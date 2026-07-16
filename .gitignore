@@ -1,4 +1,5 @@
-/bin/
+# Built plugin binary (shell entrypoints under bin/ are tracked)
+/bin/usagebar
 *.exe
 *.test
 .DS_Store
