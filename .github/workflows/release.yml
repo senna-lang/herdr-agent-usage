@@ -1,0 +1,46 @@
+# Builds prebuilt usagebar binaries on tag push (v*) and attaches them to a
+# GitHub Release. Asset names must stay in sync with the platform mapping in
+# bin/run-setup.sh (usagebar-<os>-<arch>).
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Cross-compile
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
+            os="${target%/*}"; arch="${target#*/}"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+              go build -trimpath \
+                -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+                -o "dist/usagebar-${os}-${arch}" ./cmd/usagebar
+          done
+          (cd dist && shasum -a 256 usagebar-* > SHA256SUMS)
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes

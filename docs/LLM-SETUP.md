@@ -61,10 +61,11 @@ End state:
 - Confirm `herdr` is on `PATH` and works (`herdr --help` or `herdr plugin list`).  
 - Herdr **≥ 0.7.0** is required.  
 - OS: macOS or Linux.  
-- **Go toolchain ≥ 1.25** (`go version`). The repository does not ship a
-  prebuilt binary; `usagebar.setup` builds it automatically on first run,
-  which requires Go. If Go is missing, stop and ask the user to install it
-  before continuing.  
+- **Go toolchain ≥ 1.25** (`go version`) recommended. `usagebar.setup`
+  resolves the binary automatically on first run: it builds with Go when
+  available, else downloads a prebuilt binary from GitHub Releases (needs
+  `gh` authenticated or a public repo). If neither Go nor a working
+  download path exists, stop and ask the user to install Go.  
 - Recommended (ask if missing, do not force):
 
 ```bash
@@ -111,9 +112,9 @@ herdr plugin action invoke usagebar.setup
 
 This does two things:
 
-- **Builds `bin/usagebar`** automatically if it is missing (the repo ships
-  no prebuilt binary; this is why Go is a prerequisite). No separate
-  `make build` is needed in the normal flow.  
+- **Resolves `bin/usagebar`** automatically if it is missing: builds with
+  the local Go toolchain, else downloads a prebuilt GitHub Release binary.
+  No separate `make build` is needed in the normal flow.  
 - Creates plugin config under
   `~/.config/herdr/plugins/config/usagebar/config.toml` when missing
   (`[notify]` thresholds, etc.). It does **not** by itself enable toast
@@ -126,9 +127,10 @@ finishes. Check the outcome via the plugin log:
 herdr plugin log list --plugin usagebar --limit 5
 ```
 
-If the log shows `binary not found and no Go toolchain available`
-(exit 127): install Go, run `make build` from the plugin root (resolve the
-path via `herdr plugin list`), then re-invoke `usagebar.setup`.
+If the log shows a binary-resolution failure (exit 127): install Go and run
+`make build` from the plugin root (resolve the path via `herdr plugin
+list`), or install + authenticate `gh` for the prebuilt download, then
+re-invoke `usagebar.setup`.
 
 ### 4. Notifications (mandatory user confirmation)
 

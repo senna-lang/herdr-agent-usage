@@ -21,7 +21,8 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.1.0-dev"
+// version is overridden at release time via -ldflags "-X main.version=vX.Y.Z".
+var version = "0.1.0-dev"
 
 func main() {
 	limits.SetShowNotification(herdrcli.ShowNotification)
