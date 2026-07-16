@@ -132,6 +132,18 @@ func TestFormatLimitsPanel_Empty(t *testing.T) {
 	}
 }
 
+func TestFormatLimitsPanel_EmptyMessageOverride(t *testing.T) {
+	layout := wide
+	layout.EmptyMessage = "(no agent panes open)"
+	text := FormatLimitsPanel(nil, 1_700_000_000_000, layout)
+	if !strings.Contains(text, "no agent panes open") {
+		t.Fatalf("got:\n%s", text)
+	}
+	if strings.Contains(text, "no usage data") {
+		t.Fatalf("default message should be replaced, got:\n%s", text)
+	}
+}
+
 func TestFormatLimitsPanel_CompactTier(t *testing.T) {
 	three := []ProviderLimits{
 		func() ProviderLimits { p := sampleProvider(); p.Label = "A"; return p }(),

@@ -233,9 +233,17 @@ func ShowNotification(title, body string) bool {
 
 // ListOpenAgentPanes lists panes that have an attached agent.
 func ListOpenAgentPanes() []OpenAgentPane {
+	panes, _ := ListOpenAgentPanesOK()
+	return panes
+}
+
+// ListOpenAgentPanesOK is ListOpenAgentPanes plus whether the pane query
+// succeeded, so callers can distinguish "no agent panes open" (ok=true,
+// empty) from "herdr query failed" (ok=false).
+func ListOpenAgentPanesOK() ([]OpenAgentPane, bool) {
 	stdout, ok := spawnHerdr("pane", "list")
 	if !ok || stdout == "" {
-		return nil
+		return nil, false
 	}
 	var parsed struct {
 		Result *struct {
@@ -256,7 +264,7 @@ func ListOpenAgentPanes() []OpenAgentPane {
 		} `json:"result"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &parsed); err != nil || parsed.Result == nil {
-		return nil
+		return nil, false
 	}
 	workspaceIDs := map[string]struct{}{}
 	var raw []RawPaneListEntry
@@ -286,7 +294,7 @@ func ListOpenAgentPanes() []OpenAgentPane {
 			tabLabels[k] = v
 		}
 	}
-	return BuildOpenAgentPanes(raw, tabLabels)
+	return BuildOpenAgentPanes(raw, tabLabels), true
 }
 
 func fetchTabLabels(workspaceID string) map[string]string {

@@ -48,3 +48,45 @@ func TestCollectAllProviderLimits_WithCollectorsAndAttach(t *testing.T) {
 		t.Fatalf("codex=%+v", got[1])
 	}
 }
+
+func TestCollectAllProviderLimits_OnlyFiltersProviders(t *testing.T) {
+	got := CollectAllProviderLimits(nil, 100, CollectOptions{
+		Only: map[string]bool{"claude": true, "grok": true},
+	})
+	if len(got) != 2 {
+		t.Fatalf("len=%d, want 2", len(got))
+	}
+	if got[0].ProviderID != "claude" || got[1].ProviderID != "grok" {
+		t.Fatalf("ids=%q,%q want claude,grok (display order kept)", got[0].ProviderID, got[1].ProviderID)
+	}
+}
+
+func TestCollectAllProviderLimits_OnlyEmptyHidesAll(t *testing.T) {
+	got := CollectAllProviderLimits(nil, 100, CollectOptions{Only: map[string]bool{}})
+	if len(got) != 0 {
+		t.Fatalf("len=%d, want 0", len(got))
+	}
+}
+
+func TestCollectAllProviderLimits_OnlySkipsFilteredCollectors(t *testing.T) {
+	codexCalled := false
+	got := CollectAllProviderLimits(nil, 100, CollectOptions{
+		Only: map[string]bool{"claude": true},
+		Codex: func(_ *string, now int64) ProviderLimits {
+			codexCalled = true
+			return ProviderLimits{ProviderID: "codex", Label: "Codex", Source: "test", FetchedAtMs: now}
+		},
+		Attach: func(providers []ProviderLimits, _ int64) []ProviderLimits {
+			if len(providers) != 1 {
+				t.Fatalf("attach got %d providers, want 1 (filtered)", len(providers))
+			}
+			return providers
+		},
+	})
+	if codexCalled {
+		t.Fatal("codex collector ran despite being filtered out")
+	}
+	if len(got) != 1 || got[0].ProviderID != "claude" {
+		t.Fatalf("got %+v", got)
+	}
+}

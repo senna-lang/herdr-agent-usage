@@ -16,6 +16,9 @@ type CollectOptions struct {
 	Grok     LimitsCollector
 	// Attach activity after collection (injectable for tests).
 	Attach func(providers []ProviderLimits, nowMs int64) []ProviderLimits
+	// Only restricts collection to these provider ids (nil = all providers).
+	// Filtered providers are skipped entirely: their collectors never run.
+	Only map[string]bool
 }
 
 // DefaultCollectOptions wires production local collectors (no network).
@@ -36,6 +39,7 @@ func DefaultCollectOptions() CollectOptions {
 
 // CollectAllProviderLimits runs collectors in display order:
 // Claude -> Codex -> OpenCode -> Grok, then attaches pane activity when configured.
+// Providers excluded by opts.Only are skipped (collectors never run).
 // Pass DefaultCollectOptions() for production local collectors.
 func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []ProviderLimits {
 	collect := func(c LimitsCollector, id, label string) ProviderLimits {
@@ -50,11 +54,21 @@ func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []P
 			Note:        strPtr("limits collector not configured"),
 		}
 	}
-	base := []ProviderLimits{
-		collect(opts.Claude, "claude", "Claude"),
-		collect(opts.Codex, "codex", "Codex"),
-		collect(opts.OpenCode, "opencode", "OpenCode"),
-		collect(opts.Grok, "grok", "Grok"),
+	specs := []struct {
+		collector LimitsCollector
+		id, label string
+	}{
+		{opts.Claude, "claude", "Claude"},
+		{opts.Codex, "codex", "Codex"},
+		{opts.OpenCode, "opencode", "OpenCode"},
+		{opts.Grok, "grok", "Grok"},
+	}
+	base := make([]ProviderLimits, 0, len(specs))
+	for _, s := range specs {
+		if opts.Only != nil && !opts.Only[s.id] {
+			continue
+		}
+		base = append(base, collect(s.collector, s.id, s.label))
 	}
 	if opts.Attach != nil {
 		return opts.Attach(base, nowMs)

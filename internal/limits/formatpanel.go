@@ -27,6 +27,9 @@ type PanelLayout struct {
 	Columns int
 	Rows    int
 	Color   bool
+	// EmptyMessage replaces the default "(no usage data yet)" text when the
+	// provider list is empty (e.g. "(no agent panes open)" for active-only mode).
+	EmptyMessage string
 }
 
 var defaultLayout = PanelLayout{Columns: 44, Rows: 9999, Color: false}
@@ -320,7 +323,11 @@ func FormatLimitsPanel(providers []ProviderLimits, nowMs int64, layout PanelLayo
 	footer := bar.Dim(footerText, layout.Color)
 
 	if len(providers) == 0 {
-		return strings.Join(indent([]string{"", "(no usage data yet)", "", rule, footer, ""}), "\n")
+		empty := layout.EmptyMessage
+		if empty == "" {
+			empty = "(no usage data yet)"
+		}
+		return strings.Join(indent([]string{"", empty, "", rule, footer, ""}), "\n")
 	}
 
 	chrome := 5

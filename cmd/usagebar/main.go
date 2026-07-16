@@ -58,7 +58,7 @@ func main() {
 		runStatusLine()
 	case "collect":
 		// debug: print JSON of collected limits once
-		runCollectJSON()
+		runCollectJSON(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		printUsage(os.Stderr)
@@ -72,7 +72,9 @@ func printUsage(w *os.File) {
 Usage:
   usagebar status|update [--force]   Update sidebar custom_status for HERDR_PANE_ID
   usagebar limits|panel              Interactive limits panel (q quit, r refresh)
-  usagebar limits --once             Print panel once to stdout
+                                     Shows providers with an open agent pane;
+                                     --all shows every provider
+  usagebar limits --once [--all]     Print panel once to stdout
   usagebar notify                    Check non-Claude primary rate-limit toasts
   usagebar statusline                Claude Code statusLine (stdin rate_limits)
   usagebar setup [--write-toast]     Seed plugin config / show snippets
@@ -122,33 +124,46 @@ func resolveCwd() *string {
 	return &cwd
 }
 
-func collectProviders(nowMs int64) []limits.ProviderLimits {
-	opts := limits.DefaultCollectOptions()
-	opts.Attach = func(providers []limits.ProviderLimits, now int64) []limits.ProviderLimits {
-		open := herdrcli.ListOpenAgentPanes()
-		snaps := make([]limits.OpenPaneSnapshot, 0, len(open))
-		for _, p := range open {
-			agent := ""
-			if p.Agent != nil {
-				agent = *p.Agent
-			}
-			label := agent
-			if p.RowLabel != nil {
-				label = *p.RowLabel
-			}
-			var sid *string
-			if p.AgentSession != nil {
-				sid = &p.AgentSession.Value
-			}
-			cwd := p.ForegroundCwd
-			if cwd == nil {
-				cwd = p.Cwd
-			}
-			snaps = append(snaps, limits.OpenPaneSnapshot{
-				PaneID: p.PaneID, Agent: agent, Label: label,
-				SessionID: sid, Cwd: cwd,
-			})
+// openPaneSnapshots lists open agent panes; ok=false means the herdr pane
+// query failed (unknown state), as opposed to a confirmed empty pane list.
+func openPaneSnapshots() ([]limits.OpenPaneSnapshot, bool) {
+	open, ok := herdrcli.ListOpenAgentPanesOK()
+	snaps := make([]limits.OpenPaneSnapshot, 0, len(open))
+	for _, p := range open {
+		agent := ""
+		if p.Agent != nil {
+			agent = *p.Agent
 		}
+		label := agent
+		if p.RowLabel != nil {
+			label = *p.RowLabel
+		}
+		var sid *string
+		if p.AgentSession != nil {
+			sid = &p.AgentSession.Value
+		}
+		cwd := p.ForegroundCwd
+		if cwd == nil {
+			cwd = p.Cwd
+		}
+		snaps = append(snaps, limits.OpenPaneSnapshot{
+			PaneID: p.PaneID, Agent: agent, Label: label,
+			SessionID: sid, Cwd: cwd,
+		})
+	}
+	return snaps, ok
+}
+
+// collectProviders gathers provider limits. activeOnly hides providers that
+// have no open agent pane in Herdr (the limits pane default; --all overrides).
+// When the pane query fails, all providers are shown (fail-open).
+func collectProviders(nowMs int64, activeOnly bool) []limits.ProviderLimits {
+	snaps, panesOK := openPaneSnapshots()
+	opts := limits.DefaultCollectOptions()
+	if activeOnly {
+		opts.Only = limits.ActiveProviderFilter(snaps, panesOK)
+	}
+	opts.Attach = func(providers []limits.ProviderLimits, now int64) []limits.ProviderLimits {
 		return limits.CollectAndAttachPaneActivity(providers, snaps, now)
 	}
 	base := limits.CollectAllProviderLimits(resolveCwd(), nowMs, opts)
@@ -194,10 +209,19 @@ func paintFrame(text string) {
 
 func runLimitsPane(args []string) error {
 	once := hasFlag(args, "--once")
+	// Default: show only providers with an open agent pane; --all shows every provider.
+	activeOnly := !hasFlag(args, "--all")
+	layoutFor := func() limits.PanelLayout {
+		layout := currentLayout()
+		if activeOnly {
+			layout.EmptyMessage = "(no agent panes open)"
+		}
+		return layout
+	}
 	if once || !term.IsTerminal(int(os.Stdout.Fd())) {
 		nowMs := time.Now().UnixMilli()
-		providers := collectProviders(nowMs)
-		text := limits.FormatLimitsPanel(providers, nowMs, currentLayout())
+		providers := collectProviders(nowMs, activeOnly)
+		text := limits.FormatLimitsPanel(providers, nowMs, layoutFor())
 		fmt.Print(text)
 		if !strings.HasSuffix(text, "\n") {
 			fmt.Println()
@@ -228,17 +252,17 @@ func runLimitsPane(args []string) error {
 		if providers == nil {
 			return
 		}
-		paintFrame(limits.FormatLimitsPanel(providers, nowMs, currentLayout()))
+		paintFrame(limits.FormatLimitsPanel(providers, nowMs, layoutFor()))
 	}
 
 	renderFull := func() {
 		nowMs := time.Now().UnixMilli()
-		providers := collectProviders(nowMs)
+		providers := collectProviders(nowMs, activeOnly)
 		cacheMu.Lock()
 		cachedProviders = providers
 		cachedNowMs = nowMs
 		cacheMu.Unlock()
-		paintFrame(limits.FormatLimitsPanel(providers, nowMs, currentLayout()))
+		paintFrame(limits.FormatLimitsPanel(providers, nowMs, layoutFor()))
 	}
 	renderFull()
 
@@ -363,9 +387,9 @@ func runStatusLine() {
 	}
 }
 
-func runCollectJSON() {
+func runCollectJSON(args []string) {
 	nowMs := time.Now().UnixMilli()
-	providers := collectProviders(nowMs)
+	providers := collectProviders(nowMs, !hasFlag(args, "--all"))
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(providers)
