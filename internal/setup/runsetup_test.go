@@ -1,5 +1,5 @@
 /**
- * RunSetup のテスト
+ * Tests for RunSetup
  */
 package setup
 

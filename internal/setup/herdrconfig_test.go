@@ -1,5 +1,5 @@
 /**
- * Herdr toast config inspect / append のテスト
+ * Tests for Herdr toast config inspect/append
  */
 package setup
 

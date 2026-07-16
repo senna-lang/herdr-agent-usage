@@ -1,6 +1,6 @@
 /**
- * Herdr 本体 config.toml の toast 配信設定を検査・安全に追記する。
- * 既存の [ui.toast] がある場合は上書きしない。
+ * Inspects and safely appends the toast delivery config in the main Herdr config.toml.
+ * Does not overwrite if [ui.toast] already exists.
  */
 package setup
 

@@ -1,5 +1,5 @@
 /**
- * plugin config seed / parse のテスト
+ * Tests for plugin config seed/parse
  */
 package setup
 

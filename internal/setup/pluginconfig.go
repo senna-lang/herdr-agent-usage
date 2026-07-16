@@ -1,6 +1,6 @@
 /**
- * プラグイン専用 config (HERDR_PLUGIN_CONFIG_DIR) の seed / 読み込み。
- * Herdr 本体の config.toml とは別空間。
+ * Seeds and loads the plugin-specific config (HERDR_PLUGIN_CONFIG_DIR).
+ * Lives in a separate space from the main Herdr config.toml.
  */
 package setup
 

@@ -1,9 +1,9 @@
 /**
- * usagebar setup のオーケストレーション。
- * - プラグイン config を seed
- * - Herdr toast 設定を検査
- * - 任意で toast を追記 (--write-toast)
- * - 貼り付け用スニペットを表示
+ * Orchestrates the usagebar setup.
+ * - Seed the plugin config
+ * - Inspect the Herdr toast config
+ * - Optionally append the toast config (--write-toast)
+ * - Print snippets to paste
  */
 package setup
 
