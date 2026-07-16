@@ -2,15 +2,11 @@
 
 Monitor context usage and provider rate limits for agents running in [Herdr](https://herdr.dev).
 
-Sidebar labels show each pane’s latest context usage. A live **Agent Usage** pane shows Claude, Codex, OpenCode Go, and Grok usage windows such as 5 hours, 7 days, and 30 days. Optional Herdr toasts fire when the remaining allowance in a window is low.
-
 ![Agent Usage pane showing provider limits and per-pane activity shares](docs/assets/agent-usage-pane.png)
 
-```
-⛁ 13% (130k)
-```
-
-`⛁ 13% (130k)` means the pane is using 130k tokens, or 13% of its known context window.
+- **Per-pane context meters** — every agent pane's sidebar label shows how much of its context window the session is using (`⛁ 13% (130k)` = 130k tokens, 13% of the window), updated after each completed turn.
+- **Account rate-limit windows at a glance** — one live pane shows how much 5h / 7d / 30d allowance is left for Claude, Codex, OpenCode Go, and Grok, with reset countdowns and which open pane is burning it.
+- **Low-allowance warnings** — optional toasts fire when a window drops below your thresholds (default 50 / 20 / 10 / 5 % left), before you hit the wall mid-task.
 
 ## Requirements
 
@@ -40,7 +36,7 @@ herdr plugin action invoke usagebar.enable-toast
 herdr server reload-config
 ```
 
-`usagebar.setup` builds the `usagebar` binary automatically on first run (Go ≥ 1.25 required — no prebuilt binary ships with the repo). To build manually instead, run `make build` in the plugin root.
+`usagebar.setup` resolves the `usagebar` binary automatically on first run: it builds with the local Go toolchain (≥ 1.25) when available, and otherwise downloads a prebuilt binary from [GitHub Releases](https://github.com/senna-lang/herdr-agent-usage/releases) (macOS / Linux, arm64 / amd64). To build manually instead, run `make build` in the plugin root.
 
 ## Let an LLM set it up
 
@@ -193,6 +189,24 @@ Thresholds fire once per window at the configured remaining levels (default **50
 1. Enable toast delivery (`usagebar.enable-toast` or manual snippet).
 2. **Claude** — statusLine (above) caches utilization and notifies.
 3. **Codex / OpenCode / Grok** — after a settled agent turn, the plugin can display a toast based on the shortest available limit window without the Claude status line.
+
+## Data handling
+
+Everything is computed from files that the agents already keep on your machine:
+
+| Provider | Local sources read |
+| --- | --- |
+| Claude Code | `~/.claude.json`, statusLine cache under `~/.claude/herdr-usagebar/` |
+| Codex | rollout files under `~/.codex/sessions/` |
+| OpenCode Go | `~/.local/share/opencode/opencode.db` |
+| Grok | `~/.grok/sessions/**/signals.json`, `~/.grok/auth.json` (credentials for the credits fetch) |
+
+Network requests happen in exactly two opt-in cases, both to the provider's own official endpoint with your existing credentials:
+
+- `opencode.ai` — only when you set `OPENCODE_GO_COOKIE`
+- `grok.com` — only when `~/.grok/auth.json` exists (you ran `grok login`)
+
+Nothing is sent anywhere else. No telemetry, no analytics, no third-party services. State written by the plugin (config, notify state, usage history) stays under `~/.config/herdr/plugins/config/usagebar/` and `~/.claude/herdr-usagebar/`.
 
 ## Limitations
 
