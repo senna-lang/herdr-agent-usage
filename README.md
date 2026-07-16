@@ -28,6 +28,7 @@ herdr integration install opencode
 
 ```bash
 herdr plugin install senna-lang/herdr-agent-usage
+# non-interactive shells (CI, coding agents) need --yes
 ```
 
 Plugin install does **not** rewrite `~/.config/herdr/config.toml` (toast delivery, keybindings). Run setup after install:
@@ -38,6 +39,8 @@ herdr plugin action invoke usagebar.setup
 herdr plugin action invoke usagebar.enable-toast
 herdr server reload-config
 ```
+
+`usagebar.setup` builds the `usagebar` binary automatically on first run (Go ≥ 1.25 required — no prebuilt binary ships with the repo). To build manually instead, run `make build` in the plugin root.
 
 ## Let an LLM set it up
 

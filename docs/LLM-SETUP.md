@@ -61,6 +61,10 @@ End state:
 - Confirm `herdr` is on `PATH` and works (`herdr --help` or `herdr plugin list`).  
 - Herdr **≥ 0.7.0** is required.  
 - OS: macOS or Linux.  
+- **Go toolchain ≥ 1.25** (`go version`). The repository does not ship a
+  prebuilt binary; `usagebar.setup` builds it automatically on first run,
+  which requires Go. If Go is missing, stop and ask the user to install it
+  before continuing.  
 - Recommended (ask if missing, do not force):
 
 ```bash
@@ -70,11 +74,28 @@ herdr integration install opencode
 
 ### 2. Install the plugin
 
+First inspect the current state with `herdr plugin list`:
+
+- If `usagebar` is already installed from `senna-lang/herdr-agent-usage`,
+  skip reinstall and go to step 3.  
+- **Plugin-id collision:** if a *different* plugin already claims the id
+  `usagebar` (e.g. a locally linked dev tree or a self-made compatible
+  plugin), installing would conflict. Tell the user what you found, get
+  their OK, then remove the old one first:
+
 ```bash
-herdr plugin install senna-lang/herdr-agent-usage
+herdr plugin unlink usagebar        # for a linked local plugin
+# or: herdr plugin uninstall <owner>/<repo>[/subdir...]
 ```
 
-If already installed/linked, skip reinstall. Verify:
+Then install. `--yes` is **required** whenever stdin is not interactive —
+which is the case when an agent runs this command:
+
+```bash
+herdr plugin install senna-lang/herdr-agent-usage --yes
+```
+
+Verify:
 
 ```bash
 herdr plugin list
@@ -82,19 +103,32 @@ herdr plugin list
 
 Expect `usagebar` (Agent Usage) **enabled**.
 
-If install only provides source without a binary and commands fail, from the
-plugin root run `make build` (Go toolchain required), then re-check.
-
-### 3. Seed plugin config
+### 3. Seed plugin config (builds the binary on first run)
 
 ```bash
 herdr plugin action invoke usagebar.setup
 ```
 
-This creates plugin config under
-`~/.config/herdr/plugins/config/usagebar/config.toml` when missing
-(`[notify]` thresholds, etc.). It does **not** by itself enable toast
-delivery unless the user later opts in.
+This does two things:
+
+- **Builds `bin/usagebar`** automatically if it is missing (the repo ships
+  no prebuilt binary; this is why Go is a prerequisite). No separate
+  `make build` is needed in the normal flow.  
+- Creates plugin config under
+  `~/.config/herdr/plugins/config/usagebar/config.toml` when missing
+  (`[notify]` thresholds, etc.). It does **not** by itself enable toast
+  delivery unless the user later opts in.
+
+Action invokes are asynchronous — the CLI returns before the action
+finishes. Check the outcome via the plugin log:
+
+```bash
+herdr plugin log list --plugin usagebar --limit 5
+```
+
+If the log shows `binary not found and no Go toolchain available`
+(exit 127): install Go, run `make build` from the plugin root (resolve the
+path via `herdr plugin list`), then re-invoke `usagebar.setup`.
 
 ### 4. Notifications (mandatory user confirmation)
 
@@ -189,7 +223,7 @@ Summarize in plain language:
 ## Reference
 
 - Plugin id: `usagebar`  
-- Install: `herdr plugin install senna-lang/herdr-agent-usage`  
+- Install: `herdr plugin install senna-lang/herdr-agent-usage --yes`  
 - Docs: repository `README.md`  
 - Safe toast enable: `herdr plugin action invoke usagebar.enable-toast`  
   (appends only when `[ui.toast]` is missing; never overwrites)
