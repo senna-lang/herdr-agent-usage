@@ -67,8 +67,11 @@ func ProviderLimitsFromClaudeJSON(rawJSON string, nowMs int64) *ProviderLimits {
 			} `json:"utilization"`
 		} `json:"cachedUsageUtilization"`
 		OAuthAccount *struct {
-			OrganizationType           *string `json:"organizationType"`
+			OrganizationType *string `json:"organizationType"`
+			// The real key is singular; the plural stays as a legacy fallback.
+			OrganizationRateLimitTier  *string `json:"organizationRateLimitTier"`
 			OrganizationRateLimitTiers *string `json:"organizationRateLimitTiers"`
+			UserRateLimitTier          *string `json:"userRateLimitTier"`
 			SeatTier                   *string `json:"seatTier"`
 		} `json:"oauthAccount"`
 	}
@@ -97,7 +100,16 @@ func ProviderLimitsFromClaudeJSON(rawJSON string, nowMs int64) *ProviderLimits {
 		} else {
 			org = parsed.OAuthAccount.SeatTier
 		}
-		tier = parsed.OAuthAccount.OrganizationRateLimitTiers
+		// Most specific first: per-user tier, then org tier (singular is the
+		// real key), then the legacy plural spelling.
+		switch {
+		case parsed.OAuthAccount.UserRateLimitTier != nil:
+			tier = parsed.OAuthAccount.UserRateLimitTier
+		case parsed.OAuthAccount.OrganizationRateLimitTier != nil:
+			tier = parsed.OAuthAccount.OrganizationRateLimitTier
+		default:
+			tier = parsed.OAuthAccount.OrganizationRateLimitTiers
+		}
 	}
 	plan := planlabels.ClaudePlanLabel(org, tier)
 

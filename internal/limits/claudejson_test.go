@@ -56,6 +56,62 @@ func TestProviderLimitsFromClaudeJSON(t *testing.T) {
 	}
 }
 
+func TestProviderLimitsFromClaudeJSON_TeamOrg(t *testing.T) {
+	raw, _ := json.Marshal(map[string]any{
+		"oauthAccount": map[string]any{
+			"organizationType": "claude_team",
+		},
+		"cachedUsageUtilization": map[string]any{
+			"fetchedAtMs": 1_700_000_000_000,
+			"utilization": map[string]any{
+				"five_hour": map[string]any{"utilization": 10, "resets_at": "2026-07-15T16:00:00.000Z"},
+			},
+		},
+	})
+	result := ProviderLimitsFromClaudeJSON(string(raw), 1_700_000_000_000)
+	if result == nil || result.PlanType == nil || *result.PlanType != "Team" {
+		t.Fatalf("plan %+v", result)
+	}
+}
+
+func TestProviderLimitsFromClaudeJSON_RateLimitTierSingularKey(t *testing.T) {
+	// The real ~/.claude.json key is organizationRateLimitTier (singular).
+	// organizationType is absent here so the label must come from the tier.
+	raw, _ := json.Marshal(map[string]any{
+		"oauthAccount": map[string]any{
+			"organizationRateLimitTier": "team_tier",
+		},
+		"cachedUsageUtilization": map[string]any{
+			"fetchedAtMs": 1_700_000_000_000,
+			"utilization": map[string]any{
+				"five_hour": map[string]any{"utilization": 10, "resets_at": "2026-07-15T16:00:00.000Z"},
+			},
+		},
+	})
+	result := ProviderLimitsFromClaudeJSON(string(raw), 1_700_000_000_000)
+	if result == nil || result.PlanType == nil || *result.PlanType != "Team" {
+		t.Fatalf("plan %+v", result)
+	}
+}
+
+func TestProviderLimitsFromClaudeJSON_UserRateLimitTierFallback(t *testing.T) {
+	raw, _ := json.Marshal(map[string]any{
+		"oauthAccount": map[string]any{
+			"userRateLimitTier": "max_5x",
+		},
+		"cachedUsageUtilization": map[string]any{
+			"fetchedAtMs": 1_700_000_000_000,
+			"utilization": map[string]any{
+				"five_hour": map[string]any{"utilization": 10, "resets_at": "2026-07-15T16:00:00.000Z"},
+			},
+		},
+	})
+	result := ProviderLimitsFromClaudeJSON(string(raw), 1_700_000_000_000)
+	if result == nil || result.PlanType == nil || *result.PlanType != "Max 5x" {
+		t.Fatalf("plan %+v", result)
+	}
+}
+
 func containsStr(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
 		func() bool {
