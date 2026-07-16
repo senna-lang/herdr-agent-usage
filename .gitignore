@@ -1,0 +1,5 @@
+/bin/
+*.exe
+*.test
+.DS_Store
+.shell-cwd

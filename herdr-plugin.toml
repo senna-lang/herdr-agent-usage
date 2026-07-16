@@ -1,0 +1,49 @@
+id = "usagebar"
+name = "Agent Usage"
+version = "0.1.0"
+# Plugin host (events/actions/HERDR_PLUGIN_*) landed in Herdr 0.7.0.
+min_herdr_version = "0.7.0"
+description = "Sidebar context meters, provider limit windows, and rate-limit toasts for Claude, Codex, OpenCode Go, and Grok"
+platforms = ["macos", "linux"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["bash", "bin/run-status.sh"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["bash", "bin/run-notify.sh"]
+
+[[events]]
+on = "pane.focused"
+command = ["bash", "bin/run-status.sh"]
+
+[[actions]]
+id = "refresh"
+title = "Refresh usage status"
+contexts = ["workspace", "pane"]
+command = ["bash", "bin/run-status.sh"]
+
+[[actions]]
+id = "open-limits"
+title = "Open Agent Usage pane"
+contexts = ["workspace", "pane"]
+command = ["bash", "bin/open-limits-pane.sh"]
+
+[[actions]]
+id = "setup"
+title = "Setup Agent Usage (show config snippets)"
+contexts = ["workspace", "pane"]
+command = ["bash", "bin/run-setup.sh"]
+
+[[actions]]
+id = "enable-toast"
+title = "Enable Herdr toast delivery (safe append)"
+contexts = ["workspace", "pane"]
+command = ["bash", "bin/run-setup.sh", "--write-toast"]
+
+[[panes]]
+id = "limits"
+title = "Agent Usage"
+placement = "split"
+command = ["bash", "bin/run-limits-pane.sh"]
