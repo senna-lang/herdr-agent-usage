@@ -63,9 +63,9 @@ End state:
 - OS: macOS or Linux.  
 - **Go toolchain ≥ 1.25** (`go version`) recommended. `usagebar.setup`
   resolves the binary automatically on first run: it builds with Go when
-  available, else downloads a prebuilt binary from GitHub Releases (needs
-  `gh` authenticated or a public repo). If neither Go nor a working
-  download path exists, stop and ask the user to install Go.  
+  available, else downloads a prebuilt binary from GitHub Releases. If
+  neither Go nor a working download path exists, stop and ask the user
+  to install Go.  
 - Recommended (ask if missing, do not force):
 
 ```bash
