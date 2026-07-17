@@ -54,8 +54,8 @@ func ParseGrokAuthJSON(raw string) *GrokAuthEntry {
 		}
 	}
 	if preferredKey == "" {
-		for k, v := range obj {
-			preferredKey, preferredVal = k, v
+		for _, v := range obj {
+			preferredVal = v
 			break
 		}
 	}

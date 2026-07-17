@@ -94,7 +94,7 @@ func shareText(sharePercent float64) string {
 
 func barWidth(columns int) int {
 	reserved := 32
-	w := int(math.Floor(float64(columns))) - reserved
+	w := columns - reserved
 	if w < minBar {
 		return minBar
 	}
@@ -109,7 +109,7 @@ func plainWidth(s string) int {
 }
 
 func ruleWidth(columns int) int {
-	w := int(math.Floor(float64(columns))) - 2
+	w := columns - 2
 	if w < 16 {
 		return 16
 	}
@@ -194,7 +194,7 @@ func paneActivityLine(activity ProviderPaneActivity, layout PanelLayout) string 
 	tag := minutesTag(activity.WindowMinutes)
 	labelText := tag + " share"
 	prefix := 1 + 2 + len(labelText) + 2
-	budget := int(math.Max(8, math.Floor(float64(layout.Columns))-float64(prefix)-3))
+	budget := int(math.Max(8, float64(layout.Columns)-float64(prefix)-3))
 	var parts []string
 	used := 0
 	shown := 0
@@ -331,7 +331,7 @@ func FormatLimitsPanel(providers []ProviderLimits, nowMs int64, layout PanelLayo
 	}
 
 	chrome := 5
-	bodyBudget := int(math.Max(1, math.Floor(float64(layout.Rows))-float64(chrome)))
+	bodyBudget := int(math.Max(1, float64(layout.Rows)-float64(chrome)))
 	body := renderBody(providers, layout, bodyBudget, nowMs)
 	return strings.Join(indent([]string{"", body, "", rule, footer, ""}), "\n")
 }

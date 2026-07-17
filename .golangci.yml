@@ -1,0 +1,13 @@
+version: "2"
+linters:
+  settings:
+    errcheck:
+      exclude-functions:
+        # Deferred/best-effort cleanup and output calls whose errors are
+        # routinely ignorable; checking them would just add noise.
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - fmt.Fprint
+        - golang.org/x/term.Restore

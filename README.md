@@ -1,5 +1,11 @@
 # Agent Usage
 
+[![CI](https://github.com/senna-lang/herdr-agent-usage/actions/workflows/ci.yml/badge.svg)](https://github.com/senna-lang/herdr-agent-usage/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)
+![herdr 0.7+](https://img.shields.io/badge/herdr-0.7%2B-6E56CF)
+![platforms: linux | macOS](https://img.shields.io/badge/platforms-linux%20%7C%20macOS-lightgrey)
+
 Monitor context usage and provider rate limits for agents running in [Herdr](https://herdr.dev).
 
 ![Agent Usage pane showing provider limits and per-pane activity shares](docs/assets/agent-usage-pane.png)

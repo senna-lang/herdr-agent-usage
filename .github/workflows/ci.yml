@@ -1,0 +1,75 @@
+# Runs on every push/PR: vet/build/test (linux, macOS), golangci-lint, and
+# govulncheck. Separate from release.yml, which only builds and publishes
+# tagged binaries.
+#
+# go-version is pinned to the 1.25 minor line but left patch-floating (not
+# go-version-file: go.mod, which resolves to the exact patch in the `go`
+# directive) so CI always builds against the latest 1.25.x stdlib patch —
+# otherwise govulncheck below would permanently flag CVEs already fixed
+# upstream. This narrows the noise; it doesn't eliminate it (new CVEs land
+# before a patch exists, and once 1.25 goes EOL it stops getting backports).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Gofmt check
+        run: |
+          fmt_out="$(gofmt -l .)"
+          if [[ -n "$fmt_out" ]]; then
+            echo "The following files are not gofmt-formatted:"
+            echo "$fmt_out"
+            exit 1
+          fi
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
