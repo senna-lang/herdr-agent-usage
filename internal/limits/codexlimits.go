@@ -13,10 +13,15 @@ import (
 
 	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 	"github.com/senna-lang/herdr-agent-usage/internal/planlabels"
-	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 )
 
 const codexTailScanBytes = 512 * 1024
+
+// codexMaxRolloutsToScan bounds how many rollouts (newest-first) we read looking
+// for a rate_limits snapshot. The freshest snapshot lives in the most recently
+// active session, so the first file almost always has it; the cap only guards
+// the pathological case of many just-opened sessions with no token_count yet.
+const codexMaxRolloutsToScan = 25
 
 // ExtractedCodexRateLimits is the raw extract result (planType still raw).
 type ExtractedCodexRateLimits struct {
@@ -179,41 +184,47 @@ func codexHome() string {
 	return filepath.Join(home, ".codex")
 }
 
-// CollectCodexLimits prefers cwd rollout; falls back to newest rollout.
-func CollectCodexLimits(cwd *string, nowMs int64) ProviderLimits {
-	var path string
-	if cwd != nil && *cwd != "" {
-		path = codex.FindLatestSessionFileForCwd(*cwd)
-	}
-	if path == "" {
-		newest := ListNewestRolloutPaths(1)
-		if len(newest) > 0 {
-			path = newest[0]
-		}
-	}
-	if path == "" {
+// CollectCodexLimits reads the account-global Codex rate-limit windows from the
+// freshest rollout snapshot across ALL sessions.
+//
+// Codex rate limits are account-wide: every session records the same
+// primary/secondary window (same resets_at/window_minutes), only snapshotted at
+// its own last token_count. Resolving per pane cwd (as this once did) made two
+// panes with different cwds show snapshots captured at different times — the
+// less-recently-active pane displaying a stale, lower %. So cwd is intentionally
+// ignored here (unlike the per-pane sidebar context meter, a separate path),
+// matching the Claude/OpenCode/Grok collectors. Assumes a single Codex account
+// (~/.codex is single-auth); with multiple accounts this reports whichever
+// session turned most recently.
+func CollectCodexLimits(_ *string, nowMs int64) ProviderLimits {
+	paths := ListNewestRolloutPaths(codexMaxRolloutsToScan)
+	if len(paths) == 0 {
 		note := "no rollout jsonl under ~/.codex/sessions"
 		return ProviderLimits{ProviderID: "codex", Label: "Codex", Source: "none", FetchedAtMs: nowMs, Note: &note}
 	}
-
-	lines, err := fsutil.ReadLastNLines(path, codexTailScanBytes)
-	if err != nil {
-		note := "read failed: " + err.Error()
-		return ProviderLimits{ProviderID: "codex", Label: "Codex", Source: path, FetchedAtMs: nowMs, Note: &note}
+	// Newest-first: take the first rollout that carries a rate_limits snapshot.
+	// A just-opened session has session_meta but no token_count yet, so the
+	// newest file is not always the one with data.
+	for _, path := range paths {
+		lines, err := fsutil.ReadLastNLines(path, codexTailScanBytes)
+		if err != nil {
+			continue
+		}
+		extracted := ExtractRateLimitsFromLines(lines)
+		if extracted == nil {
+			continue
+		}
+		plan := planlabels.CodexPlanLabel(extracted.PlanType)
+		return ProviderLimits{
+			ProviderID:  "codex",
+			Label:       "Codex",
+			Primary:     extracted.Primary,
+			Secondary:   extracted.Secondary,
+			PlanType:    plan,
+			Source:      "codex rollout",
+			FetchedAtMs: nowMs,
+		}
 	}
-	extracted := ExtractRateLimitsFromLines(lines)
-	if extracted == nil {
-		note := "rollout found but no rate_limits in recent token_count"
-		return ProviderLimits{ProviderID: "codex", Label: "Codex", Source: path, FetchedAtMs: nowMs, Note: &note}
-	}
-	plan := planlabels.CodexPlanLabel(extracted.PlanType)
-	return ProviderLimits{
-		ProviderID:  "codex",
-		Label:       "Codex",
-		Primary:     extracted.Primary,
-		Secondary:   extracted.Secondary,
-		PlanType:    plan,
-		Source:      "codex rollout",
-		FetchedAtMs: nowMs,
-	}
+	note := "rollout found but no rate_limits in recent token_count"
+	return ProviderLimits{ProviderID: "codex", Label: "Codex", Source: "codex rollout", FetchedAtMs: nowMs, Note: &note}
 }

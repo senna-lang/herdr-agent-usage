@@ -5,7 +5,10 @@ package limits
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 )
 
 func tokenCountRateLine(primary, secondary map[string]any, plan string) string {
@@ -74,5 +77,79 @@ func TestExtractRateLimitsFromLines_Missing(t *testing.T) {
 	})
 	if ExtractRateLimitsFromLines([]string{string(b)}) != nil {
 		t.Fatal("expected nil")
+	}
+}
+
+// sessionMetaLine is the first line of a rollout, carrying the session cwd.
+func sessionMetaLine(cwd string) string {
+	b, _ := json.Marshal(map[string]any{
+		"type":    "session_meta",
+		"payload": map[string]any{"cwd": cwd, "session_id": "sid-" + cwd, "id": "id-" + cwd},
+	})
+	return string(b)
+}
+
+// writeRollout writes a rollout jsonl under CODEX_HOME/sessions and stamps its
+// mtime (ListNewestRolloutPaths orders by mtime). When usedPercent < 0, the file
+// holds only session_meta (a just-opened session with no token_count yet).
+func writeRollout(t *testing.T, root, name, cwd string, usedPercent float64, mtime time.Time) {
+	t.Helper()
+	dir := filepath.Join(root, "sessions", "2026", "07", "18")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := sessionMetaLine(cwd) + "\n"
+	if usedPercent >= 0 {
+		content += tokenCountRateLine(
+			map[string]any{"used_percent": usedPercent, "window_minutes": 10080, "resets_at": 1784816502},
+			nil, "plus",
+		) + "\n"
+	}
+	path := filepath.Join(dir, "rollout-2026-07-18T00-00-00-"+name+".jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Codex rate limits are account-global. Two panes with different cwds must both
+// report the freshest snapshot, never their own (possibly stale) session — the
+// bug where an idle tab showed a lower % than the active tab.
+func TestCollectCodexLimits_AccountGlobalCwdIndependent(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CODEX_HOME", root)
+	now := time.Now()
+	writeRollout(t, root, "projB-stale", "/repo/projectB", 2, now.Add(-2*time.Hour))
+	writeRollout(t, root, "projA-fresh", "/repo/projectA", 6, now)
+
+	cwdA, cwdB := "/repo/projectA", "/repo/projectB"
+	gotA := CollectCodexLimits(&cwdA, 1000)
+	gotB := CollectCodexLimits(&cwdB, 1000)
+
+	if gotA.Primary == nil || gotA.Primary.UsedPercentage != 6 {
+		t.Fatalf("cwdA primary = %+v, want freshest 6", gotA.Primary)
+	}
+	if gotB.Primary == nil || gotB.Primary.UsedPercentage != 6 {
+		t.Fatalf("cwdB primary = %+v, want freshest 6 (must not read projectB's stale 2%%)", gotB.Primary)
+	}
+	if gotA.Primary.UsedPercentage != gotB.Primary.UsedPercentage {
+		t.Fatalf("cwd divergence: A=%v B=%v", gotA.Primary.UsedPercentage, gotB.Primary.UsedPercentage)
+	}
+}
+
+// The newest rollout by mtime may be a just-opened session with no token_count
+// yet; the collector must fall through to the newest one that has a snapshot.
+func TestCollectCodexLimits_SkipsSnapshotlessNewest(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CODEX_HOME", root)
+	now := time.Now()
+	writeRollout(t, root, "has-data", "/repo/a", 7, now.Add(-time.Hour))
+	writeRollout(t, root, "meta-only", "/repo/b", -1, now) // newest, no rate_limits
+
+	got := CollectCodexLimits(nil, 1000)
+	if got.Primary == nil || got.Primary.UsedPercentage != 7 {
+		t.Fatalf("expected fallback to older snapshot 7, got %+v (note=%v)", got.Primary, got.Note)
 	}
 }
