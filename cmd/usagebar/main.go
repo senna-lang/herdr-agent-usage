@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -239,48 +238,50 @@ func runLimitsPane(args []string) error {
 	paintFrame("loading…\n")
 
 	// Cache last snapshot so resize can re-layout instantly without re-collecting.
+	// All painting (paintCached/renderFull) happens on this goroutine only: the
+	// SIGWINCH handler forwards events through channels instead of writing to
+	// stdout itself, so a resize repaint can never interleave escape sequences
+	// with an in-progress full render.
 	var (
-		cacheMu         sync.Mutex
 		cachedProviders []limits.ProviderLimits
 		cachedNowMs     int64
 	)
 
 	paintCached := func() {
-		cacheMu.Lock()
-		providers := cachedProviders
-		nowMs := cachedNowMs
-		cacheMu.Unlock()
-		if providers == nil {
+		if cachedProviders == nil {
 			return
 		}
-		paintFrame(limits.FormatLimitsPanel(providers, nowMs, layoutFor()))
+		paintFrame(limits.FormatLimitsPanel(cachedProviders, cachedNowMs, layoutFor()))
 	}
 
 	renderFull := func() {
 		nowMs := time.Now().UnixMilli()
-		providers := collectProviders(nowMs, activeOnly)
-		cacheMu.Lock()
-		cachedProviders = providers
+		cachedProviders = collectProviders(nowMs, activeOnly)
 		cachedNowMs = nowMs
-		cacheMu.Unlock()
-		paintFrame(limits.FormatLimitsPanel(providers, nowMs, layoutFor()))
+		paintFrame(limits.FormatLimitsPanel(cachedProviders, nowMs, layoutFor()))
 	}
 	renderFull()
 
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
-	// SIGWINCH: instant layout-only repaint (debounced full refresh after drag ends).
+	// SIGWINCH: instant layout-only repaint (debounced full refresh after drag
+	// ends). The goroutine only signals; painting stays on the main loop.
 	winch := make(chan os.Signal, 1)
 	signal.Notify(winch, syscall.SIGWINCH)
 	defer signal.Stop(winch)
 
+	resizeQuick := make(chan struct{}, 1)
 	resizeFull := make(chan struct{}, 1)
 	go func() {
 		var debounce *time.Timer
 		for range winch {
-			// Immediate re-layout with cached data (snappy while dragging).
-			paintCached()
+			// Ask the main loop for an immediate re-layout with cached data
+			// (snappy while dragging).
+			select {
+			case resizeQuick <- struct{}{}:
+			default:
+			}
 			if debounce != nil {
 				debounce.Stop()
 			}
@@ -300,6 +301,8 @@ func runLimitsPane(args []string) error {
 			select {
 			case <-ticker.C:
 				renderFull()
+			case <-resizeQuick:
+				paintCached()
 			case <-resizeFull:
 				renderFull()
 			}
@@ -326,6 +329,9 @@ func runLimitsPane(args []string) error {
 		select {
 		case <-ticker.C:
 			renderFull()
+		case <-resizeQuick:
+			// Instant re-layout with cached data while the drag is ongoing.
+			paintCached()
 		case <-resizeFull:
 			// After resize settles, refresh data once (still fast enough).
 			renderFull()
