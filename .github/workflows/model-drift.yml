@@ -1,0 +1,61 @@
+# Weekly check that internal/claude/modelwindows.go still agrees with LiteLLM's
+# community-maintained model map (new Anthropic models, changed context
+# windows). scripts/modeldrift exits 0 (clean) / 1 (checker failed) / 2 (drift).
+# Drift opens or updates a single `model-drift` issue; a checker failure fails
+# the run loudly and opens nothing.
+name: Model drift
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC (15:00 JST)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25"
+
+      - name: Check for model-window drift
+        id: check
+        run: |
+          set +e
+          go run ./scripts/modeldrift > report.md
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 1 ]; then
+            echo "::error::model-drift checker failed to run (fetch/parse error); no issue filed"
+            exit 1
+          fi
+          cat report.md
+
+      - name: Open or update drift issue
+        if: steps.check.outputs.code == '2'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create model-drift \
+            --color FBCA04 \
+            --description "Automated Claude model-window drift report" \
+            --force
+          existing="$(gh issue list --label model-drift --state open --json number --jq '.[0].number')"
+          if [ -n "$existing" ]; then
+            # Update the body in place so an unresolved drift does not spam a
+            # new issue (and a notifying comment) every Monday.
+            gh issue edit "$existing" --body-file report.md
+            echo "Updated existing drift issue #$existing"
+          else
+            gh issue create \
+              --label model-drift \
+              --title "Claude model-window drift detected" \
+              --body-file report.md
+          fi
