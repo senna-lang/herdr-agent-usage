@@ -49,11 +49,11 @@ var ignoredModels = map[string]bool{
 // non-beta API default. Matched as a substring so bare and date-suffixed
 // variants are both covered.
 //
-// UNCONFIRMED: claude-sonnet-4-5 — repo uses 1M, LiteLLM's default is 200k.
-// Pending confirmation that Claude Code gives Sonnet 4.5 a 1M window on the
-// target plans (via the context-1m beta header). If it does not, this is a
-// live bug in modelwindows.go, not an override — remove this entry and fix
-// the map.
+// claude-sonnet-4-5 — repo uses 1M, LiteLLM's default is 200k. This is
+// intentional: the tool reports the effective window Claude Code paid plans
+// use (the context-1m beta), not LiteLLM's non-beta API default. Confirmed via
+// /context, which shows current 1M-capable models (e.g. Sonnet 5) at a ~1M
+// window on the paid plan; Sonnet 4.5 follows the same paid-plan behavior.
 var intentionalOverrides = []string{
 	"claude-sonnet-4-5",
 }
