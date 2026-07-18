@@ -18,16 +18,8 @@ var Provider = provider.FuncProvider{
 	Func: resolveCodexUsage,
 }
 
-func sessionIDOf(input provider.UsageResolveInput) *string {
-	if input.Session == nil || input.Session.Kind != "id" || input.Session.Value == "" {
-		return nil
-	}
-	v := input.Session.Value
-	return &v
-}
-
 func resolveCodexUsage(input provider.UsageResolveInput) *core.ContextUsage {
-	usage := ResolveUsageForCodex(sessionIDOf(input), input.Cwd)
+	usage := ResolveUsageForCodex(provider.SessionID(input), input.Cwd)
 	if usage == nil {
 		return nil
 	}

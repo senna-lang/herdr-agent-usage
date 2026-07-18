@@ -18,14 +18,6 @@ var Provider = provider.FuncProvider{
 	Func: resolveOpenCodeUsage,
 }
 
-func sessionIDOf(input provider.UsageResolveInput) *string {
-	if input.Session == nil || input.Session.Kind != "id" || input.Session.Value == "" {
-		return nil
-	}
-	v := input.Session.Value
-	return &v
-}
-
 func resolveOpenCodeUsage(input provider.UsageResolveInput) *core.ContextUsage {
-	return ResolveUsageForOpenCode(sessionIDOf(input), input.Cwd)
+	return ResolveUsageForOpenCode(provider.SessionID(input), input.Cwd)
 }

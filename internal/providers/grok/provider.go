@@ -17,14 +17,6 @@ var Provider = provider.FuncProvider{
 	Func: resolveGrokUsage,
 }
 
-func sessionIDOf(input provider.UsageResolveInput) *string {
-	if input.Session == nil || input.Session.Kind != "id" || input.Session.Value == "" {
-		return nil
-	}
-	v := input.Session.Value
-	return &v
-}
-
 func resolveGrokUsage(input provider.UsageResolveInput) *core.ContextUsage {
-	return ResolveUsageForGrok(sessionIDOf(input), input.Cwd)
+	return ResolveUsageForGrok(provider.SessionID(input), input.Cwd)
 }
