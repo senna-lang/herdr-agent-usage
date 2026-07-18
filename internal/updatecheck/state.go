@@ -51,7 +51,7 @@ func writeState(dir string, state State) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 	if _, err := tmp.Write(raw); err != nil {
 		tmp.Close()
 		return err

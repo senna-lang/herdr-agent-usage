@@ -1,6 +1,6 @@
 id = "usagebar"
 name = "Agent Usage"
-version = "0.1.2"
+version = "0.1.3"
 # Plugin host (events/actions/HERDR_PLUGIN_*) landed in Herdr 0.7.0.
 min_herdr_version = "0.7.0"
 description = "Sidebar context meters, provider limit windows, and rate-limit toasts for Claude, Codex, OpenCode Go, and Grok"

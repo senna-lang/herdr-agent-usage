@@ -134,7 +134,7 @@ func fetchLatestRelease(ctx context.Context, client *http.Client, endpoint strin
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 		return Release{}, fmt.Errorf("check GitHub Releases: %s", resp.Status)
 	}
 	var body struct {
