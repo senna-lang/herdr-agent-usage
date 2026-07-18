@@ -197,6 +197,15 @@ Thresholds fire once per window at the configured remaining levels (default **50
 2. **Claude** — statusLine (above) caches utilization and notifies.
 3. **Codex / OpenCode / Grok** — after a settled agent turn, the plugin can display a toast based on the shortest available limit window without the Claude status line.
 
+## Releasing (maintainers)
+
+1. Update `version` in `herdr-plugin.toml`, commit it, and push `main`.
+2. Run `scripts/release.sh vX.Y.Z` from a clean, up-to-date `main` checkout.
+
+The script waits for CI on that exact commit before it creates and pushes the
+tag. The tag-triggered Release workflow repeats vet, build, test, formatting,
+lint, and vulnerability checks before it creates a GitHub Release.
+
 ## Data handling
 
 Everything is computed from files that the agents already keep on your machine:
