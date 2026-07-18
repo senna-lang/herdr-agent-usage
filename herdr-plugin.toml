@@ -1,6 +1,6 @@
 id = "usagebar"
 name = "Agent Usage"
-version = "0.1.1"
+version = "0.1.2"
 # Plugin host (events/actions/HERDR_PLUGIN_*) landed in Herdr 0.7.0.
 min_herdr_version = "0.7.0"
 description = "Sidebar context meters, provider limit windows, and rate-limit toasts for Claude, Codex, OpenCode Go, and Grok"
@@ -17,6 +17,10 @@ command = ["bash", "bin/run-notify.sh"]
 [[events]]
 on = "pane.focused"
 command = ["bash", "bin/run-status.sh"]
+
+[[events]]
+on = "pane.focused"
+command = ["bash", "bin/run-update-check.sh", "--auto"]
 
 [[actions]]
 id = "refresh"
@@ -41,6 +45,12 @@ id = "enable-toast"
 title = "Enable Herdr toast delivery (safe append)"
 contexts = ["workspace", "pane"]
 command = ["bash", "bin/run-setup.sh", "--write-toast"]
+
+[[actions]]
+id = "check-updates"
+title = "Check for Agent Usage updates"
+contexts = ["workspace", "pane"]
+command = ["bash", "bin/run-update-check.sh"]
 
 [[panes]]
 id = "limits"

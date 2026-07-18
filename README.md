@@ -89,6 +89,7 @@ On Mac that is **Control+Shift+U** / **Control+Shift+M** (not Command). Then `he
 | Refresh meters | `usagebar.refresh` | Recompute sidebar custom status for the target pane |
 | Setup | `usagebar.setup` | Seed plugin config, show toast/key snippets, report Herdr toast status |
 | Enable toast | `usagebar.enable-toast` | Append `[ui.toast]` only if missing (never overwrites) |
+| Check for updates | `usagebar.check-updates` | Check GitHub Releases now and show the release/update instructions |
 
 ```bash
 herdr plugin action list --plugin usagebar
@@ -207,12 +208,13 @@ Everything is computed from files that the agents already keep on your machine:
 | OpenCode Go | `~/.local/share/opencode/opencode.db` |
 | Grok | `~/.grok/sessions/**/signals.json`, `~/.grok/auth.json` (credentials for the credits fetch) |
 
-Network requests happen in exactly two opt-in cases, both to the provider's own official endpoint with your existing credentials:
+Network requests happen in the following cases:
 
 - `opencode.ai` — only when you set `OPENCODE_GO_COOKIE`
 - `grok.com` — only when `~/.grok/auth.json` exists (you ran `grok login`)
+- `api.github.com` — on the first pane focus and then at most once every 24 hours, to check this plugin's latest public release. The request has no credentials and sends no usage or session data.
 
-Nothing is sent anywhere else. No telemetry, no analytics, no third-party services. State written by the plugin (config, notify state, usage history) stays under `~/.config/herdr/plugins/config/usagebar/` and `~/.claude/herdr-usagebar/`.
+No telemetry, no analytics, or usage/session data is sent. State written by the plugin (config, notification state, update-check state, usage history) stays under `~/.config/herdr/plugins/config/usagebar/` and `~/.claude/herdr-usagebar/`.
 
 ## Limitations
 

@@ -17,6 +17,7 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/ratelimit"
 	"github.com/senna-lang/herdr-agent-usage/internal/setup"
 	"github.com/senna-lang/herdr-agent-usage/internal/update"
+	"github.com/senna-lang/herdr-agent-usage/internal/updatecheck"
 	"golang.org/x/term"
 )
 
@@ -53,6 +54,8 @@ func main() {
 		}
 	case "notify":
 		runNotify()
+	case "check-update":
+		runUpdateCheck(args)
 	case "statusline":
 		// Claude Code statusLine bridge (stdin JSON → cache + toasts + summary stdout)
 		runStatusLine()
@@ -76,12 +79,45 @@ Usage:
                                      --all shows every provider
   usagebar limits --once [--all]     Print panel once to stdout
   usagebar notify                    Check non-Claude primary rate-limit toasts
+  usagebar check-update --current-version X.Y.Z [--force] [--quiet]
+                                     Check GitHub Releases for a newer plugin version
   usagebar statusline                Claude Code statusLine (stdin rate_limits)
   usagebar setup [--write-toast]     Seed plugin config / show snippets
   usagebar collect                   Debug: print collected limits as JSON
   usagebar version
 
 `)
+}
+
+func runUpdateCheck(args []string) {
+	quiet := hasFlag(args, "--quiet")
+	currentVersion := flagValue(args, "--current-version")
+	if currentVersion == "" {
+		currentVersion = version
+	}
+	result := updatecheck.Run(updatecheck.Options{
+		CurrentVersion: currentVersion,
+		StateDir:       setup.ResolvePluginConfigDir(environment()),
+		Force:          hasFlag(args, "--force"),
+		Notify:         herdrcli.ShowNotification,
+	})
+	if quiet {
+		return
+	}
+	if result.Err != nil {
+		fmt.Fprintf(os.Stderr, "Agent Usage: could not check for updates: %v\n", result.Err)
+		return
+	}
+	if !result.Checked {
+		fmt.Println("Agent Usage: update check is not due yet.")
+		return
+	}
+	if !result.Update {
+		fmt.Printf("Agent Usage %s is up to date.\n", result.Current)
+		return
+	}
+	fmt.Printf("Agent Usage update available: %s (installed %s)\n", result.Latest, result.Current)
+	fmt.Printf("Release and update instructions: %s\n", result.ReleaseURL)
 }
 
 func hasFlag(args []string, flag string) bool {
@@ -91,6 +127,25 @@ func hasFlag(args []string, flag string) bool {
 		}
 	}
 	return false
+}
+
+func flagValue(args []string, flag string) string {
+	for i, arg := range args {
+		if arg == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+func environment() map[string]string {
+	env := map[string]string{}
+	for _, entry := range os.Environ() {
+		if i := strings.IndexByte(entry, '='); i >= 0 {
+			env[entry[:i]] = entry[i+1:]
+		}
+	}
+	return env
 }
 
 func resolveCwd() *string {
