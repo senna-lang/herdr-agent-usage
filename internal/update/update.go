@@ -19,7 +19,22 @@ func isSettledStatus(status string) bool {
 	return status != "working"
 }
 
-// RunUpdate resolves usage for HERDR_PANE_ID and updates custom_status.
+func writeMetadataToken(paneID, name, value string, force bool) {
+	if !core.ShouldWriteToken(paneID, name, value, force) {
+		return
+	}
+	ok := false
+	if value == "" {
+		ok = herdrcli.ClearMetadataToken(paneID, herdrcli.Source, name)
+	} else {
+		ok = herdrcli.SetMetadataToken(paneID, herdrcli.Source, name, value)
+	}
+	if ok {
+		core.MarkTokenWritten(paneID, name, value)
+	}
+}
+
+// RunUpdate resolves usage for HERDR_PANE_ID and updates its sidebar tokens.
 // force=true (plugin action) updates even while working.
 func RunUpdate(force bool) {
 	paneID := os.Getenv("HERDR_PANE_ID")
@@ -57,19 +72,10 @@ func RunUpdate(force bool) {
 	if len(providerLimits) > 0 {
 		limitText = limits.FormatSidebarLimit(providerLimits[0])
 	}
-	if limitText == "" {
-		herdrcli.ClearMetadataToken(paneID, herdrcli.Source, "limit")
-	} else {
-		herdrcli.SetMetadataToken(paneID, herdrcli.Source, "limit", limitText)
-	}
+	writeMetadataToken(paneID, "limit", limitText, force)
 
 	if usage == nil {
-		herdrcli.ClearMetadataToken(paneID, herdrcli.Source, "context")
-		if !force && core.IsAlreadyCleared(paneID) {
-			return
-		}
-		herdrcli.ClearCustomStatus(paneID, herdrcli.Source)
-		core.MarkStatusCleared(paneID)
+		writeMetadataToken(paneID, "context", "", force)
 		return
 	}
 
@@ -77,12 +83,5 @@ func RunUpdate(force bool) {
 	sidebarW := core.ResolveSidebarWidth(liveWidth, core.ResolveConfigSidebarWidth())
 	maxCols := core.EstimateStatusMaxColumns(&sidebarW, pane.RowLabel)
 	statusText := core.FormatUsageStatus(*usage, core.FormatUsageOptions{MaxColumns: maxCols})
-	// Herdr 0.7.4+ renders configurable $context tokens. Keep the legacy
-	// custom_status write below for Herdr 0.7.0-0.7.3 compatibility.
-	herdrcli.SetMetadataToken(paneID, herdrcli.Source, "context", statusText)
-	if !core.ShouldWriteStatus(paneID, statusText, force) {
-		return
-	}
-	herdrcli.SetCustomStatus(paneID, herdrcli.Source, statusText)
-	core.MarkStatusWritten(paneID, statusText)
+	writeMetadataToken(paneID, "context", statusText, force)
 }

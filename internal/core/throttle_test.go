@@ -1,40 +1,44 @@
 /**
- * Tests for the content-based write-skip decision.
+ * Tests for per-token content-based write deduplication.
  */
 package core
 
-import (
-	"testing"
-)
+import "testing"
 
-func TestShouldWriteStatus(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("HERDR_PLUGIN_STATE_DIR", dir)
+func TestShouldWriteToken(t *testing.T) {
+	t.Setenv("HERDR_PLUGIN_STATE_DIR", t.TempDir())
 
-	if !ShouldWriteStatus("w1:p1", "⛁ 10% (10k)", false) {
-		t.Fatal("first write should be allowed")
+	if !ShouldWriteToken("w1:p1", "context", "⛁ 10% (10k)", false) {
+		t.Fatal("first context write should be allowed")
 	}
-	MarkStatusWritten("w1:p1", "⛁ 10% (10k)")
-	if ShouldWriteStatus("w1:p1", "⛁ 10% (10k)", false) {
-		t.Fatal("identical should skip")
+	MarkTokenWritten("w1:p1", "context", "⛁ 10% (10k)")
+	if ShouldWriteToken("w1:p1", "context", "⛁ 10% (10k)", false) {
+		t.Fatal("identical context should skip")
 	}
-	if !ShouldWriteStatus("w1:p1", "⛁ 21% (213k)", false) {
-		t.Fatal("changed should allow")
+	if !ShouldWriteToken("w1:p1", "context", "⛁ 21% (21k)", false) {
+		t.Fatal("changed context should be allowed")
 	}
-	if !ShouldWriteStatus("w1:p1", "⛁ 10% (10k)", true) {
-		t.Fatal("force should allow")
+	if !ShouldWriteToken("w1:p1", "context", "⛁ 10% (10k)", true) {
+		t.Fatal("force should allow an identical value")
 	}
 }
 
-func TestClearTracking(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("HERDR_PLUGIN_STATE_DIR", dir)
+func TestShouldWriteToken_TracksNamesAndClearsIndependently(t *testing.T) {
+	t.Setenv("HERDR_PLUGIN_STATE_DIR", t.TempDir())
 
-	MarkStatusCleared("w1:p1")
-	if !IsAlreadyCleared("w1:p1") {
-		t.Fatal("expected cleared")
+	MarkTokenWritten("w1:p1", "context", "same")
+	if !ShouldWriteToken("w1:p1", "limit", "same", false) {
+		t.Fatal("different token names must not share state")
 	}
-	if ShouldWriteStatus("w1:p1", "", false) {
-		t.Fatal("re-clear should skip")
+
+	if !ShouldWriteToken("w1:p1", "limit", "", false) {
+		t.Fatal("first clear should be reported")
+	}
+	MarkTokenWritten("w1:p1", "limit", "")
+	if ShouldWriteToken("w1:p1", "limit", "", false) {
+		t.Fatal("repeated clear should skip")
+	}
+	if ShouldWriteToken("w1:p1", "context", "same", false) {
+		t.Fatal("limit clear must not disturb context state")
 	}
 }

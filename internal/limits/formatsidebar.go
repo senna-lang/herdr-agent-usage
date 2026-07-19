@@ -1,9 +1,12 @@
+/**
+ * Formats a provider limit for Herdr's compact sidebar metadata row.
+ */
 package limits
 
 import "fmt"
 
 // FormatSidebarLimit returns the shortest available provider window as a
-// standalone sidebar row. Context usage remains in Herdr's custom_status.
+// standalone sidebar row. Context usage remains in its own $context row.
 func FormatSidebarLimit(provider ProviderLimits) string {
 	var window *LimitWindow
 	fallback := ""
