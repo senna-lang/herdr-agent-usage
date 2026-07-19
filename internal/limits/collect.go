@@ -10,10 +10,12 @@ type LimitsCollector func(cwd *string, nowMs int64) ProviderLimits
 
 // CollectOptions configures CollectAllProviderLimits.
 type CollectOptions struct {
-	Claude   LimitsCollector
-	Codex    LimitsCollector
-	OpenCode LimitsCollector
-	Grok     LimitsCollector
+	Claude      LimitsCollector
+	Codex       LimitsCollector
+	Antigravity LimitsCollector
+	Zai         LimitsCollector
+	OpenCode    LimitsCollector
+	Grok        LimitsCollector
 	// Attach activity after collection (injectable for tests).
 	Attach func(providers []ProviderLimits, nowMs int64) []ProviderLimits
 	// Only restricts collection to these provider ids (nil = all providers).
@@ -28,6 +30,12 @@ func DefaultCollectOptions() CollectOptions {
 			return CollectClaudeLimits(nowMs, CollectClaudeLimitsOptions{})
 		},
 		Codex: CollectCodexLimits,
+		Antigravity: func(_ *string, nowMs int64) ProviderLimits {
+			return CollectAntigravityLimits(nil, nowMs, CollectAntigravityLimitsOptions{})
+		},
+		Zai: func(_ *string, nowMs int64) ProviderLimits {
+			return CollectZaiLimits(nil, nowMs, CollectZaiLimitsOptions{})
+		},
 		OpenCode: func(_ *string, nowMs int64) ProviderLimits {
 			return CollectOpenCodeLimits(nowMs, "")
 		},
@@ -38,7 +46,8 @@ func DefaultCollectOptions() CollectOptions {
 }
 
 // CollectAllProviderLimits runs collectors in display order:
-// Claude -> Codex -> OpenCode -> Grok, then attaches pane activity when configured.
+// Claude -> Codex -> Antigravity -> Z.ai -> OpenCode -> Grok, then attaches
+// pane activity when configured.
 // Providers excluded by opts.Only are skipped (collectors never run).
 // Pass DefaultCollectOptions() for production local collectors.
 func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []ProviderLimits {
@@ -60,6 +69,8 @@ func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []P
 	}{
 		{opts.Claude, "claude", "Claude"},
 		{opts.Codex, "codex", "Codex"},
+		{opts.Antigravity, "antigravity", "Antigravity"},
+		{opts.Zai, "zai", "Z.ai"},
 		{opts.OpenCode, "opencode", "OpenCode"},
 		{opts.Grok, "grok", "Grok"},
 	}

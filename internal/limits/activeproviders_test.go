@@ -73,3 +73,13 @@ func TestActiveProviderSet_CaseInsensitiveAgentIDs(t *testing.T) {
 		t.Fatalf("got %v, want {claude, opencode}", got)
 	}
 }
+
+func TestActiveProviderSet_AntigravityAndZaiAliases(t *testing.T) {
+	got := ActiveProviderSet([]OpenPaneSnapshot{
+		{Agent: "AGY"},
+		{Agent: "z.ai"},
+	})
+	if len(got) != 2 || !got["antigravity"] || !got["zai"] {
+		t.Fatalf("got %v, want antigravity and zai", got)
+	}
+}

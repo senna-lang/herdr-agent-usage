@@ -214,6 +214,17 @@ func ClearCustomStatus(paneID, source string) {
 	spawnHerdr("pane", "report-metadata", paneID, "--source", source, "--clear-custom-status")
 }
 
+// SetDisplayAgent replaces the sidebar's rendered agent label without changing
+// the canonical agent id used for provider resolution.
+func SetDisplayAgent(paneID, source, text string) {
+	spawnHerdr("pane", "report-metadata", paneID, "--source", source, "--display-agent", text)
+}
+
+// ClearDisplayAgent removes this plugin's rendered agent-label override.
+func ClearDisplayAgent(paneID, source string) {
+	spawnHerdr("pane", "report-metadata", paneID, "--source", source, "--clear-display-agent")
+}
+
 // ShowNotification runs herdr notification show; returns whether shown.
 func ShowNotification(title, body string) bool {
 	stdout, ok := spawnHerdr("notification", "show", title, "--body", body)

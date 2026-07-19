@@ -74,9 +74,10 @@ func printUsage(w *os.File) {
 
 Usage:
   usagebar status|update [--force]   Update sidebar custom_status for HERDR_PANE_ID
-  usagebar limits|panel              Interactive limits panel (q quit, r refresh)
+usagebar limits|panel              Interactive limits panel (q quit, r refresh)
                                      Shows providers with an open agent pane;
-                                     --all shows every provider
+                                     --all shows every provider;
+                                     --exclude-provider ID hides one provider
   usagebar limits --once [--all]     Print panel once to stdout
   usagebar notify                    Check non-Claude primary rate-limit toasts
   usagebar check-update --current-version X.Y.Z [--force] [--quiet]
@@ -136,6 +137,33 @@ func flagValue(args []string, flag string) string {
 		}
 	}
 	return ""
+}
+
+func flagValues(args []string, flag string) map[string]bool {
+	values := make(map[string]bool)
+	for i, arg := range args {
+		if arg != flag || i+1 >= len(args) {
+			continue
+		}
+		value := strings.ToLower(strings.TrimSpace(args[i+1]))
+		if value != "" {
+			values[value] = true
+		}
+	}
+	return values
+}
+
+func excludeProviders(providers []limits.ProviderLimits, excluded map[string]bool) []limits.ProviderLimits {
+	if len(excluded) == 0 {
+		return providers
+	}
+	filtered := make([]limits.ProviderLimits, 0, len(providers))
+	for _, provider := range providers {
+		if !excluded[strings.ToLower(provider.ProviderID)] {
+			filtered = append(filtered, provider)
+		}
+	}
+	return filtered
 }
 
 func environment() map[string]string {
@@ -264,6 +292,7 @@ func paintFrame(text string) {
 
 func runLimitsPane(args []string) error {
 	once := hasFlag(args, "--once")
+	excluded := flagValues(args, "--exclude-provider")
 	// Default: show only providers with an open agent pane; --all shows every provider.
 	activeOnly := !hasFlag(args, "--all")
 	layoutFor := func() limits.PanelLayout {
@@ -275,7 +304,7 @@ func runLimitsPane(args []string) error {
 	}
 	if once || !term.IsTerminal(int(os.Stdout.Fd())) {
 		nowMs := time.Now().UnixMilli()
-		providers := collectProviders(nowMs, activeOnly)
+		providers := excludeProviders(collectProviders(nowMs, activeOnly), excluded)
 		text := limits.FormatLimitsPanel(providers, nowMs, layoutFor())
 		fmt.Print(text)
 		if !strings.HasSuffix(text, "\n") {
@@ -311,7 +340,7 @@ func runLimitsPane(args []string) error {
 
 	renderFull := func() {
 		nowMs := time.Now().UnixMilli()
-		cachedProviders = collectProviders(nowMs, activeOnly)
+		cachedProviders = excludeProviders(collectProviders(nowMs, activeOnly), excluded)
 		cachedNowMs = nowMs
 		paintFrame(limits.FormatLimitsPanel(cachedProviders, nowMs, layoutFor()))
 	}

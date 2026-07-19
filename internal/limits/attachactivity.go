@@ -4,6 +4,8 @@
  */
 package limits
 
+import "strings"
+
 // OpenPaneSnapshot is one open agent pane used for share aggregation.
 type OpenPaneSnapshot struct {
 	PaneID    string
@@ -15,10 +17,14 @@ type OpenPaneSnapshot struct {
 
 // agent id -> ProviderLimits.providerId
 var agentToProvider = map[string]string{
-	"claude":   "claude",
-	"codex":    "codex",
-	"opencode": "opencode",
-	"grok":     "grok",
+	"claude":      "claude",
+	"codex":       "codex",
+	"antigravity": "antigravity",
+	"agy":         "antigravity",
+	"zai":         "zai",
+	"z.ai":        "zai",
+	"opencode":    "opencode",
+	"grok":        "grok",
 }
 
 // PaneActivityDeps injects token collectors for tests and I/O adapters.
@@ -38,20 +44,9 @@ func AttachPaneActivity(
 	out := make([]ProviderLimits, len(providers))
 	for i, p := range providers {
 		out[i] = p
-		var agentID string
-		for a, providerID := range agentToProvider {
-			if providerID == p.ProviderID {
-				agentID = a
-				break
-			}
-		}
-		if agentID == "" {
-			continue
-		}
-
 		var panesForProvider []OpenPaneSnapshot
 		for _, pane := range openPanes {
-			if pane.Agent == agentID {
+			if agentToProvider[strings.ToLower(pane.Agent)] == p.ProviderID {
 				panesForProvider = append(panesForProvider, pane)
 			}
 		}

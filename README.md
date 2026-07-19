@@ -6,12 +6,14 @@
 ![herdr 0.7+](https://img.shields.io/badge/herdr-0.7%2B-6E56CF)
 ![platforms: linux | macOS](https://img.shields.io/badge/platforms-linux%20%7C%20macOS-lightgrey)
 
+**English** | [日本語](README_JP.md)
+
 Monitor context usage and provider rate limits for agents running in [Herdr](https://herdr.dev).
 
 ![Agent Usage pane showing provider limits and per-pane activity shares](docs/assets/agent-usage-pane.png)
 
-- **Per-pane context meters** — every agent pane's sidebar label shows how much of its context window the session is using (`⛁ 13% (130k)` = 130k tokens, 13% of the window), updated after each completed turn.
-- **Account rate-limit windows at a glance** — one live pane shows how much 5h / 7d / 30d allowance is left for Claude, Codex, OpenCode Go, and Grok, with reset countdowns and which open pane is burning it.
+- **Per-pane context meters** — every supported agent pane's sidebar label shows how much of its context window the session is using (`⛁ 13% (130k)` = 130k tokens, 13% of the window), updated after each completed turn. Codex and Grok labels show their most constrained account allowance; Antigravity/`agy` shows its 5-hour allowance.
+- **Account rate-limit windows at a glance** — one live pane shows how much 5h / 7d / 30d allowance is left for Codex, Antigravity, Z.ai, and Grok, with reset countdowns and which open pane is burning it. Claude and OpenCode collectors remain available but are hidden from the plugin pane by default.
 - **Low-allowance warnings** — optional toasts fire when a window drops below your thresholds (default 50 / 20 / 10 / 5 % left), before you hit the wall mid-task.
 
 ## Requirements
@@ -56,7 +58,7 @@ The agent can install the plugin and guide you through the remaining setup.
 
 1. Install the plugin and run **setup** (above).
 2. Open a workspace with at least one agent pane.
-3. After an agent turn completes (or you focus the pane), the sidebar custom status shows context usage.
+3. After an agent turn completes (or you focus the pane), the sidebar custom status shows context usage. Account allowance is included in supported agent labels, for example `codex 7%`, `grok 94%`, or `agy 100%`.
 4. Open the limits pane:
 
 ```bash
@@ -100,6 +102,7 @@ herdr plugin action invoke usagebar.setup
 
 | Surface | What it shows |
 | --- | --- |
+| **Sidebar agent label** | Account allowance: most constrained window for Codex/Grok, 5-hour window for Antigravity/`agy` |
 | **Sidebar custom status** | Per-pane context usage: `⛁ 13% (130k)` when the window size is known, or the token count alone |
 | **Agent Usage pane** | Provider plan, usage windows (5h / 7d / 30d), remaining % bars, reset countdown, open-pane token share |
 | **Toasts** (optional) | Remaining-limit warnings at configured thresholds (default 50 / 20 / 10 / 5 % left) |
@@ -108,16 +111,39 @@ herdr plugin action invoke usagebar.setup
 
 | Agent | Sidebar context | Limits pane | Notes |
 | --- | --- | --- | --- |
-| Claude Code | Yes | Yes | Rate windows from `~/.claude.json` / statusLine cache |
+| Claude Code | Yes | Hidden by default | Rate windows from `~/.claude.json` / statusLine cache |
 | Codex | Yes | Yes | Context + rate windows from local rollouts |
-| OpenCode Go | Yes | Yes | Prefer official web usage when `OPENCODE_GO_COOKIE` is set; else local SQLite |
-| Grok | Yes | Yes | Context from `signals.json`; credits from grok.com when auth is present |
+| Antigravity | Label only | Yes | `agy` label uses the 5-hour allowance; local quota API requires a running process and `lsof` |
+| Z.ai | No | Yes | Coding-plan quota API; set `Z_AI_API_KEY` |
+| OpenCode Go | Yes | Hidden by default | Prefer official web usage when `OPENCODE_GO_COOKIE` is set; else local SQLite |
+| Grok | Yes | Yes | Label uses the most constrained allowance; context comes from `signals.json` |
 
 Percentages in the limits pane are **remaining** (`% left`). Higher is safer.
+
+### Z.ai setup
+
+Set `Z_AI_API_KEY` in the environment that starts Herdr. Optional settings mirror CodexBar:
+
+- `Z_AI_API_REGION=bigmodel-cn` selects `open.bigmodel.cn`; the default is `api.z.ai`.
+- `Z_AI_API_HOST` overrides the API host, and `Z_AI_QUOTA_URL` overrides the full quota URL. Credential-bearing overrides must use HTTPS.
+- Team usage requires `Z_AI_USAGE_SCOPE=team`, `Z_AI_BIGMODEL_ORGANIZATION`, and `Z_AI_BIGMODEL_PROJECT`.
+
+Antigravity needs no external credentials. The collector probes only `127.0.0.1` and accepts the local server's self-signed TLS certificate. Start the Antigravity app, IDE, or authenticated `agy` process before refreshing limits.
 
 ## Agent Usage pane
 
 - Auto-refreshes every **15s**. Press **`r`** to refresh, **`q`** to quit.
+- The plugin pane shows every supported provider except Claude and OpenCode, including providers without a matching open Herdr agent pane.
+- Claude and OpenCode support code is not removed. The default exclusions are launch arguments in [`bin/run-limits-pane.sh`](bin/run-limits-pane.sh).
+- Direct CLI users can show every collector by omitting exclusions, or hide providers by repeating `--exclude-provider <id>`:
+
+```bash
+bin/usagebar limits --once --all
+bin/usagebar limits --once --all \
+  --exclude-provider claude \
+  --exclude-provider opencode
+```
+
 - OpenCode Go may show three windows (**5h / 7d / 30d**). Other providers show whichever usage windows their data sources make available.
 - Open pane **token share** is local activity share within the shortest window (including a **closed / other** bucket for usage outside open panes). It is not account quota attribution.
 - Sidebar context meters update after the agent has **settled** (not while `working`), so the label matches the last completed turn. If the session cannot be resolved, the custom status is cleared rather than showing another session’s numbers.
@@ -127,6 +153,18 @@ herdr plugin action invoke usagebar.open-limits
 ```
 
 ## Configuration
+
+### Provider visibility
+
+The Herdr plugin pane runs with these defaults:
+
+```bash
+usagebar limits --all \
+  --exclude-provider claude \
+  --exclude-provider opencode
+```
+
+`--all` collects providers even when they have no matching open Herdr agent pane. `--exclude-provider` only filters rendering; it does not delete or disable the collector.
 
 ### Plugin config
 
@@ -208,12 +246,14 @@ lint, and vulnerability checks before it creates a GitHub Release.
 
 ## Data handling
 
-Everything is computed from files that the agents already keep on your machine:
+Context usage is computed from files that the agents already keep on your machine. Provider limits may also come from authenticated or loopback-only APIs:
 
 | Provider | Local sources read |
 | --- | --- |
 | Claude Code | `~/.claude.json`, statusLine cache under `~/.claude/herdr-usagebar/` |
 | Codex | rollout files under `~/.codex/sessions/` |
+| Antigravity | Running Antigravity/`agy` process flags and its `127.0.0.1` quota API |
+| Z.ai | `Z_AI_API_KEY` and optional region/team environment variables; no local usage file |
 | OpenCode Go | `~/.local/share/opencode/opencode.db` |
 | Grok | `~/.grok/sessions/**/signals.json`, `~/.grok/auth.json` (credentials for the credits fetch) |
 
@@ -221,13 +261,15 @@ Network requests happen in the following cases:
 
 - `opencode.ai` — only when you set `OPENCODE_GO_COOKIE`
 - `grok.com` — only when `~/.grok/auth.json` exists (you ran `grok login`)
+- `api.z.ai` or `open.bigmodel.cn` — only when `Z_AI_API_KEY` is set; credential-bearing endpoint overrides must use HTTPS
+- `127.0.0.1` — Antigravity/`agy` local quota probing; self-signed TLS is accepted only for this fixed loopback target
 - `api.github.com` — on the first pane focus and then at most once every 24 hours, to check this plugin's latest public release. The request has no credentials and sends no usage or session data.
 
 No telemetry, no analytics, or usage/session data is sent. State written by the plugin (config, notification state, update-check state, usage history) stays under `~/.config/herdr/plugins/config/usagebar/` and `~/.claude/herdr-usagebar/`.
 
 ## Limitations
 
-- **Not a billing dashboard.** Local transcripts / rollouts / signals (and optional OpenCode web / Grok.com credits) can differ from official consoles (other machines, server-side windows).
+- **Not a billing dashboard.** Local transcripts / rollouts / signals and provider quota APIs can differ from official consoles (other machines, server-side windows, or API changes).
 - **Herdr core config is not rewritten on install.** Use `usagebar.setup` / `usagebar.enable-toast` or edit by hand.
 - **macOS / Linux** only.
 
