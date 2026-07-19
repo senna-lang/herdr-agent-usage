@@ -3,7 +3,11 @@
  */
 package core
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestShouldWriteToken(t *testing.T) {
 	t.Setenv("HERDR_PLUGIN_STATE_DIR", t.TempDir())
@@ -40,5 +44,19 @@ func TestShouldWriteToken_TracksNamesAndClearsIndependently(t *testing.T) {
 	}
 	if ShouldWriteToken("w1:p1", "context", "same", false) {
 		t.Fatal("limit clear must not disturb context state")
+	}
+}
+
+func TestMarkTokenWritten_RemovesLegacyStatusFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HERDR_PLUGIN_STATE_DIR", dir)
+	legacy := filepath.Join(dir, "last-status-w1_p1.txt")
+	if err := os.WriteFile(legacy, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	MarkTokenWritten("w1:p1", "context", "new")
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy state still exists: %v", err)
 	}
 }

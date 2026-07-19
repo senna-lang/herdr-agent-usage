@@ -55,4 +55,10 @@ func MarkTokenWritten(paneID, tokenName, value string) {
 		return
 	}
 	_ = os.WriteFile(path, []byte(value), 0o644)
+	// v0.1.x stored a single custom-status value per pane. Metadata tokens use
+	// independent files, so remove the obsolete predecessor when this pane next
+	// reports successfully.
+	dir := filepath.Dir(path)
+	safePane := unsafeTokenStateChars.ReplaceAllString(paneID, "_")
+	_ = os.Remove(filepath.Join(dir, "last-status-"+safePane+".txt"))
 }

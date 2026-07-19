@@ -19,15 +19,29 @@ func isSettledStatus(status string) bool {
 	return status != "working"
 }
 
+type metadataTokenWriter struct {
+	set   func(paneID, source, name, value string) bool
+	clear func(paneID, source, name string) bool
+}
+
+var herdrMetadataTokenWriter = metadataTokenWriter{
+	set:   herdrcli.SetMetadataToken,
+	clear: herdrcli.ClearMetadataToken,
+}
+
 func writeMetadataToken(paneID, name, value string, force bool) {
+	writeMetadataTokenWith(herdrMetadataTokenWriter, paneID, name, value, force)
+}
+
+func writeMetadataTokenWith(writer metadataTokenWriter, paneID, name, value string, force bool) {
 	if !core.ShouldWriteToken(paneID, name, value, force) {
 		return
 	}
 	ok := false
 	if value == "" {
-		ok = herdrcli.ClearMetadataToken(paneID, herdrcli.Source, name)
+		ok = writer.clear(paneID, herdrcli.Source, name)
 	} else {
-		ok = herdrcli.SetMetadataToken(paneID, herdrcli.Source, name, value)
+		ok = writer.set(paneID, herdrcli.Source, name, value)
 	}
 	if ok {
 		core.MarkTokenWritten(paneID, name, value)
@@ -66,11 +80,13 @@ func RunUpdate(force bool) {
 	})
 	nowMs := time.Now().UnixMilli()
 	collectOptions := limits.DefaultCollectOptions()
+	// Sidebar refresh deliberately collects only this pane's provider and leaves
+	// Attach nil, avoiding the heavier cross-pane activity aggregation path.
 	collectOptions.Only = map[string]bool{p.AgentID(): true}
 	providerLimits := limits.CollectAllProviderLimits(cwd, nowMs, collectOptions)
 	limitText := ""
 	if len(providerLimits) > 0 {
-		limitText = limits.FormatSidebarLimit(providerLimits[0])
+		limitText = limits.FormatSidebarLimit(providerLimits[0], nowMs)
 	}
 	writeMetadataToken(paneID, "limit", limitText, force)
 

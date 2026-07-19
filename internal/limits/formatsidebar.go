@@ -5,20 +5,26 @@ package limits
 
 import "fmt"
 
-// FormatSidebarLimit returns the shortest available provider window as a
+// FormatSidebarLimit returns the shortest unexpired provider window as a
 // standalone sidebar row. Context usage remains in its own $context row.
-func FormatSidebarLimit(provider ProviderLimits) string {
-	var window *LimitWindow
-	fallback := ""
-	switch {
-	case provider.Primary != nil:
-		window, fallback = provider.Primary, "5h"
-	case provider.Secondary != nil:
-		window, fallback = provider.Secondary, "7d"
-	case provider.Tertiary != nil:
-		window, fallback = provider.Tertiary, "30d"
-	default:
-		return ""
+func FormatSidebarLimit(provider ProviderLimits, nowMs int64) string {
+	candidates := []struct {
+		window   *LimitWindow
+		fallback string
+	}{
+		{provider.Primary, "5h"},
+		{provider.Secondary, "7d"},
+		{provider.Tertiary, "30d"},
 	}
-	return fmt.Sprintf("%s %d%%", windowTag(window, fallback), remainingOf(window.UsedPercentage))
+	for _, candidate := range candidates {
+		window := candidate.window
+		if window == nil {
+			continue
+		}
+		if window.ResetsAt != nil && *window.ResetsAt > 0 && *window.ResetsAt <= nowMs/1000 {
+			continue
+		}
+		return fmt.Sprintf("%s %d%%", windowTag(window, candidate.fallback), remainingOf(window.UsedPercentage))
+	}
+	return ""
 }
