@@ -6,9 +6,11 @@ package update
 
 import (
 	"os"
+	"time"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
 	"github.com/senna-lang/herdr-agent-usage/internal/herdrcli"
+	"github.com/senna-lang/herdr-agent-usage/internal/limits"
 	"github.com/senna-lang/herdr-agent-usage/internal/provider"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers"
 )
@@ -17,7 +19,36 @@ func isSettledStatus(status string) bool {
 	return status != "working"
 }
 
-// RunUpdate resolves usage for HERDR_PANE_ID and updates custom_status.
+type metadataTokenWriter struct {
+	set   func(paneID, source, name, value string) bool
+	clear func(paneID, source, name string) bool
+}
+
+var herdrMetadataTokenWriter = metadataTokenWriter{
+	set:   herdrcli.SetMetadataToken,
+	clear: herdrcli.ClearMetadataToken,
+}
+
+func writeMetadataToken(paneID, name, value string, force bool) {
+	writeMetadataTokenWith(herdrMetadataTokenWriter, paneID, name, value, force)
+}
+
+func writeMetadataTokenWith(writer metadataTokenWriter, paneID, name, value string, force bool) {
+	if !core.ShouldWriteToken(paneID, name, value, force) {
+		return
+	}
+	ok := false
+	if value == "" {
+		ok = writer.clear(paneID, herdrcli.Source, name)
+	} else {
+		ok = writer.set(paneID, herdrcli.Source, name, value)
+	}
+	if ok {
+		core.MarkTokenWritten(paneID, name, value)
+	}
+}
+
+// RunUpdate resolves usage for HERDR_PANE_ID and updates its sidebar tokens.
 // force=true (plugin action) updates even while working.
 func RunUpdate(force bool) {
 	paneID := os.Getenv("HERDR_PANE_ID")
@@ -47,13 +78,20 @@ func RunUpdate(force bool) {
 		Session: pane.AgentSession,
 		Cwd:     cwd,
 	})
+	nowMs := time.Now().UnixMilli()
+	collectOptions := limits.DefaultCollectOptions()
+	// Sidebar refresh deliberately collects only this pane's provider and leaves
+	// Attach nil, avoiding the heavier cross-pane activity aggregation path.
+	collectOptions.Only = map[string]bool{p.AgentID(): true}
+	providerLimits := limits.CollectAllProviderLimits(cwd, nowMs, collectOptions)
+	limitText := ""
+	if len(providerLimits) > 0 {
+		limitText = limits.FormatSidebarLimit(providerLimits[0], nowMs)
+	}
+	writeMetadataToken(paneID, "limit", limitText, force)
 
 	if usage == nil {
-		if !force && core.IsAlreadyCleared(paneID) {
-			return
-		}
-		herdrcli.ClearCustomStatus(paneID, herdrcli.Source)
-		core.MarkStatusCleared(paneID)
+		writeMetadataToken(paneID, "context", "", force)
 		return
 	}
 
@@ -61,9 +99,5 @@ func RunUpdate(force bool) {
 	sidebarW := core.ResolveSidebarWidth(liveWidth, core.ResolveConfigSidebarWidth())
 	maxCols := core.EstimateStatusMaxColumns(&sidebarW, pane.RowLabel)
 	statusText := core.FormatUsageStatus(*usage, core.FormatUsageOptions{MaxColumns: maxCols})
-	if !core.ShouldWriteStatus(paneID, statusText, force) {
-		return
-	}
-	herdrcli.SetCustomStatus(paneID, herdrcli.Source, statusText)
-	core.MarkStatusWritten(paneID, statusText)
+	writeMetadataToken(paneID, "context", statusText, force)
 }

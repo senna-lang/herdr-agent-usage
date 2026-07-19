@@ -3,7 +3,7 @@
 [![CI](https://github.com/senna-lang/herdr-agent-usage/actions/workflows/ci.yml/badge.svg)](https://github.com/senna-lang/herdr-agent-usage/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)
-![herdr 0.7+](https://img.shields.io/badge/herdr-0.7%2B-6E56CF)
+![herdr 0.7.4+](https://img.shields.io/badge/herdr-0.7.4%2B-6E56CF)
 ![platforms: linux | macOS](https://img.shields.io/badge/platforms-linux%20%7C%20macOS-lightgrey)
 
 Monitor context usage and provider rate limits for agents running in [Herdr](https://herdr.dev).
@@ -11,12 +11,13 @@ Monitor context usage and provider rate limits for agents running in [Herdr](htt
 ![Agent Usage pane showing provider limits and per-pane activity shares](docs/assets/agent-usage-pane.png)
 
 - **Per-pane context meters** — every agent pane's sidebar label shows how much of its context window the session is using (`⛁ 13% (130k)` = 130k tokens, 13% of the window), updated after each completed turn.
+- **Provider limit row** — a separate sidebar row shows the shortest account-limit window (`5h 72%`) without crowding the context meter.
 - **Account rate-limit windows at a glance** — one live pane shows how much 5h / 7d / 30d allowance is left for Claude, Codex, OpenCode Go, and Grok, with reset countdowns and which open pane is burning it.
 - **Low-allowance warnings** — optional toasts fire when a window drops below your thresholds (default 50 / 20 / 10 / 5 % left), before you hit the wall mid-task.
 
 ## Requirements
 
-- **Herdr ≥ 0.7.0**
+- **Herdr ≥ 0.7.4**
 - **macOS or Linux**
 - Agent integrations for reliable session matching (recommended):
 
@@ -33,7 +34,7 @@ herdr plugin install senna-lang/herdr-agent-usage
 # non-interactive shells (CI, coding agents) need --yes
 ```
 
-Plugin install does **not** rewrite `~/.config/herdr/config.toml` (toast delivery, keybindings). Run setup after install:
+Plugin install does **not** rewrite `~/.config/herdr/config.toml` (sidebar rows, toast delivery, keybindings). Run setup after install:
 
 ```bash
 herdr plugin action invoke usagebar.setup
@@ -56,14 +57,15 @@ The agent can install the plugin and guide you through the remaining setup.
 
 1. Install the plugin and run **setup** (above).
 2. Open a workspace with at least one agent pane.
-3. After an agent turn completes (or you focus the pane), the sidebar custom status shows context usage.
-4. Open the limits pane:
+3. Add the sidebar rows printed by `usagebar.setup` to your Herdr config, then run `herdr server reload-config`.
+4. After an agent turn completes (or you focus the pane), the sidebar shows provider limit remaining above context usage.
+5. Open the limits pane:
 
 ```bash
 herdr plugin action invoke usagebar.open-limits
 ```
 
-5. Optional keybindings in **your** `~/.config/herdr/config.toml`:
+6. Optional keybindings in **your** `~/.config/herdr/config.toml`:
 
 ```toml
 [[keys.command]]
@@ -86,8 +88,8 @@ On Mac that is **Control+Shift+U** / **Control+Shift+M** (not Command). Then `he
 | Action | Command | What it does |
 | --- | --- | --- |
 | Open limits pane | `usagebar.open-limits` | Split pane with provider windows |
-| Refresh meters | `usagebar.refresh` | Recompute sidebar custom status for the target pane |
-| Setup | `usagebar.setup` | Seed plugin config, show toast/key snippets, report Herdr toast status |
+| Refresh meters | `usagebar.refresh` | Recompute sidebar `$limit` and `$context` tokens for the target pane |
+| Setup | `usagebar.setup` | Seed plugin config, show sidebar/toast/key snippets, report Herdr toast status |
 | Enable toast | `usagebar.enable-toast` | Append `[ui.toast]` only if missing (never overwrites) |
 | Check for updates | `usagebar.check-updates` | Check GitHub Releases now and show the release/update instructions |
 
@@ -100,13 +102,14 @@ herdr plugin action invoke usagebar.setup
 
 | Surface | What it shows |
 | --- | --- |
-| **Sidebar custom status** | Per-pane context usage: `⛁ 13% (130k)` when the window size is known, or the token count alone |
+| **Sidebar `$context` row** | Per-pane context usage: `⛁ 13% (130k)` when the window size is known, or the token count alone |
+| **Sidebar `$limit` row** | Shortest provider limit window: `5h 72%` remaining |
 | **Agent Usage pane** | Provider plan, usage windows (5h / 7d / 30d), remaining % bars, reset countdown, open-pane token share |
 | **Toasts** (optional) | Remaining-limit warnings at configured thresholds (default 50 / 20 / 10 / 5 % left) |
 
 ### Supported agents
 
-| Agent | Sidebar context | Limits pane | Notes |
+| Agent | Sidebar context + limit | Limits pane | Notes |
 | --- | --- | --- | --- |
 | Claude Code | Yes | Yes | Rate windows from `~/.claude.json` / statusLine cache |
 | Codex | Yes | Yes | Context + rate windows from local rollouts |
@@ -120,13 +123,31 @@ Percentages in the limits pane are **remaining** (`% left`). Higher is safer.
 - Auto-refreshes every **15s**. Press **`r`** to refresh, **`q`** to quit.
 - OpenCode Go may show three windows (**5h / 7d / 30d**). Other providers show whichever usage windows their data sources make available.
 - Open pane **token share** is local activity share within the shortest window (including a **closed / other** bucket for usage outside open panes). It is not account quota attribution.
-- Sidebar context meters update after the agent has **settled** (not while `working`), so the label matches the last completed turn. If the session cannot be resolved, the custom status is cleared rather than showing another session’s numbers.
+- Sidebar meters update after the agent has **settled** (not while `working`), so they match the last completed turn. If the session cannot be resolved, the `$context` token is cleared rather than showing another session’s numbers.
 
 ```bash
 herdr plugin action invoke usagebar.open-limits
 ```
 
 ## Configuration
+
+### Sidebar limit row (Herdr 0.7.4+)
+
+Add `$limit` as its own row so the existing context text remains unchanged:
+
+```toml
+[ui.sidebar.agents]
+row_gap = 0
+rows = [
+  ["state_icon", "tab", "pane"],
+  ["agent", "$limit"],
+  ["$context"],
+]
+```
+
+This makes the standard display `tab · pane`, `agent · limit`, then context.
+Run `herdr server reload-config` after editing. The limit disappears
+automatically when the matching provider has no limit data.
 
 ### Plugin config
 

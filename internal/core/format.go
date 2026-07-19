@@ -19,7 +19,7 @@ const warningThresholdPercent = 80
 
 // FormatUsageOptions controls sidebar formatting.
 type FormatUsageOptions struct {
-	// MaxColumns is the maximum display width (terminal cell count) usable by custom_status.
+	// MaxColumns is the maximum display width usable by the context token.
 	// When nil, returns the full representation.
 	MaxColumns *int
 }

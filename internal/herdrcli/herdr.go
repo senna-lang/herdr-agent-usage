@@ -204,14 +204,17 @@ func GetSidebarWidthColumns(paneID string) *int {
 	return &v
 }
 
-// SetCustomStatus reports custom_status via herdr.
-func SetCustomStatus(paneID, source, text string) {
-	spawnHerdr("pane", "report-metadata", paneID, "--source", source, "--custom-status", text)
+// SetMetadataToken reports one named presentation token for use in configurable
+// Herdr 0.7.4+ sidebar rows (for example $limit).
+func SetMetadataToken(paneID, source, name, value string) bool {
+	_, ok := spawnHerdr("pane", "report-metadata", paneID, "--source", source, "--token", name+"="+value)
+	return ok
 }
 
-// ClearCustomStatus clears custom_status via herdr.
-func ClearCustomStatus(paneID, source string) {
-	spawnHerdr("pane", "report-metadata", paneID, "--source", source, "--clear-custom-status")
+// ClearMetadataToken removes one named presentation token owned by source.
+func ClearMetadataToken(paneID, source, name string) bool {
+	_, ok := spawnHerdr("pane", "report-metadata", paneID, "--source", source, "--clear-token", name)
+	return ok
 }
 
 // ShowNotification runs herdr notification show; returns whether shown.

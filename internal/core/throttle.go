@@ -1,10 +1,6 @@
 /**
- * Persists the most recent display text per pane in HERDR_PLUGIN_STATE_DIR so
- * we can skip writes to herdr when usage hasn't changed.
- *
- * We intentionally avoid time-based throttling: it would drop the tail event
- * during a burst. We always compute the latest usage and no-op when the
- * rendered string is identical.
+ * Persists the most recently reported sidebar metadata token values per pane
+ * so unchanged settle/focus events do not spawn redundant Herdr CLI writes.
  */
 package core
 
@@ -14,11 +10,9 @@ import (
 	"regexp"
 )
 
-const clearedSentinel = ""
+var unsafeTokenStateChars = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 
-var unsafePaneChars = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
-
-func stateDir() (string, error) {
+func tokenStateFilePath(paneID, tokenName string) (string, error) {
 	dir := os.Getenv("HERDR_PLUGIN_STATE_DIR")
 	if dir == "" {
 		return "", os.ErrInvalid
@@ -26,20 +20,13 @@ func stateDir() (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	return dir, nil
+	safePane := unsafeTokenStateChars.ReplaceAllString(paneID, "_")
+	safeToken := unsafeTokenStateChars.ReplaceAllString(tokenName, "_")
+	return filepath.Join(dir, "last-token-"+safePane+"-"+safeToken+".txt"), nil
 }
 
-func stateFilePath(paneID string) (string, error) {
-	dir, err := stateDir()
-	if err != nil {
-		return "", err
-	}
-	safe := unsafePaneChars.ReplaceAllString(paneID, "_")
-	return filepath.Join(dir, "last-status-"+safe+".txt"), nil
-}
-
-func readLastStatus(paneID string) (string, bool) {
-	path, err := stateFilePath(paneID)
+func readLastToken(paneID, tokenName string) (string, bool) {
+	path, err := tokenStateFilePath(paneID, tokenName)
 	if err != nil {
 		return "", false
 	}
@@ -50,39 +37,28 @@ func readLastStatus(paneID string) (string, bool) {
 	return string(b), true
 }
 
-func writeLastStatus(paneID, statusText string) {
-	path, err := stateFilePath(paneID)
-	if err != nil {
-		return
-	}
-	_ = os.WriteFile(path, []byte(statusText), 0o644)
-}
-
-// ShouldWriteStatus returns true only when the text differs from the last written display.
-// When force is true, always returns true.
-func ShouldWriteStatus(paneID, statusText string, force bool) bool {
+// ShouldWriteToken reports whether value differs from the last successful
+// write. Force always requests a write.
+func ShouldWriteToken(paneID, tokenName, value string, force bool) bool {
 	if force {
 		return true
 	}
-	last, ok := readLastStatus(paneID)
-	if !ok {
-		return true
+	last, ok := readLastToken(paneID, tokenName)
+	return !ok || last != value
+}
+
+// MarkTokenWritten records a token value after Herdr accepts the metadata
+// report. An empty value records a successful clear.
+func MarkTokenWritten(paneID, tokenName, value string) {
+	path, err := tokenStateFilePath(paneID, tokenName)
+	if err != nil {
+		return
 	}
-	return last != statusText
-}
-
-// MarkStatusWritten records the last written display text.
-func MarkStatusWritten(paneID, statusText string) {
-	writeLastStatus(paneID, statusText)
-}
-
-// MarkStatusCleared records the cleared sentinel.
-func MarkStatusCleared(paneID string) {
-	writeLastStatus(paneID, clearedSentinel)
-}
-
-// IsAlreadyCleared reports whether the persisted state is already the cleared sentinel.
-func IsAlreadyCleared(paneID string) bool {
-	last, ok := readLastStatus(paneID)
-	return ok && last == clearedSentinel
+	_ = os.WriteFile(path, []byte(value), 0o644)
+	// v0.1.x stored a single custom-status value per pane. Metadata tokens use
+	// independent files, so remove the obsolete predecessor when this pane next
+	// reports successfully.
+	dir := filepath.Dir(path)
+	safePane := unsafeTokenStateChars.ReplaceAllString(paneID, "_")
+	_ = os.Remove(filepath.Join(dir, "last-status-"+safePane+".txt"))
 }

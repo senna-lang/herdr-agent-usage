@@ -73,7 +73,7 @@ func printUsage(w *os.File) {
 	fmt.Fprint(w, `usagebar — Herdr Agent Usage (Go)
 
 Usage:
-  usagebar status|update [--force]   Update sidebar custom_status for HERDR_PANE_ID
+  usagebar status|update [--force]   Update sidebar metadata tokens for HERDR_PANE_ID
   usagebar limits|panel              Interactive limits panel (q quit, r refresh)
                                      Shows providers with an open agent pane;
                                      --all shows every provider

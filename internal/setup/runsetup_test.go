@@ -31,6 +31,8 @@ func TestRunSetup_SeedsAndSnippets(t *testing.T) {
 	text := strings.Join(report.Lines, "\n")
 	for _, want := range []string{
 		"seeded plugin config", "toast: NOT configured", "[ui.toast]",
+		"[ui.sidebar.agents]", `["state_icon", "tab", "pane"]`,
+		`"$limit"`, `"$context"`,
 		"usagebar.open-limits", "--write-toast",
 	} {
 		if !strings.Contains(text, want) {
