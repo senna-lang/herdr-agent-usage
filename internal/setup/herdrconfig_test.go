@@ -18,12 +18,22 @@ func TestInspectToastConfig_Missing(t *testing.T) {
 }
 
 func TestInspectToastConfig_Delivery(t *testing.T) {
-	status := InspectToastConfig(`
-[ui.toast]
-delivery = "herdr"
-`)
-	if status.Kind != "present" || status.Delivery == nil || *status.Delivery != "herdr" {
-		t.Fatalf("got %+v", status)
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "double quoted", raw: "[ui.toast]\ndelivery = \"herdr\"\n", want: "herdr"},
+		{name: "single quoted with comment", raw: "[ui.toast]\ndelivery = 'system' # desktop notifications\n", want: "system"},
+		{name: "recommended snippet", raw: ToastConfigSnippet(), want: "herdr"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status := InspectToastConfig(tt.raw)
+			if status.Kind != "present" || status.Delivery == nil || *status.Delivery != tt.want {
+				t.Fatalf("got %+v, want delivery=%q", status, tt.want)
+			}
+		})
 	}
 }
 

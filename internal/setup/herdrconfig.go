@@ -78,8 +78,8 @@ func KeybindingSnippet() string {
 }
 
 var (
-	deliveryDQ = regexp.MustCompile(`^delivery\s*=\s*"([^"]+)"\s*$`)
-	deliverySQ = regexp.MustCompile(`^delivery\s*=\s*'([^']+)'\s*$`)
+	deliveryDQ = regexp.MustCompile(`^delivery\s*=\s*"([^"]+)"\s*(#.*)?$`)
+	deliverySQ = regexp.MustCompile(`^delivery\s*=\s*'([^']+)'\s*(#.*)?$`)
 )
 
 // InspectToastConfig reads [ui.toast] presence and delivery from config body.
