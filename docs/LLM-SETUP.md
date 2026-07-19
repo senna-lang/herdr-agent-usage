@@ -39,6 +39,10 @@ Follow every step in order. Do not skip confirmation gates.
      `herdr plugin action invoke usagebar.enable-toast`, which is safe).  
    - Keybindings: append new `[[keys.command]]` blocks; do not rewrite
      unrelated sections.  
+   - Sidebar: never append a second `[ui.sidebar.agents]` table. If it already
+     exists, merge `$limit` and `$context` into its existing `rows` while
+     preserving unrelated rows and tokens. Apply the same merge to relevant
+     `rows_by_agent` overrides because those replace the default rows.
    - Do not delete or rewrite the whole `config.toml`.
 
 4. Prefer official CLI actions over hand-editing when possible.
@@ -49,6 +53,7 @@ End state:
 
 - Plugin `usagebar` installed and enabled  
 - Plugin config seeded (`usagebar.setup`)  
+- Sidebar shows provider limit above the unchanged context meter
 - Optional: toast delivery configured **only if the user said yes**  
 - Optional: keybindings for open-limits / refresh **with conflict handling**  
 - `herdr server reload-config` after any Herdr config change  
@@ -59,7 +64,7 @@ End state:
 ### 1. Prerequisites
 
 - Confirm `herdr` is on `PATH` and works (`herdr --help` or `herdr plugin list`).  
-- Herdr **≥ 0.7.0** is required.  
+- Herdr **≥ 0.7.4** is required.
 - OS: macOS or Linux.  
 - **Go toolchain ≥ 1.25** (`go version`) recommended. `usagebar.setup`
   resolves the binary automatically on first run: it builds with Go when
@@ -132,7 +137,35 @@ If the log shows a binary-resolution failure (exit 127): install Go and run
 list`), or install + authenticate `gh` for the prebuilt download, then
 re-invoke `usagebar.setup`.
 
-### 4. Notifications (mandatory user confirmation)
+### 4. Sidebar rows (required)
+
+Read the active Herdr config first. The target Agent layout is:
+
+```toml
+[ui.sidebar.agents]
+row_gap = 0
+rows = [
+  ["state_icon", "tab", "pane"],
+  ["agent", "$limit"],
+  ["$context"],
+]
+```
+
+- If `[ui.sidebar.agents]` is absent, append the block above.
+- If it exists, do not append another table. Preserve its existing layout,
+  add `$limit` to the row containing `agent`, and add `$context` as the next
+  row. Do not remove unrelated tokens or rows.
+- If `[ui.sidebar.agents.rows_by_agent]` contains overrides for Claude,
+  Codex, OpenCode, or Grok, merge `$limit` and `$context` into each relevant
+  override too; an override replaces the default `rows`.
+
+After changing the config:
+
+```bash
+herdr server reload-config
+```
+
+### 5. Notifications (mandatory user confirmation)
 
 Ask the user clearly, e.g.:
 
@@ -153,7 +186,7 @@ herdr server reload-config
 - **No** / skip → do nothing to toast settings. Say notifications will not
   appear until they enable toast later via `usagebar.enable-toast`.
 
-### 5. Keybindings (conflict check, then apply)
+### 6. Keybindings (conflict check, then apply)
 
 Target commands:
 
@@ -193,7 +226,7 @@ herdr server reload-config
 
 If the user declines keybindings, skip this step.
 
-### 6. Optional: Claude statusLine
+### 7. Optional: Claude statusLine
 
 Only if the user uses Claude Code and wants 5h/7d rate windows + Claude
 toasts via statusLine, offer to help. Do not change Claude settings without
@@ -201,7 +234,7 @@ asking. The command should point at this plugin’s `bin/run-statusline.sh`
 (resolve path from `herdr plugin list` / plugin root). Prefer chaining with
 an existing statusLine rather than replacing it.
 
-### 7. Smoke check
+### 8. Smoke check
 
 ```bash
 herdr plugin list
@@ -209,15 +242,17 @@ herdr plugin action list --plugin usagebar
 herdr plugin action invoke usagebar.open-limits
 ```
 
-Sidebar meters appear after an agent turn completes on a supported agent
-pane (Claude / Codex / OpenCode / Grok).
+After an agent turn completes on a supported pane (Claude / Codex / OpenCode /
+Grok), verify with `herdr pane get <pane-id>` that both `tokens.context` and
+`tokens.limit` are present. The sidebar should render limit above context.
 
-### 8. Report back
+### 9. Report back
 
 Summarize in plain language:
 
 - Installed / already present  
 - Plugin config path  
+- Sidebar rows: added / merged / already configured
 - Toast: enabled / already present / skipped by user  
 - Keys: which bindings were added, or that the user declined / chose alternates  
 - Any remaining manual steps  

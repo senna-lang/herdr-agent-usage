@@ -42,6 +42,22 @@ func ToastConfigSnippet() string {
 	}, "\n")
 }
 
+// SidebarRowsSnippet is the recommended Herdr 0.7.4+ Agent layout. Users with
+// an existing [ui.sidebar.agents] section must merge these tokens into it
+// instead of appending a duplicate TOML table.
+func SidebarRowsSnippet() string {
+	return strings.Join([]string{
+		"[ui.sidebar.agents]",
+		"row_gap = 0",
+		"rows = [",
+		`  ["state_icon", "tab", "pane"],`,
+		`  ["agent", "$limit"],`,
+		`  ["$context"],`,
+		"]",
+		"",
+	}, "\n")
+}
+
 // KeybindingSnippet is an optional keybinding example block.
 // Direct chords (no Herdr prefix mode) so one keypress sequence opens/refreshes.
 func KeybindingSnippet() string {
