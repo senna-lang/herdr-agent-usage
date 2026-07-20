@@ -217,6 +217,10 @@ func collectProviders(nowMs int64, activeOnly bool) []limits.ProviderLimits {
 	opts := limits.DefaultCollectOptions()
 	if activeOnly {
 		opts.Only = limits.ActiveProviderFilter(snaps, panesOK)
+		// Subscription gate: hide providers whose open panes all run on
+		// pay-as-you-go backends (--all bypasses both filters).
+		billing := limits.BillingProviderFilter(snaps, panesOK, limits.DefaultBillingDeps())
+		opts.Only = limits.IntersectFilters(opts.Only, billing)
 	}
 	opts.Attach = func(providers []limits.ProviderLimits, now int64) []limits.ProviderLimits {
 		return limits.CollectAndAttachPaneActivity(providers, snaps, now)
@@ -404,7 +408,11 @@ func runLimitsPane(args []string) error {
 
 func runNotify() {
 	nowMs := time.Now().UnixMilli()
-	providers := limits.CollectAllProviderLimits(resolveCwd(), nowMs, limits.DefaultCollectOptions())
+	opts := limits.DefaultCollectOptions()
+	// Never toast about subscription windows for pay-as-you-go setups.
+	snaps, panesOK := openPaneSnapshots()
+	opts.Only = limits.BillingProviderFilter(snaps, panesOK, limits.DefaultBillingDeps())
+	providers := limits.CollectAllProviderLimits(resolveCwd(), nowMs, opts)
 	limits.NotifyProviderPrimaryLimits(providers, nowMs)
 }
 

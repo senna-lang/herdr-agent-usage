@@ -160,14 +160,33 @@ type OpenCodeTokenRow struct {
 // SumOpenCodeTokensInWindow sums assistant tokens within the window.
 // input + cache.read + cache.write + output + reasoning.
 func SumOpenCodeTokensInWindow(rows []OpenCodeTokenRow, windowStartMs, windowEndMs int64) float64 {
-	var sum float64
+	return SumOpenCodeProviderTokensInWindow(rows, "", windowStartMs, windowEndMs)
+}
+
+// SumOpenCodeProviderTokensInWindow sums assistant tokens within the window
+// for one backend providerID ("" = all). The limits pane activity passes
+// "opencode-go" so direct-API traffic (deepseek, ollama, …) never counts
+// against the Go plan's budget share.
+func SumOpenCodeProviderTokensInWindow(rows []OpenCodeTokenRow, providerID string, windowStartMs, windowEndMs int64) float64 {
+	tokens, _ := SumOpenCodeActivityInWindow(rows, providerID, windowStartMs, windowEndMs)
+	return tokens
+}
+
+// SumOpenCodeActivityInWindow sums assistant tokens and USD cost within the
+// window for one backend providerID ("" = all), in a single pass. OpenCode
+// stamps every assistant message with a cost (from its own model-pricing
+// catalog; 0 for uncataloged/local models), so this works for any backend
+// OpenCode has pricing data for — not just opencode-go.
+func SumOpenCodeActivityInWindow(rows []OpenCodeTokenRow, providerID string, windowStartMs, windowEndMs int64) (tokens float64, costUSD float64) {
 	for _, row := range rows {
 		if row.TimeCreated < windowStartMs || row.TimeCreated > windowEndMs {
 			continue
 		}
 		var parsed struct {
-			Role   string `json:"role"`
-			Tokens *struct {
+			Role       string   `json:"role"`
+			ProviderID string   `json:"providerID"`
+			Cost       *float64 `json:"cost"`
+			Tokens     *struct {
 				Input     *float64 `json:"input"`
 				Output    *float64 `json:"output"`
 				Reasoning *float64 `json:"reasoning"`
@@ -186,6 +205,9 @@ func SumOpenCodeTokensInWindow(rows []OpenCodeTokenRow, windowStartMs, windowEnd
 		if parsed.Role != "assistant" {
 			continue
 		}
+		if providerID != "" && parsed.ProviderID != providerID {
+			continue
+		}
 		created := row.TimeCreated
 		if parsed.Time != nil && parsed.Time.Created != nil && isFinite(*parsed.Time.Created) {
 			created = int64(*parsed.Time.Created)
@@ -193,19 +215,20 @@ func SumOpenCodeTokensInWindow(rows []OpenCodeTokenRow, windowStartMs, windowEnd
 		if created < windowStartMs || created > windowEndMs {
 			continue
 		}
+		costUSD += nonNeg(parsed.Cost)
 		if parsed.Tokens == nil {
 			continue
 		}
 		t := parsed.Tokens
-		sum += nonNeg(t.Input)
-		sum += nonNeg(t.Output)
-		sum += nonNeg(t.Reasoning)
+		tokens += nonNeg(t.Input)
+		tokens += nonNeg(t.Output)
+		tokens += nonNeg(t.Reasoning)
 		if t.Cache != nil {
-			sum += nonNeg(t.Cache.Read)
-			sum += nonNeg(t.Cache.Write)
+			tokens += nonNeg(t.Cache.Read)
+			tokens += nonNeg(t.Cache.Write)
 		}
 	}
-	return sum
+	return tokens, costUSD
 }
 
 // SumGrokTokensInWindow sums turn_completed usage.totalTokens within the window.

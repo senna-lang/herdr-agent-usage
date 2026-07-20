@@ -79,14 +79,28 @@ func RunUpdate(force bool) {
 		Cwd:     cwd,
 	})
 	nowMs := time.Now().UnixMilli()
-	collectOptions := limits.DefaultCollectOptions()
-	// Sidebar refresh deliberately collects only this pane's provider and leaves
-	// Attach nil, avoiding the heavier cross-pane activity aggregation path.
-	collectOptions.Only = map[string]bool{p.AgentID(): true}
-	providerLimits := limits.CollectAllProviderLimits(cwd, nowMs, collectOptions)
 	limitText := ""
-	if len(providerLimits) > 0 {
-		limitText = limits.FormatSidebarLimit(providerLimits[0], nowMs)
+	// Subscription limits only apply when the pane's session is billed against
+	// a subscription plan; a pay-as-you-go backend (API key, custom base_url)
+	// has no plan window to report against, so the row shows the pane's
+	// whole-session token/cost total instead.
+	var sid *string
+	if pane.AgentSession != nil {
+		sid = &pane.AgentSession.Value
+	}
+	snapshot := limits.OpenPaneSnapshot{PaneID: paneID, Agent: *pane.Agent, SessionID: sid, Cwd: cwd}
+	if limits.PaneBillingMode(p.AgentID(), snapshot, limits.DefaultBillingDeps()) == limits.BillingPayAsYouGo {
+		totalTokens, totalCostUSD := limits.PaneTotalUsage(p.AgentID(), snapshot, nowMs)
+		limitText = limits.FormatSidebarBurn(totalTokens, totalCostUSD)
+	} else {
+		collectOptions := limits.DefaultCollectOptions()
+		// Sidebar refresh deliberately collects only this pane's provider and leaves
+		// Attach nil, avoiding the heavier cross-pane activity aggregation path.
+		collectOptions.Only = map[string]bool{p.AgentID(): true}
+		providerLimits := limits.CollectAllProviderLimits(cwd, nowMs, collectOptions)
+		if len(providerLimits) > 0 {
+			limitText = limits.FormatSidebarLimit(providerLimits[0], nowMs)
+		}
 	}
 	writeMetadataToken(paneID, "limit", limitText, force)
 

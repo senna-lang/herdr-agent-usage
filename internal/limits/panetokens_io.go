@@ -24,7 +24,9 @@ func DefaultPaneActivityDeps() PaneActivityDeps {
 	}
 }
 
-// TokensForPaneDefault sums windowed tokens for one open pane.
+// TokensForPaneDefault sums windowed tokens for one open pane, counting only
+// subscription-billed traffic (opencode-go for OpenCode): it feeds the plan
+// budget share under a provider's limits.
 func TokensForPaneDefault(providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
 	switch providerID {
 	case "claude":
@@ -32,12 +34,35 @@ func TokensForPaneDefault(providerID string, pane OpenPaneSnapshot, startMs, end
 	case "codex":
 		return codexTokensForPane(pane, startMs, endMs)
 	case "opencode":
-		return opencodeTokensForPane(pane, startMs, endMs)
+		return opencodeTokensForPane(pane, "opencode-go", startMs, endMs)
 	case "grok":
 		return grokTokensForPane(pane, startMs, endMs)
 	default:
 		return 0
 	}
+}
+
+// PaneTotalUsage sums the pane's entire session — tokens and, where
+// available, USD cost — regardless of billing backend. Pay-as-you-go has no
+// rolling quota window to report against, so the sidebar shows the pane's
+// whole-session spend instead of a windowed rate. costUSD is 0 when the
+// harness has no local cost data (Claude/Codex/Grok today) rather than when
+// spend was genuinely zero.
+func PaneTotalUsage(providerID string, pane OpenPaneSnapshot, nowMs int64) (tokens float64, costUSD float64) {
+	if providerID == "opencode" {
+		return opencodeActivityForPane(pane, "", 0, nowMs)
+	}
+	return TokensForPaneAnyBackend(providerID, pane, 0, nowMs), 0
+}
+
+// TokensForPaneAnyBackend sums a pane's tokens in [startMs, endMs] across any
+// backend, unlike TokensForPaneDefault which restricts OpenCode to the
+// opencode-go subscription gateway for plan-budget accounting.
+func TokensForPaneAnyBackend(providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+	if providerID == "opencode" {
+		return opencodeTokensForPane(pane, "", startMs, endMs)
+	}
+	return TokensForPaneDefault(providerID, pane, startMs, endMs)
 }
 
 // TotalTokensForProviderDefault sums windowed tokens across all sessions on disk.
@@ -105,14 +130,16 @@ func codexTokensForPane(pane OpenPaneSnapshot, startMs, endMs int64) float64 {
 	return SumCodexTokensInWindow(strings.Split(string(raw), "\n"), startMs, endMs)
 }
 
-func opencodeTokensForPane(pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+// opencodeSessionRowsForPane loads the pane's session message rows within
+// the window (by session id, else newest session in the pane cwd).
+func opencodeSessionRowsForPane(pane OpenPaneSnapshot, startMs, endMs int64) []OpenCodeTokenRow {
 	dbPath := ResolveOpenCodeLimitsDBPath()
 	if _, err := os.Stat(dbPath); err != nil {
-		return 0
+		return nil
 	}
 	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
 	if err != nil {
-		return 0
+		return nil
 	}
 	defer db.Close()
 
@@ -120,14 +147,14 @@ func opencodeTokensForPane(pane OpenPaneSnapshot, startMs, endMs int64) float64 
 	if sessionID == "" {
 		cwd := cwdStr(pane)
 		if cwd == "" {
-			return 0
+			return nil
 		}
 		_ = db.QueryRow(
 			`SELECT id FROM session WHERE directory = ? AND time_archived IS NULL ORDER BY time_updated DESC LIMIT 1`,
 			cwd,
 		).Scan(&sessionID)
 		if sessionID == "" {
-			return 0
+			return nil
 		}
 	}
 	rows, err := db.Query(
@@ -135,7 +162,7 @@ func opencodeTokensForPane(pane OpenPaneSnapshot, startMs, endMs int64) float64 
 		sessionID, startMs, endMs,
 	)
 	if err != nil {
-		return 0
+		return nil
 	}
 	defer rows.Close()
 	var list []OpenCodeTokenRow
@@ -147,7 +174,21 @@ func opencodeTokensForPane(pane OpenPaneSnapshot, startMs, endMs int64) float64 
 		}
 		list = append(list, OpenCodeTokenRow{Data: data, TimeCreated: tc})
 	}
-	return SumOpenCodeTokensInWindow(list, startMs, endMs)
+	return list
+}
+
+// opencodeTokensForPane sums the pane session's windowed tokens for one
+// backend providerID ("" = all backends).
+func opencodeTokensForPane(pane OpenPaneSnapshot, backendID string, startMs, endMs int64) float64 {
+	rows := opencodeSessionRowsForPane(pane, startMs, endMs)
+	return SumOpenCodeProviderTokensInWindow(rows, backendID, startMs, endMs)
+}
+
+// opencodeActivityForPane sums the pane session's windowed tokens and USD
+// cost for one backend providerID ("" = all backends), in one DB round trip.
+func opencodeActivityForPane(pane OpenPaneSnapshot, backendID string, startMs, endMs int64) (tokens float64, costUSD float64) {
+	rows := opencodeSessionRowsForPane(pane, startMs, endMs)
+	return SumOpenCodeActivityInWindow(rows, backendID, startMs, endMs)
 }
 
 func grokTokensForPane(pane OpenPaneSnapshot, startMs, endMs int64) float64 {
@@ -271,7 +312,7 @@ func openCodeTotal(startMs, endMs int64) float64 {
 		}
 		list = append(list, OpenCodeTokenRow{Data: data, TimeCreated: tc})
 	}
-	return SumOpenCodeTokensInWindow(list, startMs, endMs)
+	return SumOpenCodeProviderTokensInWindow(list, "opencode-go", startMs, endMs)
 }
 
 func grokTotal(startMs, endMs int64) float64 {

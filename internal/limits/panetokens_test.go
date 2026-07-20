@@ -130,6 +130,70 @@ func TestSumOpenCodeTokensInWindow(t *testing.T) {
 	}
 }
 
+func TestSumOpenCodeProviderTokensInWindow_FiltersBackend(t *testing.T) {
+	rows := []OpenCodeTokenRow{
+		{
+			TimeCreated: windowStart + 1,
+			Data: mustJSON(map[string]any{
+				"role": "assistant", "providerID": "opencode-go",
+				"tokens": map[string]any{"input": 30},
+			}),
+		},
+		{
+			TimeCreated: windowStart + 2,
+			Data: mustJSON(map[string]any{
+				"role": "assistant", "providerID": "deepseek",
+				"tokens": map[string]any{"input": 1000},
+			}),
+		},
+	}
+	if got := SumOpenCodeProviderTokensInWindow(rows, "opencode-go", windowStart, windowEnd); got != 30 {
+		t.Fatalf("go-only: got %v want 30", got)
+	}
+	if got := SumOpenCodeProviderTokensInWindow(rows, "", windowStart, windowEnd); got != 1030 {
+		t.Fatalf("unfiltered: got %v want 1030", got)
+	}
+}
+
+func TestSumOpenCodeActivityInWindow_TokensAndCost(t *testing.T) {
+	rows := []OpenCodeTokenRow{
+		{
+			TimeCreated: windowStart + 1,
+			Data: mustJSON(map[string]any{
+				"role": "assistant", "providerID": "deepseek", "cost": 0.0078,
+				"tokens": map[string]any{"input": 100, "output": 50},
+			}),
+		},
+		{
+			// Uncataloged model: OpenCode writes cost=0, not absent.
+			TimeCreated: windowStart + 2,
+			Data: mustJSON(map[string]any{
+				"role": "assistant", "providerID": "ollama", "cost": 0,
+				"tokens": map[string]any{"input": 200},
+			}),
+		},
+		{
+			TimeCreated: windowStart - 1, // outside window
+			Data: mustJSON(map[string]any{
+				"role": "assistant", "providerID": "deepseek", "cost": 5.0,
+				"tokens": map[string]any{"input": 9000},
+			}),
+		},
+	}
+	tokens, cost := SumOpenCodeActivityInWindow(rows, "", windowStart, windowEnd)
+	if tokens != 350 {
+		t.Fatalf("tokens: got %v want 350", tokens)
+	}
+	if cost != 0.0078 {
+		t.Fatalf("cost: got %v want 0.0078", cost)
+	}
+
+	dsTokens, dsCost := SumOpenCodeActivityInWindow(rows, "deepseek", windowStart, windowEnd)
+	if dsTokens != 150 || dsCost != 0.0078 {
+		t.Fatalf("deepseek-only: got tokens=%v cost=%v", dsTokens, dsCost)
+	}
+}
+
 func TestSumGrokTokensInWindow(t *testing.T) {
 	t0 := windowStart / 1000
 	lines := []string{
