@@ -45,13 +45,17 @@ func ToastConfigSnippet() string {
 // SidebarRowsSnippet is the recommended Herdr 0.7.4+ Agent layout. Users with
 // an existing [ui.sidebar.agents] section must merge these tokens into it
 // instead of appending a duplicate TOML table.
+//
+// $provider replaces the built-in `agent` token: it renders the harness name
+// ("opencode") on a subscription pane and the backend name ("deepseek") on a
+// pay-as-you-go one, where the backend is the more informative half.
 func SidebarRowsSnippet() string {
 	return strings.Join([]string{
 		"[ui.sidebar.agents]",
 		"row_gap = 0",
 		"rows = [",
 		`  ["state_icon", "tab", "pane"],`,
-		`  ["agent", "$limit"],`,
+		`  ["$provider", "$limit"],`,
 		`  ["$context"],`,
 		"]",
 		"",

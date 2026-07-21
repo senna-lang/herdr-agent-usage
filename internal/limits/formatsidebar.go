@@ -21,17 +21,17 @@ func FormatSidebarBurn(tokens float64, costUSD float64) string {
 	if tokens < 1 {
 		return ""
 	}
-	out := "Σ " + formatBurnTokens(tokens)
+	out := "Σ " + formatCompactTokens(tokens)
 	if costUSD > 0 {
-		out += " " + formatBurnCost(costUSD)
+		out += " " + formatCompactCost(costUSD)
 	}
 	return out
 }
 
-// formatBurnCost compacts a USD amount, keeping small DeepSeek-style
-// fractions-of-a-cent readable while collapsing larger spend to cents/whole
-// dollars: $0.0078, $0.42, $128.
-func formatBurnCost(usd float64) string {
+// formatCompactCost compacts a USD amount, keeping small fractions-of-a-cent
+// readable while collapsing larger spend to cents/whole dollars: $0.0078,
+// $0.42, $128. Shared by the sidebar burn row and the panel's API blocks.
+func formatCompactCost(usd float64) string {
 	switch {
 	case usd < 0.01:
 		return fmt.Sprintf("$%.4f", usd)
@@ -44,10 +44,12 @@ func formatBurnCost(usd float64) string {
 	}
 }
 
-// formatBurnTokens compacts a token count (812, 9.5k, 350k, 5.7M).
-// Same tiering as the context meter's count, plus an M tier: 5h burn
-// across cache reads routinely exceeds 1M tokens.
-func formatBurnTokens(tokens float64) string {
+// formatCompactTokens compacts a token count (812, 9.5k, 350k, 5.7M).
+// Same tiering as the context meter's count, plus an M tier: burn totals
+// across cache reads routinely exceed 1M tokens. Rounds harder than
+// FormatTokenCount ("350k" vs "350.4k") since both the sidebar row and the
+// panel's spend columns are width-constrained. Shared by both.
+func formatCompactTokens(tokens float64) string {
 	switch {
 	case tokens < 1000:
 		return fmt.Sprintf("%.0f", tokens)

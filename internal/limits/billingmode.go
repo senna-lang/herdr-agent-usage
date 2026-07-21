@@ -6,12 +6,16 @@
  * Pure detectors only; file/DB reads live in billingmode_io.go.
  *
  * Evidence per provider:
- *   claude   — ~/.claude.json cachedUsageUtilization / oauthAccount.billingType
+ *   claude   — account: ~/.claude.json cachedUsageUtilization /
+ *              oauthAccount.billingType; session: deployment env flags
+ *              (CLAUDE_CODE_USE_BEDROCK / VERTEX / FOUNDRY) or
+ *              ANTHROPIC_*_BASE_URL from settings / process env
  *   codex    — pane rollout: token_count with rate_limits => subscription;
  *              token_count without rate_limits => API backend
  *   opencode — session's latest assistant message providerID ("opencode-go"
  *              is the subscription gateway; anything else is direct API)
- *   grok     — auth.json auth_mode (oidc/oauth/sso => subscription)
+ *   grok     — account: auth.json auth_mode (oidc/oauth/sso => subscription);
+ *              session: custom model base_url via config.toml (non-xAI => PAYG)
  */
 package limits
 

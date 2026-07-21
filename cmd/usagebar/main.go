@@ -209,10 +209,17 @@ func openPaneSnapshots() ([]limits.OpenPaneSnapshot, bool) {
 	return snaps, ok
 }
 
-// collectProviders gathers provider limits. activeOnly hides providers that
-// have no open agent pane in Herdr (the limits pane default; --all overrides).
-// When the pane query fails, all providers are shown (fail-open).
-func collectProviders(nowMs int64, activeOnly bool) []limits.ProviderLimits {
+// panelSnapshot is what one panel render needs: subscription providers plus
+// pay-as-you-go spend blocks for the backends open panes are running.
+type panelSnapshot struct {
+	providers []limits.ProviderLimits
+	apiUsage  []limits.APIProviderUsage
+}
+
+// collectPanel gathers everything the panel shows. activeOnly hides providers
+// that have no open agent pane in Herdr (the panel default; --all overrides).
+// When the pane query fails, all subscription providers are shown (fail-open).
+func collectPanel(nowMs int64, activeOnly bool) panelSnapshot {
 	snaps, panesOK := openPaneSnapshots()
 	opts := limits.DefaultCollectOptions()
 	if activeOnly {
@@ -229,7 +236,13 @@ func collectProviders(nowMs int64, activeOnly bool) []limits.ProviderLimits {
 	hist := limits.LoadUsageHistory()
 	res := limits.EnrichRunOut(base, hist, nowMs, limits.DefaultRunOutOptions)
 	limits.SaveUsageHistory(res.History)
-	return res.Providers
+
+	// Pay-as-you-go blocks have no quota to run out of, so they skip the
+	// run-out enrichment entirely.
+	return panelSnapshot{
+		providers: res.Providers,
+		apiUsage:  limits.CollectAPIProviderUsage(snaps, nowMs),
+	}
 }
 
 func currentLayout() limits.PanelLayout {
@@ -279,8 +292,8 @@ func runLimitsPane(args []string) error {
 	}
 	if once || !term.IsTerminal(int(os.Stdout.Fd())) {
 		nowMs := time.Now().UnixMilli()
-		providers := collectProviders(nowMs, activeOnly)
-		text := limits.FormatLimitsPanel(providers, nowMs, layoutFor())
+		snap := collectPanel(nowMs, activeOnly)
+		text := limits.FormatUsagePanel(snap.providers, snap.apiUsage, nowMs, layoutFor())
 		fmt.Print(text)
 		if !strings.HasSuffix(text, "\n") {
 			fmt.Println()
@@ -302,22 +315,24 @@ func runLimitsPane(args []string) error {
 	// stdout itself, so a resize repaint can never interleave escape sequences
 	// with an in-progress full render.
 	var (
-		cachedProviders []limits.ProviderLimits
-		cachedNowMs     int64
+		cachedSnap   panelSnapshot
+		cachedLoaded bool
+		cachedNowMs  int64
 	)
 
 	paintCached := func() {
-		if cachedProviders == nil {
+		if !cachedLoaded {
 			return
 		}
-		paintFrame(limits.FormatLimitsPanel(cachedProviders, cachedNowMs, layoutFor()))
+		paintFrame(limits.FormatUsagePanel(cachedSnap.providers, cachedSnap.apiUsage, cachedNowMs, layoutFor()))
 	}
 
 	renderFull := func() {
 		nowMs := time.Now().UnixMilli()
-		cachedProviders = collectProviders(nowMs, activeOnly)
+		cachedSnap = collectPanel(nowMs, activeOnly)
+		cachedLoaded = true
 		cachedNowMs = nowMs
-		paintFrame(limits.FormatLimitsPanel(cachedProviders, nowMs, layoutFor()))
+		paintFrame(limits.FormatUsagePanel(cachedSnap.providers, cachedSnap.apiUsage, nowMs, layoutFor()))
 	}
 	renderFull()
 
@@ -459,8 +474,11 @@ func runStatusLine() {
 
 func runCollectJSON(args []string) {
 	nowMs := time.Now().UnixMilli()
-	providers := collectProviders(nowMs, !hasFlag(args, "--all"))
+	snap := collectPanel(nowMs, !hasFlag(args, "--all"))
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(providers)
+	_ = enc.Encode(struct {
+		Providers []limits.ProviderLimits   `json:"providers"`
+		APIUsage  []limits.APIProviderUsage `json:"apiUsage,omitempty"`
+	}{snap.providers, snap.apiUsage})
 }

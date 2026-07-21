@@ -3,7 +3,11 @@
  */
 package update
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/limits"
+)
 
 func TestWriteMetadataTokenWith_SetSuccessDeduplicates(t *testing.T) {
 	t.Setenv("HERDR_PLUGIN_STATE_DIR", t.TempDir())
@@ -64,5 +68,37 @@ func TestWriteMetadataTokenWith_FailureRetries(t *testing.T) {
 	writeMetadataTokenWith(writer, "w1:p1", "limit", "7d 42%", false)
 	if setCalls != 2 {
 		t.Fatalf("set=%d want 2 retries", setCalls)
+	}
+}
+
+func TestFormatSidebarProviderWith_PayAsYouGoNamesBackendOnly(t *testing.T) {
+	backendFor := func(providerID string, pane limits.OpenPaneSnapshot) string {
+		return "deepseek"
+	}
+	// The backend replaces the harness rather than appending to it: the
+	// sidebar is too narrow to carry both.
+	got := formatSidebarProviderWith(backendFor, "opencode", "opencode", limits.OpenPaneSnapshot{})
+	if got != "deepseek" {
+		t.Fatalf("got %q want %q", got, "deepseek")
+	}
+}
+
+func TestFormatSidebarProviderWith_SubscriptionKeepsHarnessOnly(t *testing.T) {
+	// Subscription panes, non-OpenCode panes, and unresolvable sessions all
+	// fall back to the bare harness name.
+	backendFor := func(providerID string, pane limits.OpenPaneSnapshot) string {
+		return ""
+	}
+	if got := formatSidebarProviderWith(backendFor, "claude", "claude", limits.OpenPaneSnapshot{}); got != "claude" {
+		t.Fatalf("got %q want %q", got, "claude")
+	}
+}
+
+func TestFormatSidebarProviderWith_EmptyAgentRendersNothing(t *testing.T) {
+	backendFor := func(providerID string, pane limits.OpenPaneSnapshot) string {
+		return "deepseek"
+	}
+	if got := formatSidebarProviderWith(backendFor, "", "opencode", limits.OpenPaneSnapshot{}); got != "" {
+		t.Fatalf("got %q want empty", got)
 	}
 }

@@ -115,6 +115,13 @@ func TestGrokBillingModeFromAuthMode(t *testing.T) {
 	}
 }
 
+func TestCombineBillingModes_ClaudeEnvOverridesSubscription(t *testing.T) {
+	// Stripe subscription account running through Bedrock must hide sub windows.
+	if got := CombineBillingModes(BillingSubscription, BillingPayAsYouGo); got != BillingPayAsYouGo {
+		t.Fatalf("got %v", got)
+	}
+}
+
 func depsFor(account map[string]BillingMode, pane map[string]BillingMode) BillingDeps {
 	return BillingDeps{
 		AccountMode: func(providerID string) BillingMode { return account[providerID] },

@@ -42,15 +42,22 @@ func TokensForPaneDefault(providerID string, pane OpenPaneSnapshot, startMs, end
 	}
 }
 
-// PaneTotalUsage sums the pane's entire session — tokens and, where
-// available, USD cost — regardless of billing backend. Pay-as-you-go has no
-// rolling quota window to report against, so the sidebar shows the pane's
-// whole-session spend instead of a windowed rate. costUSD is 0 when the
-// harness has no local cost data (Claude/Codex/Grok today) rather than when
-// spend was genuinely zero.
+// PaneTotalUsage sums what the pane spent on its pay-as-you-go backend —
+// tokens and, where available, USD cost. Pay-as-you-go has no rolling quota
+// to report against, so the sidebar shows the pane's whole-session total
+// instead of a windowed rate.
+//
+// An OpenCode session can switch backends mid-way (e.g. opencode-go then
+// deepseek); the total is scoped to the pane's current backend so it lines up
+// with the "$provider" label and excludes the subscription-gateway spend
+// already covered by that provider's limit row. Codex/Claude/Grok keep one
+// backend per session, so their per-session read is already backend-scoped.
+// costUSD is 0 when the harness records no local cost (Codex/Claude/Grok)
+// rather than when spend was genuinely zero.
 func PaneTotalUsage(providerID string, pane OpenPaneSnapshot, nowMs int64) (tokens float64, costUSD float64) {
 	if providerID == "opencode" {
-		return opencodeActivityForPane(pane, "", 0, nowMs)
+		backendID := payAsYouGoBackendID(providerID, pane)
+		return opencodeActivityForPane(pane, backendID, 0, nowMs)
 	}
 	return TokensForPaneAnyBackend(providerID, pane, 0, nowMs), 0
 }

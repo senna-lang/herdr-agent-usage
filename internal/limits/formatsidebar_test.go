@@ -110,8 +110,8 @@ func TestFormatBurnCost_Tiers(t *testing.T) {
 		{128.5, "$129"},
 	}
 	for _, c := range cases {
-		if got := formatBurnCost(c.usd); got != c.want {
-			t.Fatalf("formatBurnCost(%v)=%q want %q", c.usd, got, c.want)
+		if got := formatCompactCost(c.usd); got != c.want {
+			t.Fatalf("formatCompactCost(%v)=%q want %q", c.usd, got, c.want)
 		}
 	}
 }
