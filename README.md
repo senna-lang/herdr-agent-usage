@@ -237,12 +237,17 @@ lint, and vulnerability checks before it creates a GitHub Release.
 
 Everything is computed from files that the agents already keep on your machine:
 
-| Provider | Local sources read |
+| Harness | Local sources read |
 | --- | --- |
-| Claude Code | `~/.claude.json`, statusLine cache under `~/.claude/herdr-usagebar/` |
+| Claude Code | `~/.claude.json`, statusLine cache under `~/.claude/herdr-usagebar/`, `settings.json` (deployment env) |
 | Codex | rollout files under `~/.codex/sessions/` |
-| OpenCode Go / pay-as-you-go backends | `~/.local/share/opencode/opencode.db` (same file; the backend a session used is one of the fields already recorded per message) |
-| Grok | `~/.grok/sessions/**/signals.json`, `~/.grok/auth.json` (credentials for the credits fetch) |
+| OpenCode Go | `~/.local/share/opencode/opencode.db` |
+| Grok | `~/.grok/sessions/**/signals.json`, `~/.grok/auth.json` (credentials for the credits fetch), `~/.grok/config.toml` (custom-model base URLs) |
+
+Pay-as-you-go detection is not tied to any one harness: it reads the same
+per-harness files above (the backend a session used is already recorded there —
+OpenCode's `providerID`, Codex's `model_provider`, Claude's deployment env,
+Grok's `config.toml`). No extra data sources, no network calls.
 
 Network requests happen in the following cases:
 
