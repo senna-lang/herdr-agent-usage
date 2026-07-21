@@ -34,8 +34,15 @@ func ProcessWindow(
 	return ApplyNotifyResult(previous, decision.NewState, shown)
 }
 
-// RunRateLimitCheck parses stdin JSON and updates Claude notify state under lock.
+// RunRateLimitCheck parses stdin JSON and updates Claude notify state under lock
+// in the default (env/CLAUDE_CONFIG_DIR-derived) state dir.
 func RunRateLimitCheck(stdinJSON string, nowMs int64, notify ShowNotificationFn) {
+	RunRateLimitCheckIn("", stdinJSON, nowMs, notify)
+}
+
+// RunRateLimitCheckIn is RunRateLimitCheck scoped to an explicit per-profile
+// state dir, so two Claude accounts keep independent notify state.
+func RunRateLimitCheckIn(stateDir string, stdinJSON string, nowMs int64, notify ShowNotificationFn) {
 	rateLimits := ParseRateLimits(stdinJSON)
 	if rateLimits == nil {
 		return
@@ -43,7 +50,7 @@ func RunRateLimitCheck(stdinJSON string, nowMs int64, notify ShowNotificationFn)
 	if rateLimits.FiveHour == nil && rateLimits.SevenDay == nil {
 		return
 	}
-	WithLockedState(func(current ClaudeNotifyState) ClaudeNotifyState {
+	WithLockedStateIn(stateDir, func(current ClaudeNotifyState) ClaudeNotifyState {
 		return ClaudeNotifyState{
 			FiveHour: ProcessWindow(WindowFiveHour, rateLimits.FiveHour, current.FiveHour, nowMs, notify),
 			SevenDay: ProcessWindow(WindowSevenDay, rateLimits.SevenDay, current.SevenDay, nowMs, notify),
