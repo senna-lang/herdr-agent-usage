@@ -8,13 +8,13 @@
 
 Monitor context usage and provider rate limits for agents running in [Herdr](https://herdr.dev).
 
-![Agent Usage pane showing Claude, Codex, OpenCode Go, and Grok subscription limits alongside a pay-as-you-go DeepSeek spend block, with per-pane activity shares](docs/assets/agent-usage-pane.png)
+![Agent Usage pane showing Claude, Codex, OpenCode Go, and Grok subscription limits alongside a pay-as-you-go API spend block (DeepSeek shown as one example), with per-pane activity shares](docs/assets/agent-usage-pane.png)
 
 - **Per-pane context meters** — every agent pane's sidebar label shows how much of its context window the session is using (`⛁ 13% (130k)` = 130k tokens, 13% of the window), updated after each completed turn.
 - **Provider limit row** — a separate sidebar row shows the shortest account-limit window (`5h 72%`) without crowding the context meter.
 - **Account rate-limit windows at a glance** — one live pane shows how much 5h / 7d / 30d allowance is left for Claude, Codex, OpenCode Go, and Grok, with reset countdowns and which open pane is burning it.
 - **Low-allowance warnings** — optional toasts fire when a window drops below your thresholds (default 50 / 20 / 10 / 5 % left), before you hit the wall mid-task.
-- **Pay-as-you-go API backends** — when a pane runs a direct API key instead of a subscription, there's no plan quota to show. Detected across all four harnesses from what each records locally: OpenCode's per-message `providerID`, Codex's `model_provider`, Claude's deployment env (Bedrock / Vertex / Foundry / gateway), and Grok custom models (`~/.grok/config.toml` `[model.*]` `base_url`). The sidebar then names the backend and totals what that pane spent on it (`deepseek` with `Σ 425k $0.04`), and the Agent Usage pane adds a per-backend block with rolling 24h / 7d / 30d totals for that provider, a per-model breakdown, and which open pane is spending it. Dollar cost is shown when the harness records it (OpenCode today); otherwise the block is token-only.
+- **Pay-as-you-go API backends** — when a pane runs a direct API key instead of a subscription, there's no plan quota to show. Works with **any** provider a harness can reach (DeepSeek, OpenAI, Together, OpenRouter, Ollama, Bedrock, Vertex, a custom gateway, …), not just the one the screenshot happens to show. Detected across all four harnesses from what each records locally: OpenCode's per-message `providerID`, Codex's `model_provider`, Claude's deployment env (Bedrock / Vertex / Foundry / gateway), and Grok custom models (`~/.grok/config.toml` `[model.*]` `base_url`). The sidebar then names the backend and totals what that pane spent on it (e.g. `deepseek` with `Σ 425k $0.04`), and the Agent Usage pane adds a per-backend block with rolling 24h / 7d / 30d totals for that provider, a per-model breakdown, and which open pane is spending it. Dollar cost is shown when the harness records it (OpenCode today); otherwise the block is token-only.
 
 ## Requirements
 
