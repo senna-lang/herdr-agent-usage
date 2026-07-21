@@ -23,7 +23,12 @@ func encodeGrokCwd(cwd string) string {
 }
 
 // clearClaudeDeployEnv removes process-level deployment flags so tests only
-// see the temp settings files they write.
+// see the temp settings files they write. It also isolates
+// HERDR_PLUGIN_CONFIG_DIR at an empty temp dir: DefaultBillingDeps() now
+// resolves Claude profiles from that config, and a real machine's
+// config.toml (e.g. an id "claude" profile pointing elsewhere) would
+// otherwise override these tests' CLAUDE_CONFIG_JSON/CLAUDE_CONFIG_DIR env
+// values, since explicit-profile mode ignores env path overrides by design.
 func clearClaudeDeployEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
@@ -41,6 +46,7 @@ func clearClaudeDeployEnv(t *testing.T) {
 	} {
 		t.Setenv(k, "")
 	}
+	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", t.TempDir())
 }
 
 func writeFile(t *testing.T, path, body string) {
@@ -70,6 +76,22 @@ func withTempClaudeConfig(t *testing.T) (configDir, jsonPath string) {
 	// Avoid a real statusLine cache promoting PAYG → subscription mid-test.
 	t.Setenv("HOME", t.TempDir())
 	return configDir, jsonPath
+}
+
+// withClaudeProfileConfig configures a single [[claude.profiles]] entry
+// pointing at configDir/jsonPath, so per-profile billing detection (which
+// reads a profile's own ConfigDir rather than the ambient CLAUDE_CONFIG_DIR)
+// can find this test's temp settings. Reflects how a real user opts a
+// relocated account into isolation: explicit config, not a bare env var.
+func withClaudeProfileConfig(t *testing.T, id, configDir, jsonPath string) {
+	t.Helper()
+	pluginConfigDir := t.TempDir()
+	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", pluginConfigDir)
+	toml := "[[claude.profiles]]\n" +
+		"id = \"" + id + "\"\n" +
+		"config_dir = \"" + configDir + "\"\n" +
+		"claude_json_path = \"" + jsonPath + "\"\n"
+	writeFile(t, filepath.Join(pluginConfigDir, "config.toml"), toml)
 }
 
 func writeGrokSession(t *testing.T, home, sessionID, modelID string) {
@@ -174,6 +196,7 @@ default = "grok-4.5"
 
 func TestIO_ClaudeBedrockSettings_PaneIsPayAsYouGo(t *testing.T) {
 	configDir, jsonPath := withTempClaudeConfig(t)
+	withClaudeProfileConfig(t, "claude", configDir, jsonPath)
 	// Account still looks like a subscription — Bedrock env must win.
 	writeFile(t, jsonPath, `{
 		"cachedUsageUtilization": {"utilization": {"five_hour": {"utilization": 10}}},
@@ -285,5 +308,62 @@ base_url = "http://localhost:11434/v1"
 	}
 	if PaneBackendID("grok", panes[1]) != "ollama" {
 		t.Fatalf("ollama pane backend: got %q", PaneBackendID("grok", panes[1]))
+	}
+}
+
+func TestIO_MultipleClaudeProfiles_IndependentBilling(t *testing.T) {
+	clearClaudeDeployEnv(t)
+	t.Setenv("HOME", t.TempDir())
+
+	configDirA := t.TempDir()
+	jsonPathA := filepath.Join(t.TempDir(), "claude-a.json")
+	configDirB := t.TempDir()
+	jsonPathB := filepath.Join(t.TempDir(), "claude-b.json")
+
+	pluginConfigDir := t.TempDir()
+	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", pluginConfigDir)
+	toml := "[[claude.profiles]]\n" +
+		"id = \"claude\"\n" +
+		"config_dir = \"" + configDirA + "\"\n" +
+		"claude_json_path = \"" + jsonPathA + "\"\n\n" +
+		"[[claude.profiles]]\n" +
+		"id = \"claude-secondary\"\n" +
+		"config_dir = \"" + configDirB + "\"\n" +
+		"claude_json_path = \"" + jsonPathB + "\"\n"
+	writeFile(t, filepath.Join(pluginConfigDir, "config.toml"), toml)
+
+	// Profile A: Bedrock deployment env -> pay-as-you-go.
+	writeFile(t, jsonPathA, `{
+		"cachedUsageUtilization": {"utilization": {"five_hour": {"utilization": 10}}},
+		"oauthAccount": {"billingType": "stripe_subscription"}
+	}`)
+	writeFile(t, filepath.Join(configDirA, "settings.json"), `{
+		"env": {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": "us-east-1"}
+	}`)
+
+	// Profile B: plain subscription, no deployment env.
+	writeFile(t, jsonPathB, `{
+		"cachedUsageUtilization": {"utilization": {"five_hour": {"utilization": 5}}},
+		"oauthAccount": {"billingType": "stripe_subscription"}
+	}`)
+	writeFile(t, filepath.Join(configDirB, "settings.json"), `{"model":"opus"}`)
+
+	cwd := ioTestCwd
+	paneA := OpenPaneSnapshot{PaneID: "pa", Agent: "claude", Cwd: &cwd}
+	paneB := OpenPaneSnapshot{PaneID: "pb", Agent: "claude", Cwd: &cwd}
+
+	if mode := PaneBillingMode("claude", paneA, DefaultBillingDeps()); mode != BillingPayAsYouGo {
+		t.Fatalf("profile A: got %v want PayAsYouGo", mode)
+	}
+	if mode := PaneBillingMode("claude-secondary", paneB, DefaultBillingDeps()); mode != BillingSubscription {
+		t.Fatalf("profile B: got %v want Subscription", mode)
+	}
+
+	set := BillingProviderFilter([]OpenPaneSnapshot{paneA, paneB}, true, DefaultBillingDeps())
+	if set["claude"] {
+		t.Fatalf("profile A (bedrock) should be excluded: %#v", set)
+	}
+	if !set["claude-secondary"] {
+		t.Fatalf("profile B (subscription) should be kept: %#v", set)
 	}
 }

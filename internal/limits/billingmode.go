@@ -36,8 +36,11 @@ const (
 	BillingPayAsYouGo
 )
 
-// allProviderIDs is the display-order provider universe (matches collect.go).
-var allProviderIDs = []string{"claude", "codex", "opencode", "grok"}
+// nonClaudeProviderIDs is the fixed non-Claude portion of the display-order
+// provider universe (matches collect.go). Claude's portion is dynamic — see
+// BillingDeps.ClaudeProfileIDs — since a multi-profile setup's billing gate
+// must consider each configured account independently.
+var nonClaudeProviderIDs = []string{"codex", "opencode", "grok"}
 
 // CombineBillingModes merges account- and session-level evidence.
 // PayAsYouGo wins (positive evidence to hide), then Subscription.
@@ -165,6 +168,11 @@ type BillingDeps struct {
 	PaneMode func(providerID string, pane OpenPaneSnapshot) BillingMode
 	// AccountMode resolves account-scoped evidence for a provider.
 	AccountMode func(providerID string) BillingMode
+	// ClaudeProfileIDs are the configured Claude profile ids, replacing the
+	// single literal "claude" entry in BillingProviderFilter's provider
+	// universe so each configured account is gated independently. Empty
+	// defaults to ["claude"] (today's single-profile behavior).
+	ClaudeProfileIDs []string
 }
 
 // PaneBillingMode combines account- and session-level evidence for one pane.
@@ -186,6 +194,14 @@ func PaneBillingMode(providerID string, pane OpenPaneSnapshot, deps BillingDeps)
 // backend. Providers without open panes (or when the pane query failed)
 // are gated by account evidence alone — fail-open on Unknown.
 func BillingProviderFilter(openPanes []OpenPaneSnapshot, paneQueryOK bool, deps BillingDeps) map[string]bool {
+	claudeIDs := deps.ClaudeProfileIDs
+	if len(claudeIDs) == 0 {
+		claudeIDs = []string{"claude"}
+	}
+	allIDs := make([]string, 0, len(claudeIDs)+len(nonClaudeProviderIDs))
+	allIDs = append(allIDs, claudeIDs...)
+	allIDs = append(allIDs, nonClaudeProviderIDs...)
+
 	byProvider := make(map[string][]OpenPaneSnapshot)
 	if paneQueryOK {
 		for _, pane := range openPanes {
@@ -195,7 +211,7 @@ func BillingProviderFilter(openPanes []OpenPaneSnapshot, paneQueryOK bool, deps 
 		}
 	}
 	set := make(map[string]bool)
-	for _, providerID := range allProviderIDs {
+	for _, providerID := range allIDs {
 		account := BillingUnknown
 		if deps.AccountMode != nil {
 			account = deps.AccountMode(providerID)

@@ -3,9 +3,23 @@
  */
 package limits
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// isolatePluginConfig points HERDR_PLUGIN_CONFIG_DIR at an empty temp dir so
+// ResolvedClaudeProfiles() (invoked whenever a claude pane is present) always
+// synthesizes the single default profile here, regardless of the machine
+// running the test.
+func isolatePluginConfig(t *testing.T) {
+	t.Helper()
+	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", t.TempDir())
+}
 
 func TestActiveProviderSet_OnlyOpenAgents(t *testing.T) {
+	isolatePluginConfig(t)
 	panes := []OpenPaneSnapshot{
 		{PaneID: "w1:p1", Agent: "claude"},
 		{PaneID: "w1:p2", Agent: "claude"},
@@ -56,6 +70,7 @@ func TestActiveProviderFilter_ConfirmedEmptyHidesAll(t *testing.T) {
 }
 
 func TestActiveProviderFilter_OKUsesActiveSet(t *testing.T) {
+	isolatePluginConfig(t)
 	panes := []OpenPaneSnapshot{{PaneID: "w1:p1", Agent: "claude"}}
 	got := ActiveProviderFilter(panes, true)
 	if len(got) != 1 || !got["claude"] {
@@ -64,6 +79,7 @@ func TestActiveProviderFilter_OKUsesActiveSet(t *testing.T) {
 }
 
 func TestActiveProviderSet_CaseInsensitiveAgentIDs(t *testing.T) {
+	isolatePluginConfig(t)
 	panes := []OpenPaneSnapshot{
 		{PaneID: "w1:p1", Agent: "Claude"},
 		{PaneID: "w1:p2", Agent: "OPENCODE"},
@@ -71,5 +87,28 @@ func TestActiveProviderSet_CaseInsensitiveAgentIDs(t *testing.T) {
 	got := ActiveProviderSet(panes)
 	if len(got) != 2 || !got["claude"] || !got["opencode"] {
 		t.Fatalf("got %v, want {claude, opencode}", got)
+	}
+}
+
+func TestActiveProviderSet_ClaudePaneActivatesAllConfiguredProfiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", dir)
+	toml := `
+[[claude.profiles]]
+id = "claude"
+config_dir = "` + t.TempDir() + `"
+
+[[claude.profiles]]
+id = "claude-secondary"
+config_dir = "` + t.TempDir() + `"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	panes := []OpenPaneSnapshot{{PaneID: "w1:p1", Agent: "claude"}}
+	got := ActiveProviderSet(panes)
+	if len(got) != 2 || !got["claude"] || !got["claude-secondary"] {
+		t.Fatalf("got %v, want {claude, claude-secondary}", got)
 	}
 }

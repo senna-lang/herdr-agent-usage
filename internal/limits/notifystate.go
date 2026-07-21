@@ -7,15 +7,17 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/ratelimit"
 )
 
-// NotifyProviderPrimaryLimits checks non-Claude primary windows under the shared lock.
+// NotifyProviderPrimaryLimits checks non-Claude primary windows under the
+// shared lock, excluding every configured Claude profile id.
 func NotifyProviderPrimaryLimits(providers []ProviderLimits, nowMs int64) {
+	claudeProfiles := ResolvedClaudeProfiles()
 	ratelimit.WithLockedProviderState(func(current ratelimit.ProviderNotifyStateMap) ratelimit.ProviderNotifyStateMap {
 		// convert to limits.ProviderNotifyState
 		cur := ProviderNotifyState{}
 		for k, v := range current {
 			cur[k] = v
 		}
-		next := CheckProviderPrimaryLimits(providers, cur, nowMs, herdrcliShowNotification)
+		next := CheckProviderPrimaryLimits(providers, cur, nowMs, herdrcliShowNotification, claudeProfiles)
 		out := ratelimit.ProviderNotifyStateMap{}
 		for k, v := range next {
 			out[k] = v

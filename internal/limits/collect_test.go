@@ -24,9 +24,12 @@ func TestCollectAllProviderLimits_OrderAndStubs(t *testing.T) {
 func TestCollectAllProviderLimits_WithCollectorsAndAttach(t *testing.T) {
 	cwd := "/tmp"
 	got := CollectAllProviderLimits(&cwd, 200, CollectOptions{
-		Claude: func(c *string, now int64) ProviderLimits {
-			return ProviderLimits{ProviderID: "claude", Label: "Claude", Source: "test", FetchedAtMs: now}
-		},
+		Claude: []ClaudeProfileCollector{{
+			ID: "claude", Label: "Claude",
+			Collector: func(c *string, now int64) ProviderLimits {
+				return ProviderLimits{ProviderID: "claude", Label: "Claude", Source: "test", FetchedAtMs: now}
+			},
+		}},
 		Codex: func(c *string, now int64) ProviderLimits {
 			if c == nil || *c != "/tmp" {
 				t.Fatal("cwd not passed")
@@ -88,5 +91,53 @@ func TestCollectAllProviderLimits_OnlySkipsFilteredCollectors(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ProviderID != "claude" {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestCollectAllProviderLimits_MultipleClaudeProfiles(t *testing.T) {
+	got := CollectAllProviderLimits(nil, 100, CollectOptions{
+		Claude: []ClaudeProfileCollector{
+			{ID: "claude", Label: "Claude", Collector: func(_ *string, now int64) ProviderLimits {
+				return ProviderLimits{ProviderID: "claude", Label: "Claude", Source: "test-a", FetchedAtMs: now}
+			}},
+			{ID: "claude-secondary", Label: "Claude (secondary)", Collector: func(_ *string, now int64) ProviderLimits {
+				return ProviderLimits{ProviderID: "claude-secondary", Label: "Claude (secondary)", Source: "test-b", FetchedAtMs: now}
+			}},
+		},
+		Only: map[string]bool{"claude": true, "claude-secondary": true, "codex": true, "opencode": true, "grok": true},
+	})
+	if len(got) != 5 {
+		t.Fatalf("len=%d want 5: %+v", len(got), got)
+	}
+	if got[0].ProviderID != "claude" || got[0].Source != "test-a" {
+		t.Fatalf("profile 1 = %+v", got[0])
+	}
+	if got[1].ProviderID != "claude-secondary" || got[1].Source != "test-b" {
+		t.Fatalf("profile 2 = %+v", got[1])
+	}
+	if got[2].ProviderID != "codex" {
+		t.Fatalf("codex should follow all claude profiles, got %+v", got[2])
+	}
+}
+
+func TestCollectAllProviderLimits_ClaudeProfileFilteredByOnly(t *testing.T) {
+	secondaryCalled := false
+	got := CollectAllProviderLimits(nil, 100, CollectOptions{
+		Claude: []ClaudeProfileCollector{
+			{ID: "claude", Label: "Claude", Collector: func(_ *string, now int64) ProviderLimits {
+				return ProviderLimits{ProviderID: "claude", Label: "Claude", Source: "test-a", FetchedAtMs: now}
+			}},
+			{ID: "claude-secondary", Label: "Claude (secondary)", Collector: func(_ *string, now int64) ProviderLimits {
+				secondaryCalled = true
+				return ProviderLimits{ProviderID: "claude-secondary", Label: "Claude (secondary)", Source: "test-b", FetchedAtMs: now}
+			}},
+		},
+		Only: map[string]bool{"claude": true},
+	})
+	if len(got) != 1 || got[0].ProviderID != "claude" {
+		t.Fatalf("got %+v", got)
+	}
+	if secondaryCalled {
+		t.Fatal("filtered-out profile's collector must not run")
 	}
 }
