@@ -76,6 +76,9 @@ func minutesTag(mins int) string {
 	if mins <= 360 {
 		return "5h"
 	}
+	if mins == 24*60 {
+		return "24h"
+	}
 	if mins >= 9000 && mins < 20*24*60 {
 		return "7d"
 	}
@@ -229,6 +232,96 @@ func providerHeader(p ProviderLimits, layout PanelLayout) string {
 	return name
 }
 
+// apiWindowLine renders one rolling usage row. Tokens are the base metric —
+// every harness reports them — and USD is an optional trailing column, since
+// only OpenCode prices its messages: "  24h  332k     $0.02".
+func apiWindowLine(w APIUsageWindow, withCost bool, layout PanelLayout) string {
+	tagCol := padEnd(minutesTag(w.WindowMinutes), 3)
+	tokens := formatCompactTokens(w.Tokens)
+	if !withCost {
+		return "  " + tagCol + "  " + bar.Dim(tokens, layout.Color)
+	}
+	return "  " + tagCol + "  " + bar.Dim(padEnd(tokens, 7), layout.Color) + "  " + formatCompactCost(w.CostUSD)
+}
+
+// apiModelsLine renders the per-model token breakdown, dropping models that
+// do not fit and reporting the remainder as "+N" — same budgeting as the
+// share row. Tokens rather than USD: the per-model amounts are small enough
+// that cost rounding collapses distinct models to the same "$0.02", and the
+// window rows above already carry the spend.
+func apiModelsLine(models []APIModelUsage, layout PanelLayout) string {
+	if len(models) == 0 {
+		return ""
+	}
+	labelText := "models"
+	prefix := 1 + 2 + len(labelText) + 2
+	budget := int(math.Max(8, float64(layout.Columns)-float64(prefix)-3))
+	var parts []string
+	used, shown := 0, 0
+	for _, m := range models {
+		piece := m.ModelID + " " + formatCompactTokens(m.Tokens)
+		// Measure display width, not bytes: model ids are ASCII today but the
+		// byte length would silently truncate anything wider.
+		add := plainWidth(piece)
+		if len(parts) > 0 {
+			add += 3
+		}
+		if used+add > budget && shown > 0 {
+			break
+		}
+		parts = append(parts, piece)
+		used += add
+		shown++
+	}
+	tail := ""
+	if overflow := len(models) - shown; overflow > 0 {
+		tail = fmt.Sprintf(" +%d", overflow)
+	}
+	return "  " + bar.Dim(labelText, layout.Color) + "  " + strings.Join(parts, " · ") + tail
+}
+
+// apiProviderHeader renders "DeepSeek · API".
+func apiProviderHeader(p APIProviderUsage, layout PanelLayout) string {
+	return bar.Bold(p.Label, layout.Color) + " " + bar.Dim("·", layout.Color) + " API"
+}
+
+// apiRichBlock is the full pay-as-you-go block: header, rolling windows,
+// model breakdown, and pane share.
+func apiRichBlock(p APIProviderUsage, layout PanelLayout, withExtras bool) []string {
+	lines := []string{apiProviderHeader(p, layout)}
+	for _, w := range p.Windows {
+		lines = append(lines, apiWindowLine(w, p.HasCost, layout))
+	}
+	if !withExtras {
+		return lines
+	}
+	if modelsLine := apiModelsLine(p.Models, layout); modelsLine != "" {
+		lines = append(lines, modelsLine)
+	}
+	if p.PaneActivity != nil {
+		if paneLine := paneActivityLine(*p.PaneActivity, layout); paneLine != "" {
+			lines = append(lines, paneLine)
+		}
+	}
+	return lines
+}
+
+// apiCompactLine collapses a block to one line for the tightest tier,
+// keeping tokens as the metric so every backend reads the same way.
+func apiCompactLine(p APIProviderUsage, layout PanelLayout) string {
+	line := bar.Bold(p.Label, layout.Color)
+	width := plainWidth(line) + 1
+	for _, w := range p.Windows {
+		seg := "  " + minutesTag(w.WindowMinutes) + " " + formatCompactTokens(w.Tokens)
+		if width+plainWidth(seg) > layout.Columns {
+			break
+		}
+		line += seg
+		width += plainWidth(seg)
+	}
+	return line
+}
+
 func richBlock(p ProviderLimits, layout PanelLayout, withExtras bool, nowMs int64) []string {
 	lines := []string{providerHeader(p, layout)}
 	primaryTag := windowTag(p.Primary, "5h")
@@ -302,8 +395,16 @@ func FormatProviderBlock(p ProviderLimits, layout PanelLayout, nowMs int64) stri
 	return strings.Join(richBlock(p, layout, true, nowMs), "\n")
 }
 
-// FormatLimitsPanel renders the full panel, stepping down rich -> rich-slim -> compact.
+// FormatLimitsPanel renders subscription providers only. Prefer
+// FormatUsagePanel when pay-as-you-go blocks may be present.
 func FormatLimitsPanel(providers []ProviderLimits, nowMs int64, layout PanelLayout) string {
+	return FormatUsagePanel(providers, nil, nowMs, layout)
+}
+
+// FormatUsagePanel renders the full panel — subscription blocks first, then
+// pay-as-you-go spend blocks — stepping down rich -> rich-slim -> compact.
+// Both kinds share one row budget so a short pane degrades uniformly.
+func FormatUsagePanel(providers []ProviderLimits, apiUsage []APIProviderUsage, nowMs int64, layout PanelLayout) string {
 	if layout.Columns == 0 && layout.Rows == 0 {
 		layout = defaultLayout
 	}
@@ -322,7 +423,7 @@ func FormatLimitsPanel(providers []ProviderLimits, nowMs int64, layout PanelLayo
 	footerText := fittingFooter(timeStr, layout.Columns-1)
 	footer := bar.Dim(footerText, layout.Color)
 
-	if len(providers) == 0 {
+	if len(providers) == 0 && len(apiUsage) == 0 {
 		empty := layout.EmptyMessage
 		if empty == "" {
 			empty = "(no usage data yet)"
@@ -330,9 +431,17 @@ func FormatLimitsPanel(providers []ProviderLimits, nowMs int64, layout PanelLayo
 		return strings.Join(indent([]string{"", empty, "", rule, footer, ""}), "\n")
 	}
 
+	blocks := make([]panelBlock, 0, len(providers)+len(apiUsage))
+	for _, p := range providers {
+		blocks = append(blocks, subscriptionBlock(p, layout, nowMs))
+	}
+	for _, p := range apiUsage {
+		blocks = append(blocks, apiBlock(p, layout))
+	}
+
 	chrome := 5
 	bodyBudget := int(math.Max(1, float64(layout.Rows)-float64(chrome)))
-	body := renderBody(providers, layout, bodyBudget, nowMs)
+	body := renderBody(blocks, layout, bodyBudget)
 	return strings.Join(indent([]string{"", body, "", rule, footer, ""}), "\n")
 }
 
@@ -365,23 +474,47 @@ func indent(lines []string) []string {
 	return out
 }
 
-func renderBody(providers []ProviderLimits, layout PanelLayout, bodyBudget int, nowMs int64) string {
-	type renderer func(ProviderLimits) []string
-	var tiers []renderer
+// panelBlock renders one provider entry at a given detail tier, so
+// subscription and pay-as-you-go blocks share the same row budget.
+type panelBlock struct {
+	rich     func() []string
+	richSlim func() []string
+	compact  func() []string
+}
+
+func subscriptionBlock(p ProviderLimits, layout PanelLayout, nowMs int64) panelBlock {
+	return panelBlock{
+		rich:     func() []string { return richBlock(p, layout, true, nowMs) },
+		richSlim: func() []string { return richBlock(p, layout, false, nowMs) },
+		compact:  func() []string { return []string{compactLine(p, layout)} },
+	}
+}
+
+func apiBlock(p APIProviderUsage, layout PanelLayout) panelBlock {
+	return panelBlock{
+		rich:     func() []string { return apiRichBlock(p, layout, true) },
+		richSlim: func() []string { return apiRichBlock(p, layout, false) },
+		compact:  func() []string { return []string{apiCompactLine(p, layout)} },
+	}
+}
+
+func renderBody(blocks []panelBlock, layout PanelLayout, bodyBudget int) string {
+	type tier func(panelBlock) []string
+	var tiers []tier
 	if layout.Columns >= richMinColumns {
 		tiers = append(tiers,
-			func(p ProviderLimits) []string { return richBlock(p, layout, true, nowMs) },
-			func(p ProviderLimits) []string { return richBlock(p, layout, false, nowMs) },
+			func(b panelBlock) []string { return b.rich() },
+			func(b panelBlock) []string { return b.richSlim() },
 		)
 	}
-	tiers = append(tiers, func(p ProviderLimits) []string { return []string{compactLine(p, layout)} })
+	tiers = append(tiers, func(b panelBlock) []string { return b.compact() })
 
 	for ti, render := range tiers {
-		blocks := make([][]string, len(providers))
+		rendered := make([][]string, len(blocks))
 		allSingle := true
-		for i, p := range providers {
-			blocks[i] = render(p)
-			if len(blocks[i]) != 1 {
+		for i, b := range blocks {
+			rendered[i] = render(b)
+			if len(rendered[i]) != 1 {
 				allSingle = false
 			}
 		}
@@ -390,15 +523,15 @@ func renderBody(providers []ProviderLimits, layout PanelLayout, bodyBudget int, 
 			spacer = 0
 		}
 		total := 0
-		for _, b := range blocks {
-			total += len(b)
+		for _, r := range rendered {
+			total += len(r)
 		}
-		total += int(math.Max(0, float64(len(blocks)-1))) * spacer
+		total += int(math.Max(0, float64(len(rendered)-1))) * spacer
 		last := ti == len(tiers)-1
 		if total <= bodyBudget || last {
-			parts := make([]string, len(blocks))
-			for i, b := range blocks {
-				parts[i] = strings.Join(b, "\n")
+			parts := make([]string, len(rendered))
+			for i, r := range rendered {
+				parts[i] = strings.Join(r, "\n")
 			}
 			if spacer == 1 {
 				return strings.Join(parts, "\n\n")
@@ -406,9 +539,9 @@ func renderBody(providers []ProviderLimits, layout PanelLayout, bodyBudget int, 
 			return strings.Join(parts, "\n")
 		}
 	}
-	parts := make([]string, len(providers))
-	for i, p := range providers {
-		parts[i] = compactLine(p, layout)
+	parts := make([]string, len(blocks))
+	for i, b := range blocks {
+		parts[i] = strings.Join(b.compact(), "\n")
 	}
 	return strings.Join(parts, "\n")
 }

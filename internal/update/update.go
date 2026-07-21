@@ -19,6 +19,32 @@ func isSettledStatus(status string) bool {
 	return status != "working"
 }
 
+// formatSidebarProvider renders the sidebar's agent line: the backend name on
+// a pay-as-you-go pane ("deepseek"), the harness name otherwise ("opencode").
+//
+// The backend replaces the harness rather than joining it — the sidebar is
+// too narrow for both, and on a pay-as-you-go pane the backend is the more
+// informative half (the harness is already implied by the pane's agent icon).
+// It stands in for Herdr's built-in `agent` token, which is why it must carry
+// the harness name in the subscription case.
+func formatSidebarProvider(agentName, providerID string, pane limits.OpenPaneSnapshot) string {
+	return formatSidebarProviderWith(limits.PaneBackendID, agentName, providerID, pane)
+}
+
+func formatSidebarProviderWith(
+	backendFor func(string, limits.OpenPaneSnapshot) string,
+	agentName, providerID string,
+	pane limits.OpenPaneSnapshot,
+) string {
+	if agentName == "" {
+		return ""
+	}
+	if backendID := backendFor(providerID, pane); backendID != "" {
+		return backendID
+	}
+	return agentName
+}
+
 type metadataTokenWriter struct {
 	set   func(paneID, source, name, value string) bool
 	clear func(paneID, source, name string) bool
@@ -79,16 +105,34 @@ func RunUpdate(force bool) {
 		Cwd:     cwd,
 	})
 	nowMs := time.Now().UnixMilli()
-	collectOptions := limits.DefaultCollectOptions()
-	// Sidebar refresh deliberately collects only this pane's provider and leaves
-	// Attach nil, avoiding the heavier cross-pane activity aggregation path.
-	collectOptions.Only = map[string]bool{p.AgentID(): true}
-	providerLimits := limits.CollectAllProviderLimits(cwd, nowMs, collectOptions)
 	limitText := ""
-	if len(providerLimits) > 0 {
-		limitText = limits.FormatSidebarLimit(providerLimits[0], nowMs)
+	// Subscription limits only apply when the pane's session is billed against
+	// a subscription plan; a pay-as-you-go backend (API key, custom base_url)
+	// has no plan window to report against, so the row shows the pane's
+	// whole-session token/cost total instead.
+	var sid *string
+	if pane.AgentSession != nil {
+		sid = &pane.AgentSession.Value
+	}
+	snapshot := limits.OpenPaneSnapshot{PaneID: paneID, Agent: *pane.Agent, SessionID: sid, Cwd: cwd}
+	if limits.PaneBillingMode(p.AgentID(), snapshot, limits.DefaultBillingDeps()) == limits.BillingPayAsYouGo {
+		totalTokens, totalCostUSD := limits.PaneTotalUsage(p.AgentID(), snapshot, nowMs)
+		limitText = limits.FormatSidebarBurn(totalTokens, totalCostUSD)
+	} else {
+		collectOptions := limits.DefaultCollectOptions()
+		// Sidebar refresh deliberately collects only this pane's provider and leaves
+		// Attach nil, avoiding the heavier cross-pane activity aggregation path.
+		collectOptions.Only = map[string]bool{p.AgentID(): true}
+		providerLimits := limits.CollectAllProviderLimits(cwd, nowMs, collectOptions)
+		if len(providerLimits) > 0 {
+			limitText = limits.FormatSidebarLimit(providerLimits[0], nowMs)
+		}
 	}
 	writeMetadataToken(paneID, "limit", limitText, force)
+
+	// Stands in for Herdr's `agent` token so a pay-as-you-go pane names the
+	// backend it is actually billing ("deepseek") instead of the harness.
+	writeMetadataToken(paneID, "provider", formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot), force)
 
 	if usage == nil {
 		writeMetadataToken(paneID, "context", "", force)

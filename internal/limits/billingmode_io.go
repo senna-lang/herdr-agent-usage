@@ -1,0 +1,397 @@
+/**
+ * I/O adapters for billing-mode detection: reads local harness stores
+ * (claude.json, codex rollouts, opencode.db, grok auth.json / config.toml)
+ * and feeds the pure detectors in billingmode.go.
+ */
+package limits
+
+import (
+	"database/sql"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+	_ "modernc.org/sqlite"
+)
+
+// statusLineCacheFreshMs bounds how old a statusLine rate_limits cache may be
+// to still count as subscription evidence (7 days — one full weekly window).
+const statusLineCacheFreshMs = 7 * 24 * 60 * 60 * 1000
+
+// DefaultBillingDeps returns production billing-mode resolvers.
+func DefaultBillingDeps() BillingDeps {
+	return BillingDeps{
+		PaneMode:    paneBillingModeDefault,
+		AccountMode: accountBillingModeDefault,
+	}
+}
+
+func paneBillingModeDefault(providerID string, pane OpenPaneSnapshot) BillingMode {
+	switch providerID {
+	case "opencode":
+		return opencodePaneBillingMode(pane)
+	case "codex":
+		return codexPaneBillingMode(pane)
+	case "claude":
+		return claudePaneBillingMode(pane)
+	case "grok":
+		return grokPaneBillingMode(pane)
+	default:
+		return BillingUnknown
+	}
+}
+
+func accountBillingModeDefault(providerID string) BillingMode {
+	switch providerID {
+	case "claude":
+		return claudeAccountBillingMode()
+	case "grok":
+		return grokAccountBillingMode()
+	default:
+		return BillingUnknown
+	}
+}
+
+// opencodePaneBillingMode classifies a pane by the backend its session last
+// used ("" when it cannot be resolved).
+func opencodePaneBillingMode(pane OpenPaneSnapshot) BillingMode {
+	backendID := opencodePaneBackendID(pane)
+	if backendID == "" {
+		return BillingUnknown
+	}
+	return OpenCodeBillingModeFromProviderID(&backendID)
+}
+
+// PaneBackendID returns the backend a pay-as-you-go pane is running
+// ("deepseek", "openai", "anthropic"), or "" when the pane sits on a
+// subscription plan or its backend cannot be resolved.
+func PaneBackendID(providerID string, pane OpenPaneSnapshot) string {
+	if PaneBillingMode(providerID, pane, DefaultBillingDeps()) != BillingPayAsYouGo {
+		return ""
+	}
+	return payAsYouGoBackendID(providerID, pane)
+}
+
+// payAsYouGoBackendID names the backend of an already-classified
+// pay-as-you-go pane.
+//
+// OpenCode / Codex record a per-session provider. Claude uses deployment
+// env (settings + process); Grok joins session modelId with config.toml.
+func payAsYouGoBackendID(providerID string, pane OpenPaneSnapshot) string {
+	switch providerID {
+	case "opencode":
+		backendID := opencodePaneBackendID(pane)
+		if backendID == openCodeGoBackendID {
+			return ""
+		}
+		return backendID
+	case "codex":
+		return codexPaneBackendID(pane)
+	case "claude":
+		return ResolveClaudeBackendID(claudeEnvForPane(pane))
+	case "grok":
+		return resolveGrokBackendForPane(pane)
+	default:
+		return ""
+	}
+}
+
+// claudePaneBillingMode uses deployment env evidence (Bedrock/Vertex/…).
+func claudePaneBillingMode(pane OpenPaneSnapshot) BillingMode {
+	return ClaudeBillingModeFromEnv(claudeEnvForPane(pane))
+}
+
+// grokPaneBillingMode is PayAsYouGo when the pane's model points at a
+// non-xAI base_url in config.toml.
+func grokPaneBillingMode(pane OpenPaneSnapshot) BillingMode {
+	return GrokBillingModeFromBackendID(resolveGrokBackendForPane(pane))
+}
+
+// claudeEnvForPane merges process env, user settings, and project settings
+// for the pane cwd (later layers win).
+func claudeEnvForPane(pane OpenPaneSnapshot) map[string]string {
+	var cwd string
+	if pane.Cwd != nil {
+		cwd = *pane.Cwd
+	}
+	return loadClaudeEnv(cwd)
+}
+
+func loadClaudeEnv(cwd string) map[string]string {
+	return MergeClaudeEnv(
+		claudeProcessEnv(),
+		claudeSettingsEnv(ResolveClaudeUserSettingsPath()),
+		claudeSettingsEnv(filepath.Join(cwd, ".claude", "settings.json")),
+		claudeSettingsEnv(filepath.Join(cwd, ".claude", "settings.local.json")),
+	)
+}
+
+// claudeProcessEnv copies Claude deployment-related keys from the process
+// environment (global shell exports apply to every pane).
+func claudeProcessEnv() map[string]string {
+	keys := []string{
+		"CLAUDE_CODE_USE_BEDROCK",
+		"CLAUDE_CODE_USE_VERTEX",
+		"CLAUDE_CODE_USE_FOUNDRY",
+		"CLAUDE_CODE_USE_MANTLE",
+		"ANTHROPIC_BASE_URL",
+		"ANTHROPIC_BEDROCK_BASE_URL",
+		"ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
+		"ANTHROPIC_AWS_BASE_URL",
+		"ANTHROPIC_VERTEX_BASE_URL",
+		"ANTHROPIC_FOUNDRY_BASE_URL",
+	}
+	out := map[string]string{}
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func claudeSettingsEnv(path string) map[string]string {
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return ClaudeEnvFromSettingsJSON(string(raw))
+}
+
+// ResolveClaudeUserSettingsPath returns ~/.claude/settings.json.
+func ResolveClaudeUserSettingsPath() string {
+	if v := os.Getenv("CLAUDE_CONFIG_DIR"); v != "" {
+		return filepath.Join(v, "settings.json")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "settings.json")
+}
+
+// resolveGrokBackendForPane joins the pane session's model id with config.toml.
+func resolveGrokBackendForPane(pane OpenPaneSnapshot) string {
+	modelID := grokPaneModelID(pane)
+	models, base := loadGrokModelConfig()
+	return ResolveGrokBackendID(modelID, models, base)
+}
+
+func grokPaneModelID(pane OpenPaneSnapshot) string {
+	var sid, cwd *string
+	if pane.SessionID != nil {
+		sid = pane.SessionID
+	}
+	if pane.Cwd != nil {
+		cwd = pane.Cwd
+	}
+	signals := grok.ResolveSignalsPath(sid, cwd)
+	if signals == "" {
+		return ""
+	}
+	// Prefer summary.json (cheap, authoritative current model).
+	summaryPath := strings.Replace(signals, "signals.json", "summary.json", 1)
+	if raw, err := os.ReadFile(summaryPath); err == nil {
+		if id := GrokModelIDFromSummaryJSON(string(raw)); id != "" {
+			return id
+		}
+	}
+	updatesPath := strings.Replace(signals, "signals.json", "updates.jsonl", 1)
+	raw, err := os.ReadFile(updatesPath)
+	if err != nil {
+		return ""
+	}
+	return GrokModelIDFromLines(strings.Split(string(raw), "\n"))
+}
+
+type grokConfigCache struct {
+	mu     sync.Mutex
+	path   string
+	mtime  int64
+	models map[string]GrokModelConfig
+	base   string
+}
+
+var globalGrokConfigCache grokConfigCache
+
+// loadGrokModelConfig reads and caches ~/.grok/config.toml model tables.
+func loadGrokModelConfig() (map[string]GrokModelConfig, string) {
+	path := ResolveGrokConfigPath()
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil, ""
+	}
+	mtime := st.ModTime().UnixMilli()
+	globalGrokConfigCache.mu.Lock()
+	defer globalGrokConfigCache.mu.Unlock()
+	var models map[string]GrokModelConfig
+	var base string
+	if globalGrokConfigCache.path == path && globalGrokConfigCache.mtime == mtime {
+		models, base = globalGrokConfigCache.models, globalGrokConfigCache.base
+	} else {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, ""
+		}
+		body := string(raw)
+		models = ParseGrokModelConfigs(body)
+		base = ParseGrokModelsBaseURL(body)
+		globalGrokConfigCache.path = path
+		globalGrokConfigCache.mtime = mtime
+		globalGrokConfigCache.models = models
+		globalGrokConfigCache.base = base
+	}
+	// Env override is applied after the file cache so it can change without
+	// a config.toml mtime bump.
+	if v := os.Getenv("GROK_MODELS_BASE_URL"); v != "" {
+		base = v
+	}
+	return models, base
+}
+
+// ResolveGrokConfigPath returns $GROK_HOME/config.toml or ~/.grok/config.toml.
+func ResolveGrokConfigPath() string {
+	if home := os.Getenv("GROK_HOME"); home != "" {
+		return filepath.Join(home, "config.toml")
+	}
+	h, _ := os.UserHomeDir()
+	return filepath.Join(h, ".grok", "config.toml")
+}
+
+// AccountClaudeBackendID is the settings/process-derived backend for Claude
+// when scanning account-scoped transcripts (no pane cwd).
+func AccountClaudeBackendID() string {
+	return ResolveClaudeBackendID(loadClaudeEnv(""))
+}
+
+// GrokBackendForModelID resolves a model id against the live config.toml.
+func GrokBackendForModelID(modelID string) string {
+	models, base := loadGrokModelConfig()
+	return ResolveGrokBackendID(modelID, models, base)
+}
+
+// codexPaneBackendID reads session_meta.model_provider from the pane's rollout.
+func codexPaneBackendID(pane OpenPaneSnapshot) string {
+	lines := codexPaneRolloutLines(pane)
+	if lines == nil {
+		return ""
+	}
+	return CodexProviderFromLines(lines)
+}
+
+// codexPaneRolloutLines reads the pane's rollout in full. Unlike the
+// rate-limit probe, which tail-scans for the freshest token_count,
+// session_meta sits at the head of the file.
+func codexPaneRolloutLines(pane OpenPaneSnapshot) []string {
+	var sid, cwd *string
+	if pane.SessionID != nil {
+		sid = pane.SessionID
+	}
+	if pane.Cwd != nil {
+		cwd = pane.Cwd
+	}
+	path := codex.ResolveSessionFile(sid, cwd)
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return strings.Split(string(raw), "\n")
+}
+
+// opencodePaneBackendID returns the backend providerID of the pane session's
+// most recent assistant message (by session id, else newest session in the
+// pane cwd). Empty when the DB, session, or message cannot be resolved.
+func opencodePaneBackendID(pane OpenPaneSnapshot) string {
+	dbPath := ResolveOpenCodeLimitsDBPath()
+	if _, err := os.Stat(dbPath); err != nil {
+		return ""
+	}
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
+	if err != nil {
+		return ""
+	}
+	defer db.Close()
+
+	sessionID := resolvePaneSessionID(db, pane)
+	if sessionID == "" {
+		return ""
+	}
+	var providerID string
+	if err := db.QueryRow(
+		`SELECT json_extract(data, '$.providerID') FROM message
+		 WHERE session_id = ?
+		   AND json_valid(data)
+		   AND json_extract(data, '$.role') = 'assistant'
+		   AND json_extract(data, '$.providerID') IS NOT NULL
+		 ORDER BY CAST(COALESCE(json_extract(data, '$.time.created'), time_created) AS INTEGER) DESC
+		 LIMIT 1`,
+		sessionID,
+	).Scan(&providerID); err != nil {
+		return ""
+	}
+	return providerID
+}
+
+// codexPaneBillingMode tail-scans the pane's own rollout for rate_limits.
+func codexPaneBillingMode(pane OpenPaneSnapshot) BillingMode {
+	var sid, cwd *string
+	if pane.SessionID != nil {
+		sid = pane.SessionID
+	}
+	if pane.Cwd != nil {
+		cwd = pane.Cwd
+	}
+	path := codex.ResolveSessionFile(sid, cwd)
+	if path == "" {
+		return BillingUnknown
+	}
+	lines, err := fsutil.ReadLastNLines(path, codexTailScanBytes)
+	if err != nil {
+		return BillingUnknown
+	}
+	return CodexBillingModeFromLines(lines)
+}
+
+func claudeAccountBillingMode() BillingMode {
+	raw, err := os.ReadFile(ResolveClaudeJSONPath())
+	mode := BillingUnknown
+	if err == nil {
+		mode = ClaudeBillingModeFromJSON(string(raw))
+		if mode == BillingPayAsYouGo {
+			// A fresh statusLine rate_limits cache is subscription evidence too
+			// (the utilization cache can lag behind a new subscription login).
+			nowMs := time.Now().UnixMilli()
+			if cached := collectFromStatusLineCache(nowMs, ResolveClaudeLimitsCachePath()); cached != nil {
+				if nowMs-cached.FetchedAtMs <= statusLineCacheFreshMs {
+					mode = BillingSubscription
+				}
+			}
+		}
+	}
+	// Deployment env (Bedrock/Vertex/…) is account-scoped when set in
+	// user settings or the process environment.
+	return CombineBillingModes(mode, ClaudeBillingModeFromEnv(loadClaudeEnv("")))
+}
+
+func grokAccountBillingMode() BillingMode {
+	raw, err := os.ReadFile(ResolveGrokAuthPath())
+	if err != nil {
+		return BillingUnknown
+	}
+	auth := ParseGrokAuthJSON(string(raw))
+	if auth == nil {
+		return BillingUnknown
+	}
+	return GrokBillingModeFromAuthMode(auth.AuthMode)
+}

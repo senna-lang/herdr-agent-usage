@@ -24,6 +24,7 @@ type modelEntry struct {
 }
 
 type providerEntry struct {
+	Name   string                `json:"name"`
 	Models map[string]modelEntry `json:"models"`
 }
 
@@ -100,6 +101,20 @@ func ClearModelsCatalogCache() {
 	catalogMu.Lock()
 	cached = nil
 	catalogMu.Unlock()
+}
+
+// ProviderDisplayName returns the catalog's display name for a providerID
+// ("deepseek" -> "DeepSeek"). Falls back to "" when the provider is absent
+// from the catalog, letting callers pick their own fallback.
+func ProviderDisplayName(providerID string) string {
+	if providerID == "" {
+		return ""
+	}
+	catalog := loadCatalog()
+	if catalog == nil {
+		return ""
+	}
+	return catalog[providerID].Name
 }
 
 // ContextWindowFor returns limit.context for a providerID + modelID pair.
