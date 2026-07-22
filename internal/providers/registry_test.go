@@ -6,7 +6,7 @@ package providers
 import "testing"
 
 func TestFindProvider_Registered(t *testing.T) {
-	for _, id := range []string{"claude", "codex", "grok", "opencode"} {
+	for _, id := range []string{"claude", "codex", "grok", "omp", "pi", "opencode"} {
 		p := FindProvider(id)
 		if p == nil || p.AgentID() != id {
 			t.Fatalf("%s: got %#v", id, p)

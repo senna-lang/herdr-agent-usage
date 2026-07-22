@@ -237,3 +237,107 @@ func GrokUsageRowsFromLines(lines []string) []apiUsageRow {
 	}
 	return out
 }
+
+// OMPPiUsageRowsFromLines converts an OMP / stock Pi session jsonl into
+// usage rows. Each assistant turn carries its own provider/model/cost, so
+// the panel can show backend spend with USD when the harness recorded it.
+// Timestamps are unix milliseconds on the message.
+func OMPPiUsageRowsFromLines(lines []string) []apiUsageRow {
+	var out []apiUsageRow
+	for _, line := range lines {
+		raw := strings.TrimSpace(line)
+		if raw == "" || !strings.Contains(raw, `"role"`) {
+			continue
+		}
+		var parsed struct {
+			Type    string `json:"type"`
+			Message *struct {
+				Role      string `json:"role"`
+				Provider  string `json:"provider"`
+				Model     string `json:"model"`
+				Timestamp int64  `json:"timestamp"`
+				Usage     *struct {
+					TotalTokens *float64 `json:"totalTokens"`
+					Cost        *struct {
+						Total *float64 `json:"total"`
+					} `json:"cost"`
+				} `json:"usage"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+			continue
+		}
+		if parsed.Message == nil || parsed.Message.Role != "assistant" || parsed.Message.Usage == nil {
+			continue
+		}
+		tokens := nonNeg(parsed.Message.Usage.TotalTokens)
+		if tokens <= 0 {
+			continue
+		}
+		cost := 0.0
+		if parsed.Message.Usage.Cost != nil {
+			cost = nonNeg(parsed.Message.Usage.Cost.Total)
+		}
+		out = append(out, apiUsageRow{
+			CreatedMs: parsed.Message.Timestamp,
+			ModelID:   parsed.Message.Model,
+			Tokens:    tokens,
+			CostUSD:   cost,
+		})
+	}
+	return out
+}
+
+// OMPPiUsageRowsByBackendFromLines is like OMPPiUsageRowsFromLines, but
+// groups rows by the assistant message's provider id ("deepseek", "cursor").
+func OMPPiUsageRowsByBackendFromLines(lines []string) map[string][]apiUsageRow {
+	out := make(map[string][]apiUsageRow)
+	for _, line := range lines {
+		raw := strings.TrimSpace(line)
+		if raw == "" || !strings.Contains(raw, `"role"`) {
+			continue
+		}
+		var parsed struct {
+			Message *struct {
+				Role      string `json:"role"`
+				Provider  string `json:"provider"`
+				Model     string `json:"model"`
+				Timestamp int64  `json:"timestamp"`
+				Usage     *struct {
+					TotalTokens *float64 `json:"totalTokens"`
+					Cost        *struct {
+						Total *float64 `json:"total"`
+					} `json:"cost"`
+				} `json:"usage"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+			continue
+		}
+		if parsed.Message == nil || parsed.Message.Role != "assistant" || parsed.Message.Usage == nil {
+			continue
+		}
+		backendID := strings.TrimSpace(parsed.Message.Provider)
+		if backendID == "" {
+			continue
+		}
+		tokens := nonNeg(parsed.Message.Usage.TotalTokens)
+		if tokens <= 0 {
+			continue
+		}
+		cost := 0.0
+		if parsed.Message.Usage.Cost != nil {
+			cost = nonNeg(parsed.Message.Usage.Cost.Total)
+		}
+		out[backendID] = append(out[backendID], apiUsageRow{
+			CreatedMs: parsed.Message.Timestamp,
+			ModelID:   parsed.Message.Model,
+			Tokens:    tokens,
+			CostUSD:   cost,
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}

@@ -14,7 +14,7 @@ Monitor context usage and provider rate limits for agents running in [Herdr](htt
 - **Provider limit row** — a separate sidebar row shows the shortest account-limit window (`5h 72%`) without crowding the context meter.
 - **Account rate-limit windows at a glance** — one live pane shows how much 5h / 7d / 30d allowance is left for Claude, Codex, OpenCode Go, and Grok, with reset countdowns and which open pane is burning it.
 - **Low-allowance warnings** — optional toasts fire when a window drops below your thresholds (default 50 / 20 / 10 / 5 % left), before you hit the wall mid-task.
-- **Pay-as-you-go API backends** — when a pane runs a direct API key instead of a subscription, there's no plan quota to show. Works with **any** provider a harness can reach (DeepSeek, OpenAI, Together, OpenRouter, Ollama, Bedrock, Vertex, a custom gateway, …), not just the one the screenshot happens to show. Detected across all four harnesses from what each records locally: OpenCode's per-message `providerID`, Codex's `model_provider`, Claude's deployment env (Bedrock / Vertex / Foundry / gateway), and Grok custom models (`~/.grok/config.toml` `[model.*]` `base_url`). The sidebar then names the backend and totals what that pane spent on it (e.g. `deepseek` with `Σ 425k $0.04`), and the Agent Usage pane adds a per-backend block with rolling 24h / 7d / 30d totals for that provider, a per-model breakdown, and which open pane is spending it. Dollar cost is shown when the harness records it (OpenCode today); otherwise the block is token-only.
+- **Pay-as-you-go API backends** — when a pane runs a direct API key instead of a subscription, there's no plan quota to show. Works with **any** provider a harness can reach (DeepSeek, OpenAI, Together, OpenRouter, Ollama, Bedrock, Vertex, a custom gateway, …), not just the one the screenshot happens to show. Detected across supported harnesses from what each records locally: OpenCode's per-message `providerID`, Codex's `model_provider`, Claude's deployment env (Bedrock / Vertex / Foundry / gateway), Grok custom models (`~/.grok/config.toml` `[model.*]` `base_url`), and OMP / Pi assistant `message.provider`. The sidebar then names the backend and totals what that pane spent on it (e.g. `deepseek` with `Σ 425k $0.04`), and the Agent Usage pane adds a per-backend block with rolling 24h / 7d / 30d totals for that provider, a per-model breakdown, and which open pane is spending it. Dollar cost is shown when the harness records it (OpenCode, OMP, and Pi today); otherwise the block is token-only.
 
 ## Requirements
 
@@ -25,6 +25,8 @@ Monitor context usage and provider rate limits for agents running in [Herdr](htt
 ```bash
 herdr integration install codex
 herdr integration install opencode
+herdr integration install omp
+herdr integration install pi
 # Claude Code integration recommended when you use Claude panes
 ```
 
@@ -117,6 +119,8 @@ herdr plugin action invoke usagebar.setup
 | Codex | Yes | Yes | Context + rate windows from local rollouts; custom `model_provider` panes are pay-as-you-go |
 | OpenCode Go | Yes | Yes | Prefer official web usage when `OPENCODE_GO_COOKIE` is set; else local SQLite. Non-`opencode-go` backends (e.g. DeepSeek) show token/cost spend instead of plan windows |
 | Grok | Yes | Yes | Context from `signals.json`; SuperGrok credits when auth is present. Custom models (`~/.grok/config.toml` `[model.*]` with `base_url`) are pay-as-you-go and labelled from the endpoint host (openai, ollama, …) |
+| OMP (Oh My Pi) | Yes | Yes | Session jsonl under `~/.omp/agent/sessions/`; always pay-as-you-go. Sidebar burn + pane API blocks use assistant `usage.totalTokens` / `usage.cost.total`, grouped by `message.provider` |
+| Pi coding agent | Yes | Yes | Session jsonl under `~/.pi/agent/sessions/`; same pay-as-you-go path as OMP (shared extractors) |
 
 Percentages in the limits pane are **remaining** (`% left`). Higher is safer.
 
@@ -243,11 +247,13 @@ Everything is computed from files that the agents already keep on your machine:
 | Codex | rollout files under `~/.codex/sessions/` |
 | OpenCode Go | `~/.local/share/opencode/opencode.db` |
 | Grok | `~/.grok/sessions/**/signals.json`, `~/.grok/auth.json` (credentials for the credits fetch), `~/.grok/config.toml` (custom-model base URLs) |
+| OMP | `~/.omp/agent/sessions/**/*.jsonl`, `~/.omp/agent/models.db` (context window lookup) |
+| Pi coding agent | `~/.pi/agent/sessions/**/*.jsonl`, `~/.pi/agent/models.db` when present |
 
 Pay-as-you-go detection is not tied to any one harness: it reads the same
 per-harness files above (the backend a session used is already recorded there —
 OpenCode's `providerID`, Codex's `model_provider`, Claude's deployment env,
-Grok's `config.toml`). No extra data sources, no network calls.
+Grok's `config.toml`, OMP/Pi `message.provider`). No extra data sources, no network calls.
 
 Network requests happen in the following cases:
 

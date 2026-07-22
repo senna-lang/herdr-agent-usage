@@ -9,6 +9,7 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 )
 
@@ -17,6 +18,8 @@ var All = []provider.UsageProvider{
 	claude.Provider,
 	codex.Provider,
 	grok.Provider,
+	omp.Provider,
+	omp.PiProvider,
 	opencode.Provider,
 }
 

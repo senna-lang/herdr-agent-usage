@@ -16,6 +16,7 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
 	_ "modernc.org/sqlite"
 )
 
@@ -35,6 +36,9 @@ func paneBillingModeDefault(providerID string, pane OpenPaneSnapshot) BillingMod
 	switch providerID {
 	case "opencode":
 		return opencodePaneBillingMode(pane)
+	case "omp", "pi":
+		// OMP / stock Pi sessions are API-key / Cursor-backed; no subscription quota windows.
+		return BillingPayAsYouGo
 	case "codex":
 		return codexPaneBillingMode(pane)
 	case "claude":
@@ -90,6 +94,10 @@ func payAsYouGoBackendID(providerID string, pane OpenPaneSnapshot) string {
 			return ""
 		}
 		return backendID
+	case "omp":
+		return ompPaneBackendID(pane)
+	case "pi":
+		return piPaneBackendID(pane)
 	case "codex":
 		return codexPaneBackendID(pane)
 	case "claude":
@@ -394,4 +402,50 @@ func grokAccountBillingMode() BillingMode {
 		return BillingUnknown
 	}
 	return GrokBillingModeFromAuthMode(auth.AuthMode)
+}
+
+// ompPaneBackendID returns the latest assistant provider id from the OMP
+// session jsonl path carried on the pane snapshot.
+func ompPaneBackendID(pane OpenPaneSnapshot) string {
+	path := ompSessionPath(pane)
+	if path == "" {
+		return ""
+	}
+	return omp.BackendIDForPath(path)
+}
+
+// ompSessionPath resolves the OMP jsonl path from SessionID, else newest cwd session.
+func ompSessionPath(pane OpenPaneSnapshot) string {
+	if pane.SessionID != nil {
+		if path := omp.SessionPathFromSnapshotValue(*pane.SessionID); path != "" {
+			return path
+		}
+	}
+	if pane.Cwd != nil {
+		return omp.FindLatestOMPSessionForCwd(*pane.Cwd)
+	}
+	return ""
+}
+
+// piSessionPath resolves the stock Pi jsonl path from SessionID, else newest cwd session.
+func piSessionPath(pane OpenPaneSnapshot) string {
+	if pane.SessionID != nil {
+		if path := omp.SessionPathFromSnapshotValue(*pane.SessionID); path != "" {
+			return path
+		}
+	}
+	if pane.Cwd != nil {
+		return omp.FindLatestPiSessionForCwd(*pane.Cwd)
+	}
+	return ""
+}
+
+// piPaneBackendID returns the latest assistant provider id from the Pi
+// session jsonl path carried on the pane snapshot.
+func piPaneBackendID(pane OpenPaneSnapshot) string {
+	path := piSessionPath(pane)
+	if path == "" {
+		return ""
+	}
+	return omp.BackendIDForPath(path)
 }

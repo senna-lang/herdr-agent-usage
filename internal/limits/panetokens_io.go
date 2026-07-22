@@ -13,6 +13,7 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
 	_ "modernc.org/sqlite"
 )
 
@@ -35,6 +36,12 @@ func TokensForPaneDefault(providerID string, pane OpenPaneSnapshot, startMs, end
 		return codexTokensForPane(pane, startMs, endMs)
 	case "opencode":
 		return opencodeTokensForPane(pane, "opencode-go", startMs, endMs)
+	case "omp":
+		tokens, _ := ompActivityForPane(pane, startMs, endMs)
+		return tokens
+	case "pi":
+		tokens, _ := piActivityForPane(pane, startMs, endMs)
+		return tokens
 	case "grok":
 		return grokTokensForPane(pane, startMs, endMs)
 	default:
@@ -58,6 +65,12 @@ func PaneTotalUsage(providerID string, pane OpenPaneSnapshot, nowMs int64) (toke
 	if providerID == "opencode" {
 		backendID := payAsYouGoBackendID(providerID, pane)
 		return opencodeActivityForPane(pane, backendID, 0, nowMs)
+	}
+	if providerID == "omp" {
+		return ompActivityForPane(pane, 0, nowMs)
+	}
+	if providerID == "pi" {
+		return piActivityForPane(pane, 0, nowMs)
 	}
 	return TokensForPaneAnyBackend(providerID, pane, 0, nowMs), 0
 }
@@ -347,4 +360,20 @@ func grokTotal(startMs, endMs int64) float64 {
 // CollectAndAttachPaneActivity attaches activity using DefaultPaneActivityDeps.
 func CollectAndAttachPaneActivity(providers []ProviderLimits, openPanes []OpenPaneSnapshot, nowMs int64) []ProviderLimits {
 	return AttachPaneActivity(providers, openPanes, nowMs, DefaultPaneActivityDeps())
+}
+
+func ompActivityForPane(pane OpenPaneSnapshot, startMs, endMs int64) (tokens float64, costUSD float64) {
+	path := ompSessionPath(pane)
+	if path == "" {
+		return 0, 0
+	}
+	return omp.ActivityForPath(path, startMs, endMs)
+}
+
+func piActivityForPane(pane OpenPaneSnapshot, startMs, endMs int64) (tokens float64, costUSD float64) {
+	path := piSessionPath(pane)
+	if path == "" {
+		return 0, 0
+	}
+	return omp.ActivityForPath(path, startMs, endMs)
 }
