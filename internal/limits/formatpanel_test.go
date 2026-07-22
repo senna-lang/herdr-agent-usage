@@ -222,3 +222,83 @@ func TestFormatLimitsPanel_RowBudget(t *testing.T) {
 		t.Fatalf("too many lines: %d", len(strings.Split(text, "\n")))
 	}
 }
+
+func TestFormatProviderBlock_Note(t *testing.T) {
+	p := sampleProvider()
+	note := "stale ~45m ago"
+	p.Note = &note
+	text := FormatProviderBlock(p, wide, 1_700_000_000_000)
+	if !strings.Contains(text, "stale ~45m ago") {
+		t.Fatalf("note not rendered:\n%s", text)
+	}
+}
+
+func TestFormatProviderBlock_NoteTruncatesToFitWidth(t *testing.T) {
+	narrow := PanelLayout{Columns: 20, Rows: 9999, Color: false}
+	note := "a very long note that does not fit in a narrow pane at all"
+	line := noteLine(&note, narrow)
+	if utf8.RuneCountInString(line) > narrow.Columns+1 {
+		t.Fatalf("note line exceeds width budget: %q", line)
+	}
+	if !strings.Contains(line, "…") {
+		t.Fatalf("expected truncation ellipsis: %q", line)
+	}
+}
+
+func TestFormatProviderBlock_NoNoteWhenAbsent(t *testing.T) {
+	text := FormatProviderBlock(sampleProvider(), wide, 1_700_000_000_000)
+	if strings.Contains(text, "…") {
+		t.Fatalf("unexpected truncation with no note:\n%s", text)
+	}
+}
+
+func claudeProfileSample(accountEmail string, usedPct float64) ProviderLimits {
+	r1, r2 := int64(2_000_000_000), int64(2_000_500_000)
+	wm1, wm2 := 300, 10080
+	plan := "Pro"
+	return ProviderLimits{
+		ProviderID:   "claude-" + accountEmail,
+		Label:        "claude-" + accountEmail,
+		AccountLabel: accountEmail,
+		GroupLabel:   "Claude",
+		Primary:      &LimitWindow{UsedPercentage: usedPct, ResetsAt: &r1, WindowMinutes: &wm1},
+		Secondary:    &LimitWindow{UsedPercentage: usedPct, ResetsAt: &r2, WindowMinutes: &wm2},
+		PlanType:     &plan,
+		Source:       "claude.json cachedUsageUtilization",
+		FetchedAtMs:  1_700_000_000_000,
+	}
+}
+
+func TestFormatUsagePanel_GroupsMultipleClaudeProfilesUnderSharedHeading(t *testing.T) {
+	providers := []ProviderLimits{
+		claudeProfileSample("you@example.com", 12),
+		claudeProfileSample("colleague@example.com", 32),
+	}
+	text := FormatLimitsPanel(providers, 1_700_000_000_000, wide)
+	if !strings.Contains(text, "Claude\n") && !strings.Contains(text, "Claude ") {
+		t.Fatalf("expected a single shared Claude heading:\n%s", text)
+	}
+	for _, want := range []string{"you@example.com · Pro", "colleague@example.com · Pro"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing account line %q:\n%s", want, text)
+		}
+	}
+	// Only one "Claude" heading, not one per account.
+	if strings.Count(text, "Claude") != 1 {
+		t.Fatalf("want exactly one Claude heading, got %d:\n%s", strings.Count(text, "Claude"), text)
+	}
+}
+
+func TestFormatUsagePanel_SingleClaudeProfileNotGrouped(t *testing.T) {
+	p := claudeProfileSample("you@example.com", 12)
+	p.GroupLabel = ""
+	p.AccountLabel = ""
+	p.Label = "Claude"
+	text := FormatLimitsPanel([]ProviderLimits{p}, 1_700_000_000_000, wide)
+	if !strings.Contains(text, "Claude · Pro") {
+		t.Fatalf("expected ungrouped single profile to keep its own header:\n%s", text)
+	}
+	if strings.Contains(text, "you@example.com") {
+		t.Fatalf("single profile should not show an account email line:\n%s", text)
+	}
+}

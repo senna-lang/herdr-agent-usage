@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/senna-lang/herdr-agent-usage/internal/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/herdrcli"
 	"github.com/senna-lang/herdr-agent-usage/internal/limits"
 	"github.com/senna-lang/herdr-agent-usage/internal/ratelimit"
@@ -439,8 +440,23 @@ func runStatusLine() {
 	}
 	stdinJSON := string(data)
 	nowMs := time.Now().UnixMilli()
-	if rateLimits := ratelimit.ParseRateLimits(stdinJSON); rateLimits != nil {
-		// Persist rate_limits so the limits pane can show Claude windows.
+
+	// Route this statusLine invocation to the profile matching its own
+	// CLAUDE_CONFIG_DIR. The statusLine runs inside the Claude process, so the
+	// env var is present and identifies the account unambiguously.
+	env := environment()
+	profiles := setup.ResolveClaudeProfiles(env)
+	profile, known := claude.ResolveActiveProfile(profiles, env["CLAUDE_CONFIG_DIR"])
+	if !known {
+		// Profiles are configured but none match this CLAUDE_CONFIG_DIR: skip all
+		// writes and notifications rather than misattribute the account. Still
+		// print the summary so the Claude status line renders.
+		printStatusLineSummary(stdinJSON)
+		return
+	}
+
+	rateLimits := ratelimit.ParseRateLimits(stdinJSON)
+	if rateLimits != nil {
 		input := limits.RateLimitsInput{}
 		if rateLimits.FiveHour != nil {
 			input.FiveHour = &struct {
@@ -454,18 +470,34 @@ func runStatusLine() {
 				ResetsAt       int64
 			}{rateLimits.SevenDay.UsedPercentage, rateLimits.SevenDay.ResetsAt}
 		}
-		if err := limits.WriteClaudeLimitsCache(input, nowMs, ""); err != nil {
+		// Empty-payload guard lives in WriteClaudeLimitsCacheGuarded so `{}`
+		// cannot clobber a valid cache.
+		if _, err := limits.WriteClaudeLimitsCacheGuarded(input, nowMs, profile.LimitsCache); err != nil {
 			fmt.Fprintf(os.Stderr, "[usagebar-rate] cache write failed: %v\n", err)
 		}
 	}
+
+	// Prefix non-default profile toasts with the profile label so two accounts'
+	// alerts are distinguishable.
+	notify := herdrcli.ShowNotification
+	if !claude.IsDefaultProfile(profile) {
+		label := profile.Label
+		inner := notify
+		notify = func(title, body string) bool { return inner(label+": "+title, body) }
+	}
+
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
 				fmt.Fprintf(os.Stderr, "[usagebar-rate] check failed: %v\n", r)
 			}
 		}()
-		ratelimit.RunRateLimitCheck(stdinJSON, nowMs, herdrcli.ShowNotification)
+		ratelimit.RunRateLimitCheckIn(profile.StateDir, stdinJSON, nowMs, notify)
 	}()
+	printStatusLineSummary(stdinJSON)
+}
+
+func printStatusLineSummary(stdinJSON string) {
 	summary := ratelimit.FormatStatusLineSummary(ratelimit.ParseRateLimits(stdinJSON))
 	if summary != "" {
 		fmt.Println(summary)

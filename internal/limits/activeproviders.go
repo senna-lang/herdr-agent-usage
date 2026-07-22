@@ -20,11 +20,26 @@ func ActiveProviderFilter(openPanes []OpenPaneSnapshot, paneQueryOK bool) map[st
 // ActiveProviderSet returns the provider ids that have at least one open
 // pane. Agent ids match case-insensitively; unknown agents are ignored.
 // The result is never nil: an empty set means "no agent panes open".
+//
+// A Claude pane (any account) activates every configured Claude profile id —
+// not just the one that pane happens to belong to — so the panel can show all
+// configured accounts side by side for comparison, per the issue's request.
 func ActiveProviderSet(openPanes []OpenPaneSnapshot) map[string]bool {
 	set := make(map[string]bool)
+	hasClaudePane := false
 	for _, pane := range openPanes {
-		if providerID, ok := agentToProvider[strings.ToLower(pane.Agent)]; ok {
+		agent := strings.ToLower(pane.Agent)
+		if agent == "claude" {
+			hasClaudePane = true
+			continue
+		}
+		if providerID, ok := agentToProvider[agent]; ok {
 			set[providerID] = true
+		}
+	}
+	if hasClaudePane {
+		for _, p := range ResolvedClaudeProfiles() {
+			set[p.ID] = true
 		}
 	}
 	return set

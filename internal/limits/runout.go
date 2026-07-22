@@ -133,18 +133,11 @@ func EnrichRunOut(
 
 	nextProviders := make([]ProviderLimits, len(providers))
 	for i, p := range providers {
-		nextProviders[i] = ProviderLimits{
-			ProviderID:   p.ProviderID,
-			Label:        p.Label,
-			Primary:      withRunOut(p.ProviderID, kindPrimary, p.Primary),
-			Secondary:    withRunOut(p.ProviderID, kindSecondary, p.Secondary),
-			Tertiary:     withRunOut(p.ProviderID, kindTertiary, p.Tertiary),
-			PlanType:     p.PlanType,
-			Source:       p.Source,
-			FetchedAtMs:  p.FetchedAtMs,
-			Note:         p.Note,
-			PaneActivity: p.PaneActivity,
-		}
+		next := p
+		next.Primary = withRunOut(p.ProviderID, kindPrimary, p.Primary)
+		next.Secondary = withRunOut(p.ProviderID, kindSecondary, p.Secondary)
+		next.Tertiary = withRunOut(p.ProviderID, kindTertiary, p.Tertiary)
+		nextProviders[i] = next
 	}
 
 	return EnrichRunOutResult{Providers: nextProviders, History: history}

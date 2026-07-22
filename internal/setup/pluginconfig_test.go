@@ -34,6 +34,43 @@ remaining_thresholds = [30, 10]
 	}
 }
 
+func TestParsePluginConfigTOML_ClaudeProfiles(t *testing.T) {
+	cfg := ParsePluginConfigTOML(`
+[[claude.profiles]]
+id = "claude"
+label = "Claude"
+config_dir = "/home/u/.claude"
+claude_json_path = "/home/u/.claude.json"
+
+[[claude.profiles]]
+id = "claude-secondary"
+label = "Claude (secondary)"
+config_dir = "/home/u/.claude-m"
+`)
+	if len(cfg.ClaudeProfiles) != 2 {
+		t.Fatalf("want 2 profiles, got %d", len(cfg.ClaudeProfiles))
+	}
+	p0 := cfg.ClaudeProfiles[0]
+	if p0.ID != "claude" || p0.ConfigDir != "/home/u/.claude" || p0.JSONPath != "/home/u/.claude.json" {
+		t.Fatalf("p0 = %+v", p0)
+	}
+	p1 := cfg.ClaudeProfiles[1]
+	if p1.ID != "claude-secondary" || p1.Label != "Claude (secondary)" || p1.ConfigDir != "/home/u/.claude-m" {
+		t.Fatalf("p1 = %+v", p1)
+	}
+	// notify defaults still apply when [notify] is absent.
+	if !cfg.NotifyEnabled {
+		t.Fatal("expected notify default enabled")
+	}
+}
+
+func TestParsePluginConfigTOML_NoProfilesByDefault(t *testing.T) {
+	cfg := ParsePluginConfigTOML(DefaultPluginConfigTOML(DefaultPluginConfig))
+	if len(cfg.ClaudeProfiles) != 0 {
+		t.Fatalf("seed must not define active profiles, got %+v", cfg.ClaudeProfiles)
+	}
+}
+
 func TestSeedPluginConfigIfMissing(t *testing.T) {
 	dir := t.TempDir()
 	if !SeedPluginConfigIfMissing(dir) {

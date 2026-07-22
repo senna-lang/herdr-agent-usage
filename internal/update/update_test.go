@@ -4,8 +4,10 @@
 package update
 
 import (
+	"os"
 	"testing"
 
+	"github.com/senna-lang/herdr-agent-usage/internal/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/limits"
 )
 
@@ -100,5 +102,63 @@ func TestFormatSidebarProviderWith_EmptyAgentRendersNothing(t *testing.T) {
 	}
 	if got := formatSidebarProviderWith(backendFor, "", "opencode", limits.OpenPaneSnapshot{}); got != "" {
 		t.Fatalf("got %q want empty", got)
+	}
+}
+
+func TestResolveSidebarAccountLabel_PrefersEmailOverLabel(t *testing.T) {
+	dir := t.TempDir()
+	jsonPath := dir + "/.claude.json"
+	if err := os.WriteFile(jsonPath, []byte(`{"oauthAccount":{"emailAddress":"you@example.com"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	profile := claude.ClaudeProfile{ID: "claude", Label: "My Work Account", JSONPath: jsonPath}
+	if got := resolveSidebarAccountLabel(profile); got != "you@example.com" {
+		t.Fatalf("got %q want email", got)
+	}
+}
+
+func TestResolveSidebarAccountLabel_FallsBackToLabelWithoutEmail(t *testing.T) {
+	profile := claude.ClaudeProfile{ID: "claude-secondary", Label: "claude-secondary", JSONPath: t.TempDir() + "/missing.json"}
+	if got := resolveSidebarAccountLabel(profile); got != "claude-secondary" {
+		t.Fatalf("got %q want label fallback", got)
+	}
+}
+
+func TestCombineLimitAndContext(t *testing.T) {
+	cases := []struct{ limitText, statusText, want string }{
+		{"5h 88%", "⛁ 14% (136k)", "5h 88% · ⛁ 14% (136k)"},
+		{"", "⛁ 14% (136k)", "⛁ 14% (136k)"},
+		{"5h 88%", "", "5h 88%"},
+		{"", "", ""},
+	}
+	for _, c := range cases {
+		if got := combineLimitAndContext(c.limitText, c.statusText); got != c.want {
+			t.Fatalf("combineLimitAndContext(%q, %q) = %q, want %q", c.limitText, c.statusText, got, c.want)
+		}
+	}
+}
+
+func TestReserveColumnsFor(t *testing.T) {
+	base := 20
+	got := reserveColumnsFor(&base, "you@example.com")
+	if got == nil {
+		t.Fatal("want non-nil budget")
+	}
+	// 20 - (15 for the email + 3 for " · ") = 2, floored to 3.
+	if *got != 3 {
+		t.Fatalf("got %d want 3 (floored)", *got)
+	}
+
+	wide := 60
+	got = reserveColumnsFor(&wide, "you@example.com")
+	if *got != 60-len("you@example.com")-3 {
+		t.Fatalf("got %d want %d", *got, 60-len("you@example.com")-3)
+	}
+
+	if got := reserveColumnsFor(nil, "you@example.com"); got != nil {
+		t.Fatal("nil budget must stay nil")
+	}
+	if got := reserveColumnsFor(&wide, ""); *got != wide {
+		t.Fatal("empty prefix must not shrink the budget")
 	}
 }

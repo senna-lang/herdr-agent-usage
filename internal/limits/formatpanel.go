@@ -224,6 +224,22 @@ func paneActivityLine(activity ProviderPaneActivity, layout PanelLayout) string 
 	return "  " + label + "  " + strings.Join(parts, " · ") + tail
 }
 
+// noteLine renders p.Note (stale-cache warnings, account identity, spend
+// summaries, …), truncated to fit the pane width. Empty when there is no
+// note — callers only append it when non-empty.
+func noteLine(note *string, layout PanelLayout) string {
+	if note == nil || *note == "" {
+		return ""
+	}
+	text := *note
+	budget := max(layout.Columns-3, 8) // "  " prefix + 1 margin
+	if utf8.RuneCountInString(text) > budget {
+		runes := []rune(text)
+		text = string(runes[:budget-1]) + "…"
+	}
+	return "  " + bar.Dim(text, layout.Color)
+}
+
 func providerHeader(p ProviderLimits, layout PanelLayout) string {
 	name := bar.Bold(p.Label, layout.Color)
 	if p.PlanType != nil {
@@ -355,6 +371,11 @@ func richBlock(p ProviderLimits, layout PanelLayout, withExtras bool, nowMs int6
 			lines = append(lines, paneLine)
 		}
 	}
+	if withExtras {
+		if note := noteLine(p.Note, layout); note != "" {
+			lines = append(lines, note)
+		}
+	}
 	return lines
 }
 
@@ -432,9 +453,7 @@ func FormatUsagePanel(providers []ProviderLimits, apiUsage []APIProviderUsage, n
 	}
 
 	blocks := make([]panelBlock, 0, len(providers)+len(apiUsage))
-	for _, p := range providers {
-		blocks = append(blocks, subscriptionBlock(p, layout, nowMs))
-	}
+	blocks = append(blocks, buildProviderBlocks(providers, layout, nowMs)...)
 	for _, p := range apiUsage {
 		blocks = append(blocks, apiBlock(p, layout))
 	}
@@ -488,6 +507,83 @@ func subscriptionBlock(p ProviderLimits, layout PanelLayout, nowMs int64) panelB
 		richSlim: func() []string { return richBlock(p, layout, false, nowMs) },
 		compact:  func() []string { return []string{compactLine(p, layout)} },
 	}
+}
+
+// buildProviderBlocks turns each contiguous run of 2+ providers sharing the
+// same non-empty GroupLabel (e.g. multiple configured Claude accounts) into
+// one nested groupedSubscriptionBlock; every other provider keeps its normal
+// standalone subscriptionBlock. Groups are expected to be contiguous, which
+// holds for how CollectAllProviderLimits orders configured Claude profiles.
+func buildProviderBlocks(providers []ProviderLimits, layout PanelLayout, nowMs int64) []panelBlock {
+	blocks := make([]panelBlock, 0, len(providers))
+	for i := 0; i < len(providers); {
+		label := providers[i].GroupLabel
+		j := i + 1
+		if label != "" {
+			for j < len(providers) && providers[j].GroupLabel == label {
+				j++
+			}
+		}
+		if label != "" && j-i >= 2 {
+			blocks = append(blocks, groupedSubscriptionBlock(label, providers[i:j], layout, nowMs))
+		} else {
+			blocks = append(blocks, subscriptionBlock(providers[i], layout, nowMs))
+			j = i + 1
+		}
+		i = j
+	}
+	return blocks
+}
+
+// groupedSubscriptionBlock renders a shared heading (e.g. "Claude") followed
+// by each member indented two spaces, using AccountLabel in place of Label so
+// the members stay distinguishable under the one heading.
+func groupedSubscriptionBlock(label string, members []ProviderLimits, layout PanelLayout, nowMs int64) panelBlock {
+	inner := layout
+	inner.Columns = max(layout.Columns-2, richMinColumns)
+
+	memberWithAccountLabel := func(m ProviderLimits) ProviderLimits {
+		if m.AccountLabel != "" {
+			m.Label = m.AccountLabel
+		}
+		return m
+	}
+
+	render := func(withExtras bool) []string {
+		lines := []string{bar.Bold(label, layout.Color)}
+		for i, m := range members {
+			if i > 0 {
+				lines = append(lines, "")
+			}
+			sub := richBlock(memberWithAccountLabel(m), inner, withExtras, nowMs)
+			lines = append(lines, indentLines(sub, "  ")...)
+		}
+		return lines
+	}
+
+	return panelBlock{
+		rich:     func() []string { return render(true) },
+		richSlim: func() []string { return render(false) },
+		compact: func() []string {
+			lines := []string{bar.Bold(label, layout.Color)}
+			for _, m := range members {
+				lines = append(lines, "  "+compactLine(memberWithAccountLabel(m), inner))
+			}
+			return lines
+		},
+	}
+}
+
+func indentLines(lines []string, prefix string) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		if l == "" {
+			out[i] = l
+			continue
+		}
+		out[i] = prefix + l
+	}
+	return out
 }
 
 func apiBlock(p APIProviderUsage, layout PanelLayout) panelBlock {

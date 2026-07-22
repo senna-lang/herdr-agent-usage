@@ -26,10 +26,9 @@ func projectsRoot() string {
 	return filepath.Join(home, ".claude", "projects")
 }
 
-// findSessionFile scans project directories for {sessionId}.jsonl.
+// findSessionFileIn scans root's project directories for {sessionId}.jsonl.
 // The project directory name (encoded cwd) is lossy; UUIDs are globally unique.
-func findSessionFile(sessionID string) string {
-	root := projectsRoot()
+func findSessionFileIn(root, sessionID string) string {
 	if root == "" {
 		return ""
 	}
@@ -50,12 +49,20 @@ func findSessionFile(sessionID string) string {
 	return ""
 }
 
-// ResolveTranscriptPathForSession returns the transcript jsonl path, or empty when not found.
+// ResolveTranscriptPathForSession returns the transcript jsonl path under the
+// default projects root, or empty when not found.
 func ResolveTranscriptPathForSession(sessionID string) string {
+	return ResolveTranscriptPathForSessionIn(projectsRoot(), sessionID)
+}
+
+// ResolveTranscriptPathForSessionIn is ResolveTranscriptPathForSession scoped
+// to an explicit projects root, so a multi-profile caller can search one
+// profile's root without touching global env state.
+func ResolveTranscriptPathForSessionIn(root, sessionID string) string {
 	if sessionID == "" {
 		return ""
 	}
-	return findSessionFile(sessionID)
+	return findSessionFileIn(root, sessionID)
 }
 
 func totalTokensOf(usage TranscriptUsage) int {
@@ -116,9 +123,16 @@ func intOrZero(n *float64) int {
 	return int(*n)
 }
 
-// ResolveUsageForSession resolves the latest usage for a session ID.
+// ResolveUsageForSession resolves the latest usage for a session ID under the
+// default projects root.
 func ResolveUsageForSession(sessionID string) *TranscriptUsage {
-	path := findSessionFile(sessionID)
+	return ResolveUsageForSessionIn(projectsRoot(), sessionID)
+}
+
+// ResolveUsageForSessionIn is ResolveUsageForSession scoped to an explicit
+// projects root.
+func ResolveUsageForSessionIn(root, sessionID string) *TranscriptUsage {
+	path := findSessionFileIn(root, sessionID)
 	if path == "" {
 		return nil
 	}
@@ -127,4 +141,22 @@ func ResolveUsageForSession(sessionID string) *TranscriptUsage {
 		return nil
 	}
 	return ExtractLatestUsageFromLines(lines)
+}
+
+// ResolveProfileForSession scans each profile's ProjectsRoot for the session's
+// transcript file. Session UUIDs are globally unique, so at most one profile
+// should match; returns ok=false when none do (never guesses).
+func ResolveProfileForSession(sessionID string, roots map[string]string) (providerID string, ok bool) {
+	if sessionID == "" {
+		return "", false
+	}
+	for id, root := range roots {
+		if root == "" {
+			continue
+		}
+		if findSessionFileIn(root, sessionID) != "" {
+			return id, true
+		}
+	}
+	return "", false
 }
