@@ -31,6 +31,43 @@ func isSettledStatus(status string) bool {
 	return status != "working"
 }
 
+// resolveSidebarAccountLabel picks the text that identifies profile in the
+// sidebar's $limit slot once it has been displaced by the account row: the
+// real login email when readable, otherwise the profile's own label (which
+// defaults to its id, never empty).
+func resolveSidebarAccountLabel(profile claude.ClaudeProfile) string {
+	if email, ok := limits.AccountEmailFromJSONPath(profile.JSONPath); ok {
+		return email
+	}
+	return profile.Label
+}
+
+// reserveColumnsFor shrinks a MaxColumns budget to leave room for a fixed
+// "<prefix> · " segment that combineLimitAndContext will join onto the
+// context text, so FormatUsageStatus's own truncation still accounts for it.
+func reserveColumnsFor(maxColumns *int, prefix string) *int {
+	if maxColumns == nil || prefix == "" {
+		return maxColumns
+	}
+	reserved := core.DisplayWidth(prefix) + 3 // " · "
+	adjusted := max(*maxColumns-reserved, 3)
+	return &adjusted
+}
+
+// combineLimitAndContext joins the account's limit text with its context
+// status ("5h 88% · ⛁ 14% (136k)") for the sidebar's $context row, once a
+// multi-profile Claude pane has moved account identity into $limit's row and
+// this is the only row left to carry the limit percentage.
+func combineLimitAndContext(limitText, statusText string) string {
+	if limitText == "" {
+		return statusText
+	}
+	if statusText == "" {
+		return limitText
+	}
+	return limitText + " · " + statusText
+}
+
 // formatSidebarProvider renders the sidebar's agent line: the backend name on
 // a pay-as-you-go pane ("deepseek"), the harness name otherwise ("opencode").
 //
@@ -152,7 +189,24 @@ func RunUpdate(force bool) {
 			limitText = limits.FormatSidebarLimit(providerLimits[0], nowMs)
 		}
 	}
-	writeMetadataToken(paneID, "limit", limitText, force)
+
+	// With 2+ configured Claude accounts, the $limit row's job shifts from
+	// "show the limit" to "show which account this pane is" (joined with
+	// $provider as "claude · you@example.com") since that's otherwise
+	// invisible in the sidebar. The limit percentage moves down into
+	// $context instead, as this pane's own account is already unambiguous.
+	multiProfile := *pane.Agent == "claude" && len(claudeProfiles) > 1
+	accountText := ""
+	limitToken := limitText
+	if multiProfile {
+		if profile, ok := findClaudeProfile(claudeProfiles, providerID); ok {
+			accountText = resolveSidebarAccountLabel(profile)
+		}
+		if accountText != "" {
+			limitToken = accountText
+		}
+	}
+	writeMetadataToken(paneID, "limit", limitToken, force)
 
 	// Stands in for Herdr's `agent` token so a pay-as-you-go pane names the
 	// backend it is actually billing ("deepseek") instead of the harness.
@@ -176,14 +230,20 @@ func RunUpdate(force bool) {
 		})
 	}
 
+	contextPrefix := ""
+	if accountText != "" {
+		contextPrefix = limitText
+	}
+
 	if usage == nil {
-		writeMetadataToken(paneID, "context", "", force)
+		writeMetadataToken(paneID, "context", contextPrefix, force)
 		return
 	}
 
 	liveWidth := herdrcli.GetSidebarWidthColumns(paneID)
 	sidebarW := core.ResolveSidebarWidth(liveWidth, core.ResolveConfigSidebarWidth())
 	maxCols := core.EstimateStatusMaxColumns(&sidebarW, pane.RowLabel)
+	maxCols = reserveColumnsFor(maxCols, contextPrefix)
 	statusText := core.FormatUsageStatus(*usage, core.FormatUsageOptions{MaxColumns: maxCols})
-	writeMetadataToken(paneID, "context", statusText, force)
+	writeMetadataToken(paneID, "context", combineLimitAndContext(contextPrefix, statusText), force)
 }

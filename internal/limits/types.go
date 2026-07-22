@@ -42,6 +42,15 @@ type ProviderLimits struct {
 	Note        *string
 	// PaneActivity is per-pane token activity share over the smallest window.
 	PaneActivity *ProviderPaneActivity
+	// GroupLabel nests this entry under one shared heading in the panel
+	// (e.g. multiple configured Claude accounts under "Claude") instead of
+	// its own top-level block. Only takes effect when 2+ entries share the
+	// same non-empty GroupLabel; a lone entry renders as if it were empty.
+	GroupLabel string
+	// AccountLabel is shown in place of Label for the per-account line inside
+	// a group (e.g. the account's real login email), so members sharing one
+	// GroupLabel stay distinguishable. Ignored outside a group.
+	AccountLabel string
 }
 
 // ProviderPaneActivity is windowed per-pane activity for one provider.

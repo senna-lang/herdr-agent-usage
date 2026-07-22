@@ -192,3 +192,34 @@ func TestIsDefaultProfile(t *testing.T) {
 		t.Fatal("custom profile is not default")
 	}
 }
+
+func TestResolveProfiles_DefaultDirProfileUsesSiblingJSONPath(t *testing.T) {
+	// Re-declaring the real default account (config_dir == ~/.claude) as an
+	// explicit profile, alongside other accounts, must still resolve its
+	// .claude.json to the sibling ~/.claude.json -- Claude Code never writes
+	// that file inside ~/.claude/ itself.
+	home := "/home/u"
+	specs := []ProfileSpec{
+		{ID: "claude", ConfigDir: filepath.Join(home, ".claude")},
+		{ID: "claude-secondary", ConfigDir: "/other/dir"},
+	}
+	profiles := ResolveProfiles(specs, map[string]string{}, home)
+	if profiles[0].JSONPath != filepath.Join(home, ".claude.json") {
+		t.Fatalf("default-dir profile jsonPath = %q, want sibling ~/.claude.json", profiles[0].JSONPath)
+	}
+	// A genuinely separate config dir still defaults to <config_dir>/.claude.json.
+	if profiles[1].JSONPath != filepath.Join("/other/dir", ".claude.json") {
+		t.Fatalf("separate-dir profile jsonPath = %q", profiles[1].JSONPath)
+	}
+}
+
+func TestResolveProfiles_ExplicitJSONPathOverridesDefaultDirHeuristic(t *testing.T) {
+	home := "/home/u"
+	specs := []ProfileSpec{
+		{ID: "claude", ConfigDir: filepath.Join(home, ".claude"), JSONPath: "/custom/path.json"},
+	}
+	p := ResolveProfiles(specs, map[string]string{}, home)[0]
+	if p.JSONPath != "/custom/path.json" {
+		t.Fatalf("explicit claude_json_path must win, got %q", p.JSONPath)
+	}
+}

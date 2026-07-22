@@ -87,12 +87,29 @@ func synthesizeDefaultProfile(env map[string]string, home string) ClaudeProfile 
 	}
 }
 
+// defaultJSONPathFor returns the default .claude.json path for configDir.
+//
+// Claude Code does not relocate .claude.json under CLAUDE_CONFIG_DIR — it
+// always lives at the fixed sibling path ~/.claude.json regardless of which
+// config dir is active, unless the user separately sets CLAUDE_CONFIG_JSON.
+// So a profile whose config_dir happens to equal the real default (~/.claude,
+// e.g. when re-declaring the default account alongside additional accounts,
+// as the multi-profile config example does) must default its JSONPath to
+// that same sibling file, not <config_dir>/.claude.json — the naive pattern
+// that holds for any other, genuinely separate config dir.
+func defaultJSONPathFor(configDir, home string) string {
+	if configDir == filepath.Join(home, ".claude") {
+		return filepath.Join(home, ".claude.json")
+	}
+	return filepath.Join(configDir, ".claude.json")
+}
+
 // resolveSpec builds a concrete profile from one config entry. Env path
 // overrides are deliberately ignored in multi-profile mode: a single global
 // override cannot be attributed to one of several profiles.
-func resolveSpec(spec ProfileSpec) ClaudeProfile {
+func resolveSpec(spec ProfileSpec, home string) ClaudeProfile {
 	label := firstNonEmpty(spec.Label, spec.ID)
-	jsonPath := firstNonEmpty(spec.JSONPath, filepath.Join(spec.ConfigDir, ".claude.json"))
+	jsonPath := firstNonEmpty(spec.JSONPath, defaultJSONPathFor(spec.ConfigDir, home))
 	return ClaudeProfile{
 		ID:           spec.ID,
 		Label:        label,
@@ -126,7 +143,7 @@ func ResolveProfiles(specs []ProfileSpec, env map[string]string, home string) []
 		}
 		seenID[spec.ID] = true
 		seenDir[spec.ConfigDir] = true
-		out = append(out, resolveSpec(spec))
+		out = append(out, resolveSpec(spec, home))
 	}
 	if len(out) == 0 {
 		return []ClaudeProfile{synthesizeDefaultProfile(env, home)}

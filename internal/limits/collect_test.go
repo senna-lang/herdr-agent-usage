@@ -3,7 +3,11 @@
  */
 package limits
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestCollectAllProviderLimits_OrderAndStubs(t *testing.T) {
 	got := CollectAllProviderLimits(nil, 100, CollectOptions{})
@@ -139,5 +143,79 @@ func TestCollectAllProviderLimits_ClaudeProfileFilteredByOnly(t *testing.T) {
 	}
 	if secondaryCalled {
 		t.Fatal("filtered-out profile's collector must not run")
+	}
+}
+
+func TestDefaultCollectOptions_MultiProfileGroupsEveryProfileUnderClaude(t *testing.T) {
+	pluginConfigDir := t.TempDir()
+	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", pluginConfigDir)
+	dirLabeled := t.TempDir()
+	dirUnlabeled := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dirLabeled, ".claude.json"),
+		[]byte(`{"oauthAccount":{"emailAddress":"primary@example.com"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dirUnlabeled, ".claude.json"),
+		[]byte(`{"oauthAccount":{"emailAddress":"secondary@example.com"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toml := "[[claude.profiles]]\n" +
+		"id = \"claude\"\n" +
+		"label = \"My Work Account\"\n" +
+		"config_dir = \"" + dirLabeled + "\"\n\n" +
+		"[[claude.profiles]]\n" +
+		"id = \"claude-secondary\"\n" +
+		"config_dir = \"" + dirUnlabeled + "\"\n"
+	if err := os.WriteFile(filepath.Join(pluginConfigDir, "config.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := DefaultCollectOptions()
+	if len(opts.Claude) != 2 {
+		t.Fatalf("want 2 claude collectors, got %d", len(opts.Claude))
+	}
+	// The explicit label must be preserved as Label; AccountLabel carries the
+	// real email so the panel can show it instead once grouped.
+	if opts.Claude[0].Label != "My Work Account" {
+		t.Fatalf("explicit label must be preserved, got %q", opts.Claude[0].Label)
+	}
+	got0 := opts.Claude[0].Collector(nil, 0)
+	if got0.GroupLabel != "Claude" {
+		t.Fatalf("labeled profile should be grouped under Claude, got %q", got0.GroupLabel)
+	}
+	if got0.AccountLabel != "primary@example.com" {
+		t.Fatalf("labeled profile should still resolve AccountLabel from its email, got %q", got0.AccountLabel)
+	}
+	// The unlabeled profile keeps its id as Label, plus the same grouping.
+	if opts.Claude[1].Label != "claude-secondary" {
+		t.Fatalf("unlabeled profile label should default to id, got %q", opts.Claude[1].Label)
+	}
+	got1 := opts.Claude[1].Collector(nil, 0)
+	if got1.GroupLabel != "Claude" {
+		t.Fatalf("unlabeled profile should be grouped under Claude, got %q", got1.GroupLabel)
+	}
+	if got1.AccountLabel != "secondary@example.com" {
+		t.Fatalf("unlabeled profile should resolve AccountLabel from its email, got %q", got1.AccountLabel)
+	}
+}
+
+func TestDefaultCollectOptions_SingleProfileNotGrouped(t *testing.T) {
+	pluginConfigDir := t.TempDir()
+	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", pluginConfigDir)
+	// Isolate from the real machine's ~/.claude.json (age/content varies by
+	// machine and would otherwise make this test's Note assertion flaky).
+	t.Setenv("HOME", t.TempDir())
+	// No [[claude.profiles]] configured -> single synthesized default; grouping
+	// only kicks in once there are 2+ profiles to disambiguate.
+	opts := DefaultCollectOptions()
+	if len(opts.Claude) != 1 {
+		t.Fatalf("want 1 (default) claude collector, got %d", len(opts.Claude))
+	}
+	got := opts.Claude[0].Collector(nil, 0)
+	if got.GroupLabel != "" {
+		t.Fatalf("single-profile mode should not set GroupLabel, got %q", got.GroupLabel)
+	}
+	if got.AccountLabel != "" {
+		t.Fatalf("single-profile mode should not set AccountLabel, got %q", got.AccountLabel)
 	}
 }

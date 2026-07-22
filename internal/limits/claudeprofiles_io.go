@@ -37,3 +37,21 @@ func claudeProfileByID(id string) (claude.ClaudeProfile, bool) {
 	}
 	return claude.ClaudeProfile{}, false
 }
+
+// applyProfileGrouping nests pl under the shared "Claude" heading when
+// multiProfile is true, so 2+ configured accounts render as one group instead
+// of N separate top-level blocks. AccountLabel carries p's real logged-in
+// email so the nested row stays distinguishable even when the profile has no
+// explicit label; it falls back to pl.Label when the email can't be read.
+func applyProfileGrouping(pl ProviderLimits, p claude.ClaudeProfile, multiProfile bool) ProviderLimits {
+	if !multiProfile {
+		return pl
+	}
+	pl.GroupLabel = "Claude"
+	if email, ok := AccountEmailFromJSONPath(p.JSONPath); ok {
+		pl.AccountLabel = email
+	} else {
+		pl.AccountLabel = pl.Label
+	}
+	return pl
+}

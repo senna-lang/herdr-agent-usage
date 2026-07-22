@@ -38,6 +38,7 @@ type CollectOptions struct {
 // Claude collector per configured profile (see ResolvedClaudeProfiles).
 func DefaultCollectOptions() CollectOptions {
 	profiles := ResolvedClaudeProfiles()
+	multiProfile := len(profiles) > 1
 	claudeCollectors := make([]ClaudeProfileCollector, len(profiles))
 	for i, p := range profiles {
 		claudeCollectors[i] = ClaudeProfileCollector{
@@ -50,7 +51,11 @@ func DefaultCollectOptions() CollectOptions {
 				})
 				pl.ProviderID = p.ID
 				pl.Label = p.Label
-				return pl
+				// When 2+ accounts are configured, every row nests under one
+				// shared "Claude" group in the panel, labeled by its real
+				// logged-in email rather than the profile's own label — so
+				// the account behind each row is always verifiable.
+				return applyProfileGrouping(pl, p, multiProfile)
 			},
 		}
 	}
