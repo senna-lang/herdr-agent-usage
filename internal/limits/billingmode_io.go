@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/senna-lang/herdr-agent-usage/internal/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
@@ -23,7 +24,10 @@ import (
 // to still count as subscription evidence (7 days — one full weekly window).
 const statusLineCacheFreshMs = 7 * 24 * 60 * 60 * 1000
 
-// DefaultBillingDeps returns production billing-mode resolvers.
+// DefaultBillingDeps returns production billing-mode resolvers. It resolves the
+// profile snapshot once and shares it across both mode closures and the id
+// list, so a BillingProviderFilter pass agrees on one profile set instead of
+// re-resolving config/env per pane.
 func DefaultBillingDeps() BillingDeps {
 	profiles := ResolvedClaudeProfiles()
 	ids := make([]string, len(profiles))
@@ -31,19 +35,23 @@ func DefaultBillingDeps() BillingDeps {
 		ids[i] = p.ID
 	}
 	return BillingDeps{
-		PaneMode:         paneBillingModeDefault,
-		AccountMode:      accountBillingModeDefault,
+		PaneMode: func(providerID string, pane OpenPaneSnapshot) BillingMode {
+			return paneBillingModeWith(profiles, providerID, pane)
+		},
+		AccountMode: func(providerID string) BillingMode {
+			return accountBillingModeWith(profiles, providerID)
+		},
 		ClaudeProfileIDs: ids,
 	}
 }
 
-// paneBillingModeDefault dispatches by provider id. Claude-family ids (any
-// configured profile, not just the literal "claude") resolve via that
-// profile's own ConfigDir rather than the ambient CLAUDE_CONFIG_DIR — the read
-// side (panel/sidebar) never sees that env var, so per-profile billing
-// detection must thread the resolved profile's paths explicitly.
-func paneBillingModeDefault(providerID string, pane OpenPaneSnapshot) BillingMode {
-	if profile, ok := claudeProfileByID(providerID); ok {
+// paneBillingModeWith dispatches by provider id against an explicit profile
+// snapshot. Claude-family ids (any configured profile, not just the literal
+// "claude") resolve via that profile's own ConfigDir rather than the ambient
+// CLAUDE_CONFIG_DIR — the read side (panel/sidebar) never sees that env var, so
+// per-profile billing detection must thread the resolved profile's paths.
+func paneBillingModeWith(profiles []claude.ClaudeProfile, providerID string, pane OpenPaneSnapshot) BillingMode {
+	if profile, ok := profileByIDIn(profiles, providerID); ok {
 		return claudePaneBillingModeIn(profile.ConfigDir, pane)
 	}
 	switch providerID {
@@ -58,8 +66,8 @@ func paneBillingModeDefault(providerID string, pane OpenPaneSnapshot) BillingMod
 	}
 }
 
-func accountBillingModeDefault(providerID string) BillingMode {
-	if profile, ok := claudeProfileByID(providerID); ok {
+func accountBillingModeWith(profiles []claude.ClaudeProfile, providerID string) BillingMode {
+	if profile, ok := profileByIDIn(profiles, providerID); ok {
 		return claudeAccountBillingModeIn(profile.JSONPath, profile.LimitsCache, profile.ConfigDir)
 	}
 	switch providerID {

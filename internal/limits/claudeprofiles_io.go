@@ -28,14 +28,23 @@ func ResolvedClaudeProfiles() []claude.ClaudeProfile {
 	return setup.ResolveClaudeProfiles(processEnvMap())
 }
 
-// claudeProfileByID looks up one resolved profile by provider id.
-func claudeProfileByID(id string) (claude.ClaudeProfile, bool) {
-	for _, p := range ResolvedClaudeProfiles() {
+// profileByIDIn looks up one profile by provider id within an already-resolved
+// snapshot, so a caller that resolved the profiles once (e.g. per
+// AttachPaneActivity pass) can dispatch without re-reading config/env per hit.
+func profileByIDIn(profiles []claude.ClaudeProfile, id string) (claude.ClaudeProfile, bool) {
+	for _, p := range profiles {
 		if p.ID == id {
 			return p, true
 		}
 	}
 	return claude.ClaudeProfile{}, false
+}
+
+// claudeProfileByID looks up one resolved profile by provider id, resolving the
+// snapshot fresh. Used by non-hot direct callers; hot loops instead capture one
+// snapshot and dispatch via profileByIDIn.
+func claudeProfileByID(id string) (claude.ClaudeProfile, bool) {
+	return profileByIDIn(ResolvedClaudeProfiles(), id)
 }
 
 // applyProfileGrouping nests pl under the shared "Claude" heading when

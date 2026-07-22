@@ -21,10 +21,19 @@ import (
 // resolve Claude panes by profile (session-transcript match) when more than
 // one Claude profile is configured.
 func DefaultPaneActivityDeps() PaneActivityDeps {
+	// Resolve the profile snapshot once and share it across all three deps, so
+	// the whole AttachPaneActivity pass agrees on one profile set instead of
+	// the resolver and the token/total dispatch each re-resolving (which could
+	// also skew if config changed mid-pass).
+	profiles := ResolvedClaudeProfiles()
 	return PaneActivityDeps{
-		TokensForPane:          TokensForPaneDefault,
-		TotalTokensForProvider: TotalTokensForProviderDefault,
-		ResolvePaneProvider:    BuildClaudePaneProviderResolver(ResolvedClaudeProfiles()),
+		TokensForPane: func(providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+			return tokensForPaneWith(profiles, providerID, pane, startMs, endMs)
+		},
+		TotalTokensForProvider: func(providerID string, startMs, endMs int64) float64 {
+			return totalTokensForProviderWith(profiles, providerID, startMs, endMs)
+		},
+		ResolvePaneProvider: BuildClaudePaneProviderResolver(profiles),
 	}
 }
 
@@ -68,7 +77,14 @@ func BuildClaudePaneProviderResolver(profiles []claude.ClaudeProfile) PaneProvid
 // "claude"), so Claude is dispatched by profile lookup rather than a switch
 // case: each profile's tokens are read from only its own transcript root.
 func TokensForPaneDefault(providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
-	if profile, ok := claudeProfileByID(providerID); ok {
+	return tokensForPaneWith(ResolvedClaudeProfiles(), providerID, pane, startMs, endMs)
+}
+
+// tokensForPaneWith is TokensForPaneDefault dispatched against an explicit
+// profile snapshot (see DefaultPaneActivityDeps): Claude ids resolve their
+// transcript root from profiles, other agents via the static switch.
+func tokensForPaneWith(profiles []claude.ClaudeProfile, providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+	if profile, ok := profileByIDIn(profiles, providerID); ok {
 		return claudeTokensForPaneIn(profile.ProjectsRoot, pane, startMs, endMs)
 	}
 	switch providerID {
@@ -117,7 +133,13 @@ func TokensForPaneAnyBackend(providerID string, pane OpenPaneSnapshot, startMs, 
 // disk. Claude profile ids are dispatched by lookup (see TokensForPaneDefault)
 // so each profile's total is scanned from only its own transcript root.
 func TotalTokensForProviderDefault(providerID string, startMs, endMs int64) float64 {
-	if profile, ok := claudeProfileByID(providerID); ok {
+	return totalTokensForProviderWith(ResolvedClaudeProfiles(), providerID, startMs, endMs)
+}
+
+// totalTokensForProviderWith is TotalTokensForProviderDefault dispatched against
+// an explicit profile snapshot (see DefaultPaneActivityDeps).
+func totalTokensForProviderWith(profiles []claude.ClaudeProfile, providerID string, startMs, endMs int64) float64 {
+	if profile, ok := profileByIDIn(profiles, providerID); ok {
 		return claudeTotalIn(profile.ProjectsRoot, startMs, endMs)
 	}
 	switch providerID {
