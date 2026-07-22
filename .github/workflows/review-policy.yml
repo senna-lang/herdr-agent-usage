@@ -1,0 +1,101 @@
+# Enforces the repository's conditional review policy: PRs opened by the
+# maintainer may merge without an approval; all other PRs need one current
+# approval from a collaborator with write access.
+name: Review policy
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  review-policy:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v8
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const maintainer = "senna-lang";
+
+            if (pr.user.login === maintainer) {
+              core.notice("Maintainer-authored PR: approval is not required.");
+              return;
+            }
+
+            const reviews = await github.paginate(
+              github.rest.pulls.listReviews,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+                per_page: 100,
+              },
+            );
+
+            // Only each reviewer's latest review applies. An approval for an
+            // older commit is not sufficient after the PR changes.
+            const latestByReviewer = new Map();
+            for (const review of reviews) {
+              if (!review.user || review.user.login === pr.user.login) {
+                continue;
+              }
+              const previous = latestByReviewer.get(review.user.login);
+              if (
+                !previous ||
+                new Date(review.submitted_at || 0) >=
+                  new Date(previous.submitted_at || 0)
+              ) {
+                latestByReviewer.set(review.user.login, review);
+              }
+            }
+
+            const currentReviews = [];
+            for (const [login, review] of latestByReviewer) {
+              if (review.commit_id !== pr.head.sha) {
+                continue;
+              }
+              const { data: permission } =
+                await github.rest.repos.getCollaboratorPermissionLevel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  username: login,
+                });
+              if (["admin", "maintain", "write"].includes(permission.permission)) {
+                currentReviews.push(review);
+              }
+            }
+
+            const changeRequests = currentReviews.filter(
+              (review) => review.state === "CHANGES_REQUESTED",
+            );
+            if (changeRequests.length > 0) {
+              core.setFailed(
+                `Changes requested by ${changeRequests
+                  .map((review) => review.user.login)
+                  .join(", ")} must be resolved, dismissed, or approved.`,
+              );
+              return;
+            }
+
+            const approvals = currentReviews.filter(
+              (review) => review.state === "APPROVED",
+            );
+            if (approvals.length === 0) {
+              core.setFailed(
+                "This external PR needs one approval from a collaborator with write access.",
+              );
+              return;
+            }
+
+            core.notice(
+              `Review requirement met by ${approvals
+                .map((review) => review.user.login)
+                .join(", ")}.`,
+            );
