@@ -109,5 +109,9 @@ func ActivityForPath(path string, startMs, endMs int64) (tokens float64, costUSD
 			lines = append(lines, line)
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		// Fail closed: a truncated scan would undercount silently.
+		return 0, 0
+	}
 	return SumUsageFromLines(lines, startMs, endMs)
 }

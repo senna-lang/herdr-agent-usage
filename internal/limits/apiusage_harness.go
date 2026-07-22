@@ -270,6 +270,9 @@ func OMPPiUsageRowsFromLines(lines []string) []apiUsageRow {
 		if parsed.Message == nil || parsed.Message.Role != "assistant" || parsed.Message.Usage == nil {
 			continue
 		}
+		if parsed.Message.Timestamp <= 0 {
+			continue
+		}
 		tokens := nonNeg(parsed.Message.Usage.TotalTokens)
 		if tokens <= 0 {
 			continue
@@ -315,6 +318,9 @@ func OMPPiUsageRowsByBackendFromLines(lines []string) map[string][]apiUsageRow {
 			continue
 		}
 		if parsed.Message == nil || parsed.Message.Role != "assistant" || parsed.Message.Usage == nil {
+			continue
+		}
+		if parsed.Message.Timestamp <= 0 {
 			continue
 		}
 		backendID := strings.TrimSpace(parsed.Message.Provider)
