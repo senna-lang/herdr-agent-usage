@@ -263,6 +263,10 @@ No telemetry, no analytics, or usage/session data is sent. State written by the 
 - **Herdr core config is not rewritten on install.** Use `usagebar.setup` / `usagebar.enable-toast` or edit by hand.
 - **macOS / Linux** only.
 
+## Contributing
+
+Bug fixes and documentation improvements are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) before starting a larger change.
+
 ## License
 
 [MIT](LICENSE)
