@@ -97,5 +97,5 @@ jobs:
             core.notice(
               `Review requirement met by ${approvals
                 .map((review) => review.user.login)
-                .join(", ")}.",
+                .join(", ")}.`,
             );
