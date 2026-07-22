@@ -11,3 +11,14 @@ linters:
         - (*database/sql.Rows).Close
         - fmt.Fprint
         - golang.org/x/term.Restore
+  exclusions:
+    rules:
+      # staticcheck as bundled in golangci-lint (version: latest) does not model
+      # (*testing.T).Fatal as terminating, so `if p == nil { t.Fatal(...) }`
+      # guards before a deref trip SA5011 (possible nil dereference). Standalone
+      # staticcheck reports these as clean, so they are false positives; a nil
+      # deref in a test just fails the test anyway. Keep SA5011 live in
+      # production code, where it catches real bugs.
+      - path: '_test\.go'
+        linters: [staticcheck]
+        text: 'SA5011'
