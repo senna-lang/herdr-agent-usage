@@ -35,6 +35,7 @@ func TestParseGrokWebBillingResponse(t *testing.T) {
 	snap := ParseGrokWebBillingResponse(data, nowMs)
 	if snap == nil {
 		t.Fatal("expected snapshot")
+		return
 	}
 	if snap.UsedPercent != 55 {
 		t.Fatalf("usedPercent=%v want 55", snap.UsedPercent)

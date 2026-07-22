@@ -97,6 +97,7 @@ func TestElapsedAverageRatePerMin_FrontLoadedOneDayOfSeven(t *testing.T) {
 	rate := ElapsedAverageRatePerMin(w, runNow, LongWindowMinElapsedMin)
 	if rate == nil {
 		t.Fatal("expected rate")
+		return
 	}
 	want := 60.0 / float64(day)
 	if math.Abs(*rate-want) > 1e-8 {
@@ -116,6 +117,7 @@ func TestElapsedAverageRatePerMin_ClampsUpToMinElapsed(t *testing.T) {
 	rate := ElapsedAverageRatePerMin(w, runNow, LongWindowMinElapsedMin)
 	if rate == nil {
 		t.Fatal("expected rate")
+		return
 	}
 	want := 10.0 / float64(LongWindowMinElapsedMin)
 	if math.Abs(*rate-want) > 1e-8 {
