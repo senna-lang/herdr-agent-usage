@@ -10,28 +10,85 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/claude"
+	claudeprovider "github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
 	_ "modernc.org/sqlite"
 )
 
-// DefaultPaneActivityDeps returns production token collectors.
+// DefaultPaneActivityDeps returns production token collectors, wired to
+// resolve Claude panes by profile (session-transcript match) when more than
+// one Claude profile is configured.
 func DefaultPaneActivityDeps() PaneActivityDeps {
+	// Resolve the profile snapshot once and share it across all three deps, so
+	// the whole AttachPaneActivity pass agrees on one profile set instead of
+	// the resolver and the token/total dispatch each re-resolving (which could
+	// also skew if config changed mid-pass).
+	profiles := ResolvedClaudeProfiles()
 	return PaneActivityDeps{
-		TokensForPane:          TokensForPaneDefault,
-		TotalTokensForProvider: TotalTokensForProviderDefault,
+		TokensForPane: func(providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+			return tokensForPaneWith(profiles, providerID, pane, startMs, endMs)
+		},
+		TotalTokensForProvider: func(providerID string, startMs, endMs int64) float64 {
+			return totalTokensForProviderWith(profiles, providerID, startMs, endMs)
+		},
+		ResolvePaneProvider: BuildClaudePaneProviderResolver(profiles),
+	}
+}
+
+// BuildClaudePaneProviderResolver attributes Claude panes to the specific
+// configured profile matching their session transcript, and other agents via
+// the static agentToProvider map.
+//
+// A single Claude profile (whether the synthesized default or one explicitly
+// configured profile, which need not be id "claude") short-circuits to that
+// profile's id directly rather than session matching — same cost as today,
+// but correct even when the lone profile has a custom id.
+func BuildClaudePaneProviderResolver(profiles []claude.ClaudeProfile) PaneProviderResolver {
+	if len(profiles) == 1 {
+		soleID := profiles[0].ID
+		return func(pane OpenPaneSnapshot) (string, bool) {
+			if pane.Agent == "claude" {
+				return soleID, true
+			}
+			id, ok := agentToProvider[pane.Agent]
+			return id, ok
+		}
+	}
+	roots := make(map[string]string, len(profiles))
+	for _, p := range profiles {
+		roots[p.ID] = p.ProjectsRoot
+	}
+	return func(pane OpenPaneSnapshot) (string, bool) {
+		if pane.Agent != "claude" {
+			id, ok := agentToProvider[pane.Agent]
+			return id, ok
+		}
+		return claudeprovider.ResolveProfileForSession(sessionIDStr(pane), roots)
 	}
 }
 
 // TokensForPaneDefault sums windowed tokens for one open pane, counting only
 // subscription-billed traffic (opencode-go for OpenCode): it feeds the plan
 // budget share under a provider's limits.
+//
+// providerID may be any configured Claude profile id (not just the literal
+// "claude"), so Claude is dispatched by profile lookup rather than a switch
+// case: each profile's tokens are read from only its own transcript root.
 func TokensForPaneDefault(providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+	return tokensForPaneWith(ResolvedClaudeProfiles(), providerID, pane, startMs, endMs)
+}
+
+// tokensForPaneWith is TokensForPaneDefault dispatched against an explicit
+// profile snapshot (see DefaultPaneActivityDeps): Claude ids resolve their
+// transcript root from profiles, other agents via the static switch.
+func tokensForPaneWith(profiles []claude.ClaudeProfile, providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+	if profile, ok := profileByIDIn(profiles, providerID); ok {
+		return claudeTokensForPaneIn(profile.ProjectsRoot, pane, startMs, endMs)
+	}
 	switch providerID {
-	case "claude":
-		return claudeTokensForPane(pane, startMs, endMs)
 	case "codex":
 		return codexTokensForPane(pane, startMs, endMs)
 	case "opencode":
@@ -85,11 +142,20 @@ func TokensForPaneAnyBackend(providerID string, pane OpenPaneSnapshot, startMs, 
 	return TokensForPaneDefault(providerID, pane, startMs, endMs)
 }
 
-// TotalTokensForProviderDefault sums windowed tokens across all sessions on disk.
+// TotalTokensForProviderDefault sums windowed tokens across all sessions on
+// disk. Claude profile ids are dispatched by lookup (see TokensForPaneDefault)
+// so each profile's total is scanned from only its own transcript root.
 func TotalTokensForProviderDefault(providerID string, startMs, endMs int64) float64 {
+	return totalTokensForProviderWith(ResolvedClaudeProfiles(), providerID, startMs, endMs)
+}
+
+// totalTokensForProviderWith is TotalTokensForProviderDefault dispatched against
+// an explicit profile snapshot (see DefaultPaneActivityDeps).
+func totalTokensForProviderWith(profiles []claude.ClaudeProfile, providerID string, startMs, endMs int64) float64 {
+	if profile, ok := profileByIDIn(profiles, providerID); ok {
+		return claudeTotalIn(profile.ProjectsRoot, startMs, endMs)
+	}
 	switch providerID {
-	case "claude":
-		return claudeTotal(startMs, endMs)
 	case "codex":
 		return codexTotal(startMs, endMs)
 	case "opencode":
@@ -115,12 +181,15 @@ func cwdStr(pane OpenPaneSnapshot) string {
 	return *pane.Cwd
 }
 
-func claudeTokensForPane(pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+// claudeTokensForPaneIn sums one pane's windowed tokens from an explicit
+// projects root, so a pane's tokens are read from only its resolved profile's
+// root (see claudeProfileByID dispatch in TokensForPaneDefault).
+func claudeTokensForPaneIn(root string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
 	sid := sessionIDStr(pane)
 	if sid == "" {
 		return 0
 	}
-	path := claude.ResolveTranscriptPathForSession(sid)
+	path := claudeprovider.ResolveTranscriptPathForSessionIn(root, sid)
 	if path == "" {
 		return 0
 	}
@@ -271,8 +340,10 @@ func claudeProjectsRoot() string {
 	return filepath.Join(home, ".claude", "projects")
 }
 
-func claudeTotal(startMs, endMs int64) float64 {
-	root := claudeProjectsRoot()
+// claudeTotalIn sums windowed tokens across all sessions under an explicit
+// projects root, so each Claude profile's activity total is scanned from only
+// its own root (see claudeProfileByID dispatch in TotalTokensForProviderDefault).
+func claudeTotalIn(root string, startMs, endMs int64) float64 {
 	var sum float64
 	for _, dir := range listDirSafe(root) {
 		dirPath := filepath.Join(root, dir)

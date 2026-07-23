@@ -100,3 +100,56 @@ func TestClaudeLimitsCache_Neither(t *testing.T) {
 		t.Fatalf("note=%v", limits.Note)
 	}
 }
+
+func fiveHourInput(pct float64) RateLimitsInput {
+	return RateLimitsInput{FiveHour: &struct {
+		UsedPercentage float64
+		ResetsAt       int64
+	}{pct, 1000}}
+}
+
+func TestWriteClaudeLimitsCacheGuarded_SkipsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "cache.json")
+
+	// Seed a valid cache.
+	if wrote, err := WriteClaudeLimitsCacheGuarded(fiveHourInput(42), 1_000, cachePath); err != nil || !wrote {
+		t.Fatalf("seed write: wrote=%v err=%v", wrote, err)
+	}
+	// An empty payload must not clobber it.
+	wrote, err := WriteClaudeLimitsCacheGuarded(RateLimitsInput{}, 2_000, cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wrote {
+		t.Fatal("empty payload should not write")
+	}
+	got := CollectClaudeLimits(3_000, CollectClaudeLimitsOptions{
+		StatusLineCachePath: cachePath,
+		ClaudeJSONPath:      filepath.Join(dir, "missing.json"),
+	})
+	if got.Primary == nil || got.Primary.UsedPercentage != 42 {
+		t.Fatalf("prior cache should survive, got %+v", got.Primary)
+	}
+}
+
+func TestWriteClaudeLimitsCacheGuarded_SeparateProfilePaths(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "a", "cache.json")
+	pathB := filepath.Join(dir, "b", "cache.json")
+
+	if _, err := WriteClaudeLimitsCacheGuarded(fiveHourInput(10), 1_000, pathA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteClaudeLimitsCacheGuarded(fiveHourInput(90), 1_000, pathB); err != nil {
+		t.Fatal(err)
+	}
+	a := CollectClaudeLimits(2_000, CollectClaudeLimitsOptions{StatusLineCachePath: pathA, ClaudeJSONPath: filepath.Join(dir, "na.json")})
+	b := CollectClaudeLimits(2_000, CollectClaudeLimitsOptions{StatusLineCachePath: pathB, ClaudeJSONPath: filepath.Join(dir, "nb.json")})
+	if a.Primary == nil || a.Primary.UsedPercentage != 10 {
+		t.Fatalf("profile A = %+v", a.Primary)
+	}
+	if b.Primary == nil || b.Primary.UsedPercentage != 90 {
+		t.Fatalf("profile B = %+v", b.Primary)
+	}
+}

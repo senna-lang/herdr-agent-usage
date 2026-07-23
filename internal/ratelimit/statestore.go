@@ -17,6 +17,10 @@ const (
 	lockStale         = 10 * time.Second
 )
 
+// baseDir is the single-default notify-state dir. Per-profile isolation is
+// threaded explicitly via the *In variants (resolveDir); the default here stays
+// byte-identical to the historical location so it resolves the same regardless
+// of whether CLAUDE_CONFIG_DIR is visible (it is not on the read side).
 func baseDir() string {
 	if v := os.Getenv("USAGEBAR_STATE_DIR"); v != "" {
 		_ = os.MkdirAll(v, 0o755)
@@ -28,25 +32,38 @@ func baseDir() string {
 	return dir
 }
 
-func stateFilePath() string {
-	return filepath.Join(baseDir(), "rate-limit-state.json")
+// resolveDir returns an explicit per-profile state dir, or the env/default
+// baseDir() when empty. The multi-profile write path passes the resolved
+// profile's StateDir so two accounts never share notify state or lock.
+func resolveDir(dir string) string {
+	if dir == "" {
+		return baseDir()
+	}
+	_ = os.MkdirAll(dir, 0o755)
+	return dir
 }
 
-func lockFilePath() string {
-	return filepath.Join(baseDir(), "rate-limit-state.lock")
+func stateFilePathIn(dir string) string {
+	return filepath.Join(resolveDir(dir), "rate-limit-state.json")
 }
 
-func providerStateFilePath() string {
+func lockFilePathIn(dir string) string {
+	return filepath.Join(resolveDir(dir), "rate-limit-state.lock")
+}
+
+func providerStateFilePathIn(dir string) string {
 	if v := os.Getenv("USAGEBAR_PROVIDER_NOTIFY_PATH"); v != "" {
 		return v
 	}
-	return filepath.Join(baseDir(), "provider-limit-notify-state.json")
+	return filepath.Join(resolveDir(dir), "provider-limit-notify-state.json")
 }
 
-// AcquireLock returns true when the lock was acquired.
+func providerStateFilePath() string { return providerStateFilePathIn("") }
+
+// AcquireLockIn returns true when the lock in dir was acquired.
 // On timeout returns false without destroying another process's lock.
-func AcquireLock() bool {
-	path := lockFilePath()
+func AcquireLockIn(dir string) bool {
+	path := lockFilePathIn(dir)
 	deadline := time.Now().Add(lockTimeout)
 	for {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
@@ -68,10 +85,17 @@ func AcquireLock() bool {
 	}
 }
 
-// ReleaseLock removes the lock file.
-func ReleaseLock() {
-	_ = os.Remove(lockFilePath())
+// ReleaseLockIn removes the lock file in dir.
+func ReleaseLockIn(dir string) {
+	_ = os.Remove(lockFilePathIn(dir))
 }
+
+// AcquireLock returns true when the lock was acquired.
+// On timeout returns false without destroying another process's lock.
+func AcquireLock() bool { return AcquireLockIn("") }
+
+// ReleaseLock removes the lock file.
+func ReleaseLock() { ReleaseLockIn("") }
 
 // windowStateWire is the on-disk JSON shape for WindowState.
 type windowStateWire struct {
@@ -116,8 +140,8 @@ type ClaudeNotifyState struct {
 	SevenDay *WindowState `json:"sevenDay"`
 }
 
-func readClaudeState() ClaudeNotifyState {
-	raw, err := os.ReadFile(stateFilePath())
+func readClaudeStateIn(dir string) ClaudeNotifyState {
+	raw, err := os.ReadFile(stateFilePathIn(dir))
 	if err != nil {
 		return ClaudeNotifyState{}
 	}
@@ -134,12 +158,12 @@ func readClaudeState() ClaudeNotifyState {
 	}
 }
 
-func writeClaudeState(state ClaudeNotifyState) {
+func writeClaudeStateIn(dir string, state ClaudeNotifyState) {
 	wire := map[string]any{
 		"fiveHour": toWire(state.FiveHour),
 		"sevenDay": toWire(state.SevenDay),
 	}
-	path := stateFilePath()
+	path := stateFilePathIn(dir)
 	tmp := path + ".tmp"
 	b, err := json.Marshal(wire)
 	if err != nil {
@@ -153,16 +177,21 @@ func writeClaudeState(state ClaudeNotifyState) {
 
 // WithLockedState runs read→update→write under lock for Claude statusLine state.
 func WithLockedState(update func(current ClaudeNotifyState) ClaudeNotifyState) ClaudeNotifyState {
-	locked := AcquireLock()
+	return WithLockedStateIn("", update)
+}
+
+// WithLockedStateIn is WithLockedState scoped to an explicit state dir.
+func WithLockedStateIn(dir string, update func(current ClaudeNotifyState) ClaudeNotifyState) ClaudeNotifyState {
+	locked := AcquireLockIn(dir)
 	defer func() {
 		if locked {
-			ReleaseLock()
+			ReleaseLockIn(dir)
 		}
 	}()
-	current := readClaudeState()
+	current := readClaudeStateIn(dir)
 	next := update(current)
 	if locked {
-		writeClaudeState(next)
+		writeClaudeStateIn(dir, next)
 	}
 	return next
 }

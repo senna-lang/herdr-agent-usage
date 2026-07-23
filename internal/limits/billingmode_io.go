@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/senna-lang/herdr-agent-usage/internal/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
@@ -24,15 +25,36 @@ import (
 // to still count as subscription evidence (7 days — one full weekly window).
 const statusLineCacheFreshMs = 7 * 24 * 60 * 60 * 1000
 
-// DefaultBillingDeps returns production billing-mode resolvers.
+// DefaultBillingDeps returns production billing-mode resolvers. It resolves the
+// profile snapshot once and shares it across both mode closures and the id
+// list, so a BillingProviderFilter pass agrees on one profile set instead of
+// re-resolving config/env per pane.
 func DefaultBillingDeps() BillingDeps {
+	profiles := ResolvedClaudeProfiles()
+	ids := make([]string, len(profiles))
+	for i, p := range profiles {
+		ids[i] = p.ID
+	}
 	return BillingDeps{
-		PaneMode:    paneBillingModeDefault,
-		AccountMode: accountBillingModeDefault,
+		PaneMode: func(providerID string, pane OpenPaneSnapshot) BillingMode {
+			return paneBillingModeWith(profiles, providerID, pane)
+		},
+		AccountMode: func(providerID string) BillingMode {
+			return accountBillingModeWith(profiles, providerID)
+		},
+		ClaudeProfileIDs: ids,
 	}
 }
 
-func paneBillingModeDefault(providerID string, pane OpenPaneSnapshot) BillingMode {
+// paneBillingModeWith dispatches by provider id against an explicit profile
+// snapshot. Claude-family ids (any configured profile, not just the literal
+// "claude") resolve via that profile's own ConfigDir rather than the ambient
+// CLAUDE_CONFIG_DIR — the read side (panel/sidebar) never sees that env var, so
+// per-profile billing detection must thread the resolved profile's paths.
+func paneBillingModeWith(profiles []claude.ClaudeProfile, providerID string, pane OpenPaneSnapshot) BillingMode {
+	if profile, ok := profileByIDIn(profiles, providerID); ok {
+		return claudePaneBillingModeIn(profile.ConfigDir, pane)
+	}
 	switch providerID {
 	case "opencode":
 		return opencodePaneBillingMode(pane)
@@ -41,8 +63,6 @@ func paneBillingModeDefault(providerID string, pane OpenPaneSnapshot) BillingMod
 		return BillingPayAsYouGo
 	case "codex":
 		return codexPaneBillingMode(pane)
-	case "claude":
-		return claudePaneBillingMode(pane)
 	case "grok":
 		return grokPaneBillingMode(pane)
 	default:
@@ -50,10 +70,11 @@ func paneBillingModeDefault(providerID string, pane OpenPaneSnapshot) BillingMod
 	}
 }
 
-func accountBillingModeDefault(providerID string) BillingMode {
+func accountBillingModeWith(profiles []claude.ClaudeProfile, providerID string) BillingMode {
+	if profile, ok := profileByIDIn(profiles, providerID); ok {
+		return claudeAccountBillingModeIn(profile.JSONPath, profile.LimitsCache, profile.ConfigDir)
+	}
 	switch providerID {
-	case "claude":
-		return claudeAccountBillingMode()
 	case "grok":
 		return grokAccountBillingMode()
 	default:
@@ -87,6 +108,9 @@ func PaneBackendID(providerID string, pane OpenPaneSnapshot) string {
 // OpenCode / Codex record a per-session provider. Claude uses deployment
 // env (settings + process); Grok joins session modelId with config.toml.
 func payAsYouGoBackendID(providerID string, pane OpenPaneSnapshot) string {
+	if profile, ok := claudeProfileByID(providerID); ok {
+		return ResolveClaudeBackendID(loadClaudeEnvIn(profile.ConfigDir, cwdStr(pane)))
+	}
 	switch providerID {
 	case "opencode":
 		backendID := opencodePaneBackendID(pane)
@@ -100,8 +124,6 @@ func payAsYouGoBackendID(providerID string, pane OpenPaneSnapshot) string {
 		return piPaneBackendID(pane)
 	case "codex":
 		return codexPaneBackendID(pane)
-	case "claude":
-		return ResolveClaudeBackendID(claudeEnvForPane(pane))
 	case "grok":
 		return resolveGrokBackendForPane(pane)
 	default:
@@ -109,9 +131,11 @@ func payAsYouGoBackendID(providerID string, pane OpenPaneSnapshot) string {
 	}
 }
 
-// claudePaneBillingMode uses deployment env evidence (Bedrock/Vertex/…).
-func claudePaneBillingMode(pane OpenPaneSnapshot) BillingMode {
-	return ClaudeBillingModeFromEnv(claudeEnvForPane(pane))
+// claudePaneBillingModeIn uses deployment env evidence (Bedrock/Vertex/…) from
+// the given profile's ConfigDir (its own settings.json), not the ambient
+// CLAUDE_CONFIG_DIR.
+func claudePaneBillingModeIn(configDir string, pane OpenPaneSnapshot) BillingMode {
+	return ClaudeBillingModeFromEnv(loadClaudeEnvIn(configDir, cwdStr(pane)))
 }
 
 // grokPaneBillingMode is PayAsYouGo when the pane's model points at a
@@ -131,12 +155,28 @@ func claudeEnvForPane(pane OpenPaneSnapshot) map[string]string {
 }
 
 func loadClaudeEnv(cwd string) map[string]string {
+	return loadClaudeEnvIn("", cwd)
+}
+
+// loadClaudeEnvIn is loadClaudeEnv scoped to an explicit profile ConfigDir.
+// configDir="" keeps today's env/default lookup (ResolveClaudeUserSettingsPath),
+// used by the single-account callers that predate multi-profile support.
+func loadClaudeEnvIn(configDir, cwd string) map[string]string {
 	return MergeClaudeEnv(
 		claudeProcessEnv(),
-		claudeSettingsEnv(ResolveClaudeUserSettingsPath()),
+		claudeSettingsEnv(resolveClaudeUserSettingsPathIn(configDir)),
 		claudeSettingsEnv(filepath.Join(cwd, ".claude", "settings.json")),
 		claudeSettingsEnv(filepath.Join(cwd, ".claude", "settings.local.json")),
 	)
+}
+
+// resolveClaudeUserSettingsPathIn returns <configDir>/settings.json, or the
+// env/default ResolveClaudeUserSettingsPath() when configDir is empty.
+func resolveClaudeUserSettingsPathIn(configDir string) string {
+	if configDir != "" {
+		return filepath.Join(configDir, "settings.json")
+	}
+	return ResolveClaudeUserSettingsPath()
 }
 
 // claudeProcessEnv copies Claude deployment-related keys from the process
@@ -371,8 +411,12 @@ func codexPaneBillingMode(pane OpenPaneSnapshot) BillingMode {
 	return CodexBillingModeFromLines(lines)
 }
 
-func claudeAccountBillingMode() BillingMode {
-	raw, err := os.ReadFile(ResolveClaudeJSONPath())
+// claudeAccountBillingModeIn reads billing evidence from one profile's own
+// claude.json / limits cache / ConfigDir, so each configured account's
+// evidence comes from only its own files rather than the ambient default.
+
+func claudeAccountBillingModeIn(jsonPath, limitsCachePath, configDir string) BillingMode {
+	raw, err := os.ReadFile(jsonPath)
 	mode := BillingUnknown
 	if err == nil {
 		mode = ClaudeBillingModeFromJSON(string(raw))
@@ -380,7 +424,7 @@ func claudeAccountBillingMode() BillingMode {
 			// A fresh statusLine rate_limits cache is subscription evidence too
 			// (the utilization cache can lag behind a new subscription login).
 			nowMs := time.Now().UnixMilli()
-			if cached := collectFromStatusLineCache(nowMs, ResolveClaudeLimitsCachePath()); cached != nil {
+			if cached := collectFromStatusLineCache(nowMs, limitsCachePath); cached != nil {
 				if nowMs-cached.FetchedAtMs <= statusLineCacheFreshMs {
 					mode = BillingSubscription
 				}
@@ -389,7 +433,7 @@ func claudeAccountBillingMode() BillingMode {
 	}
 	// Deployment env (Bedrock/Vertex/…) is account-scoped when set in
 	// user settings or the process environment.
-	return CombineBillingModes(mode, ClaudeBillingModeFromEnv(loadClaudeEnv("")))
+	return CombineBillingModes(mode, ClaudeBillingModeFromEnv(loadClaudeEnvIn(configDir, "")))
 }
 
 func grokAccountBillingMode() BillingMode {

@@ -36,7 +36,12 @@ type CollectClaudeLimitsOptions struct {
 	ClaudeJSONPath      string
 }
 
-// ResolveClaudeLimitsCachePath returns the statusLine cache path.
+// ResolveClaudeLimitsCachePath returns the single-default statusLine cache path.
+// Multi-account isolation comes from explicit [[claude.profiles]] config, whose
+// paths are computed per config_dir; the synthesized default must stay
+// byte-identical to the historical location so it resolves the same on the write
+// side (statusLine) and the read side (panel/sidebar), which cannot see
+// CLAUDE_CONFIG_DIR.
 func ResolveClaudeLimitsCachePath() string {
 	if v := os.Getenv("USAGEBAR_CLAUDE_LIMITS_PATH"); v != "" {
 		return v
@@ -77,6 +82,16 @@ func WriteClaudeLimitsCache(rateLimits RateLimitsInput, nowMs int64, path string
 		return err
 	}
 	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
+
+// WriteClaudeLimitsCacheGuarded writes the cache only when at least one window
+// is present, so an empty statusLine payload (e.g. `{}`) cannot overwrite a
+// previously valid cache. Returns whether a write happened.
+func WriteClaudeLimitsCacheGuarded(rateLimits RateLimitsInput, nowMs int64, path string) (bool, error) {
+	if rateLimits.FiveHour == nil && rateLimits.SevenDay == nil {
+		return false, nil
+	}
+	return true, WriteClaudeLimitsCache(rateLimits, nowMs, path)
 }
 
 func collectFromStatusLineCache(nowMs int64, path string) *ProviderLimits {

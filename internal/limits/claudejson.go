@@ -143,6 +143,34 @@ func CollectClaudeLimitsFromJSON(nowMs int64, path string) *ProviderLimits {
 	return ProviderLimitsFromClaudeJSON(string(raw), nowMs)
 }
 
+// AccountEmailFromJSON extracts oauthAccount.emailAddress from a
+// ~/.claude.json body. Used for display only: distinguishing two configured
+// Claude profiles that share no explicit label, by the account actually
+// logged into each one.
+func AccountEmailFromJSON(rawJSON string) (string, bool) {
+	var parsed struct {
+		OAuthAccount *struct {
+			EmailAddress *string `json:"emailAddress"`
+		} `json:"oauthAccount"`
+	}
+	if err := json.Unmarshal([]byte(rawJSON), &parsed); err != nil {
+		return "", false
+	}
+	if parsed.OAuthAccount == nil || parsed.OAuthAccount.EmailAddress == nil || *parsed.OAuthAccount.EmailAddress == "" {
+		return "", false
+	}
+	return *parsed.OAuthAccount.EmailAddress, true
+}
+
+// AccountEmailFromJSONPath reads path and extracts the account email.
+func AccountEmailFromJSONPath(path string) (string, bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	return AccountEmailFromJSON(string(raw))
+}
+
 func itoa(n int) string {
 	if n == 0 {
 		return "0"

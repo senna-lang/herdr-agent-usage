@@ -5,6 +5,7 @@ package limits
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -122,4 +123,41 @@ func containsStr(s, sub string) bool {
 			}
 			return false
 		}())
+}
+
+func TestAccountEmailFromJSON_Found(t *testing.T) {
+	email, ok := AccountEmailFromJSON(`{
+		"oauthAccount": {"emailAddress": "user@example.com", "organizationType": "claude_pro"}
+	}`)
+	if !ok || email != "user@example.com" {
+		t.Fatalf("ok=%v email=%q", ok, email)
+	}
+}
+
+func TestAccountEmailFromJSON_MissingOAuthAccount(t *testing.T) {
+	_, ok := AccountEmailFromJSON(`{"cachedUsageUtilization": {}}`)
+	if ok {
+		t.Fatal("expected no email without oauthAccount")
+	}
+}
+
+func TestAccountEmailFromJSON_EmptyEmail(t *testing.T) {
+	_, ok := AccountEmailFromJSON(`{"oauthAccount": {"emailAddress": ""}}`)
+	if ok {
+		t.Fatal("expected no email for empty string")
+	}
+}
+
+func TestAccountEmailFromJSON_InvalidJSON(t *testing.T) {
+	_, ok := AccountEmailFromJSON(`not json`)
+	if ok {
+		t.Fatal("expected no email for invalid JSON")
+	}
+}
+
+func TestAccountEmailFromJSONPath_MissingFile(t *testing.T) {
+	_, ok := AccountEmailFromJSONPath(filepath.Join(t.TempDir(), "missing.json"))
+	if ok {
+		t.Fatal("expected no email for missing file")
+	}
 }

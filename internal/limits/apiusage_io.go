@@ -32,12 +32,15 @@ type paneBackend struct {
 // panes of one harness. Subscription panes and panes whose backend cannot be
 // resolved are skipped.
 func activeAPIPaneBackends(openPanes []OpenPaneSnapshot, harnessID string) []paneBackend {
+	// Resolve the billing deps (and their profile snapshot) once for the whole
+	// pass rather than per pane.
+	deps := DefaultBillingDeps()
 	var out []paneBackend
 	for _, pane := range openPanes {
 		if agentToProvider[strings.ToLower(pane.Agent)] != harnessID {
 			continue
 		}
-		if PaneBillingMode(harnessID, pane, DefaultBillingDeps()) != BillingPayAsYouGo {
+		if PaneBillingMode(harnessID, pane, deps) != BillingPayAsYouGo {
 			continue
 		}
 		backendID := payAsYouGoBackendID(harnessID, pane)
