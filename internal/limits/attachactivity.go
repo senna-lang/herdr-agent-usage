@@ -22,6 +22,8 @@ var agentToProvider = map[string]string{
 	"claude":   "claude",
 	"codex":    "codex",
 	"opencode": "opencode",
+	"omp":      "omp",
+	"pi":       "pi",
 	"grok":     "grok",
 }
 

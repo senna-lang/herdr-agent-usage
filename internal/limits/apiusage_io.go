@@ -55,8 +55,9 @@ func activeAPIPaneBackends(openPanes []OpenPaneSnapshot, harnessID string) []pan
 // CollectAPIProviderUsage builds one block per pay-as-you-go backend running
 // in an open pane across every harness, richest first.
 //
-// Only OpenCode records a per-message cost, so blocks from the other
-// harnesses are token-only; the formatter drops the cost column for them.
+// OpenCode and OMP/Pi can record a per-message cost; Claude/Codex/Grok are
+// token-only. Each block's HasCost follows AnyAPICost(windows) so the
+// formatter only shows the cost column when a harness actually recorded USD.
 func CollectAPIProviderUsage(openPanes []OpenPaneSnapshot, nowMs int64) []APIProviderUsage {
 	out := collectOpenCodeAPIUsage(openPanes, nowMs)
 	out = append(out, collectFileHarnessAPIUsage(openPanes, nowMs)...)

@@ -20,13 +20,14 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
 )
 
 // collectFileHarnessAPIUsage builds blocks for every file-backed harness that
 // has an open pay-as-you-go pane.
 func collectFileHarnessAPIUsage(openPanes []OpenPaneSnapshot, nowMs int64) []APIProviderUsage {
 	var out []APIProviderUsage
-	for _, harnessID := range []string{"claude", "codex", "grok"} {
+	for _, harnessID := range []string{"claude", "codex", "grok", "omp", "pi"} {
 		active := activeAPIPaneBackends(openPanes, harnessID)
 		if len(active) == 0 {
 			continue
@@ -69,7 +70,7 @@ func buildFileHarnessBlocks(harnessID string, active []paneBackend, nowMs int64)
 			Label:     backendDisplayLabel(backendID),
 			Windows:   windows,
 			Models:    SumAPIModels(rows, nowMs, APIShareWindowMinutes),
-			HasCost:   false,
+			HasCost:   AnyAPICost(windows),
 		}
 		if activity := fileHarnessPaneActivity(harnessID, backendID, panesByBackend[backendID], rows, nowMs); activity != nil {
 			block.PaneActivity = activity
@@ -104,6 +105,10 @@ func scanHarnessRows(harnessID string, startMs, nowMs int64) map[string][]apiUsa
 		return scanGrokRowsByBackend(startMs)
 	case "codex":
 		return scanCodexRows(startMs)
+	case "omp":
+		return scanOMPPiRowsByBackend(omp.ListAllOMPSessionFiles(), startMs)
+	case "pi":
+		return scanOMPPiRowsByBackend(omp.ListAllPiSessionFiles(), startMs)
 	default:
 		return nil
 	}
@@ -193,6 +198,26 @@ func scanCodexRows(startMs int64) map[string][]apiUsageRow {
 	return out
 }
 
+// scanOMPPiRowsByBackend reads OMP / Pi session jsonl files touched in the
+// window and groups assistant usage by message provider id.
+func scanOMPPiRowsByBackend(paths []string, startMs int64) map[string][]apiUsageRow {
+	out := make(map[string][]apiUsageRow)
+	for _, path := range paths {
+		lines := readIfTouchedInWindow(path, startMs)
+		if lines == nil {
+			continue
+		}
+		byBackend := OMPPiUsageRowsByBackendFromLines(lines)
+		for backendID, rows := range byBackend {
+			out[backendID] = append(out[backendID], rows...)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // fileHarnessPaneActivity scales each open pane's own session tokens against
 // the backend total, matching how the other blocks compute their share row.
 func fileHarnessPaneActivity(
@@ -226,6 +251,9 @@ func fileHarnessPaneActivity(
 				continue
 			}
 			rows = CodexUsageRowsFromLines(lines, "")
+		case "omp", "pi":
+			byBackend := OMPPiUsageRowsByBackendFromLines(lines)
+			rows = byBackend[backendID]
 		}
 		var tokens float64
 		for _, r := range rows {
@@ -281,6 +309,10 @@ func paneSessionLines(harnessID string, pane OpenPaneSnapshot) []string {
 			return nil
 		}
 		path = strings.Replace(signals, "signals.json", "updates.jsonl", 1)
+	case "omp":
+		path = ompSessionPath(pane)
+	case "pi":
+		path = piSessionPath(pane)
 	}
 	if path == "" {
 		return nil
