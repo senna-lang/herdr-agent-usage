@@ -138,6 +138,24 @@ func TestAnyAPICost(t *testing.T) {
 	}
 }
 
+func TestMergeAPIProviderUsage_GroupsSameBackendAcrossHarnesses(t *testing.T) {
+	blocks := []APIProviderUsage{
+		{BackendID: "deepseek", Label: "DeepSeek", Windows: []APIUsageWindow{{WindowMinutes: 1440, Tokens: 100, CostUSD: .01}}, Models: []APIModelUsage{{ModelID: "chat", Tokens: 100, CostUSD: .01}}, PaneActivity: &ProviderPaneActivity{WindowMinutes: 1440, TotalTokens: 100, Panes: []PaneActivityShare{{PaneID: "open", Label: "OpenCode", Tokens: 100}}}},
+		{BackendID: "deepseek", Label: "DeepSeek", Windows: []APIUsageWindow{{WindowMinutes: 1440, Tokens: 50, CostUSD: .02}}, Models: []APIModelUsage{{ModelID: "chat", Tokens: 20, CostUSD: .01}, {ModelID: "reasoner", Tokens: 30, CostUSD: .01}}, PaneActivity: &ProviderPaneActivity{WindowMinutes: 1440, TotalTokens: 50, Panes: []PaneActivityShare{{PaneID: "omp", Label: "OMP", Tokens: 50}}}},
+	}
+	got := MergeAPIProviderUsage(blocks)
+	if len(got) != 1 {
+		t.Fatalf("got %d blocks: %#v", len(got), got)
+	}
+	block := got[0]
+	if block.Windows[0].Tokens != 150 || block.Windows[0].CostUSD != .03 || len(block.Models) != 2 {
+		t.Fatalf("merged block=%#v", block)
+	}
+	if block.PaneActivity == nil || len(block.PaneActivity.Panes) != 2 || block.PaneActivity.TotalTokens != 150 {
+		t.Fatalf("activity=%#v", block.PaneActivity)
+	}
+}
+
 func TestHumanizeBackendID(t *testing.T) {
 	cases := map[string]string{
 		"deepseek":    "Deepseek",

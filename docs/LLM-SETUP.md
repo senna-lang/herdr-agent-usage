@@ -243,8 +243,11 @@ herdr plugin action invoke usagebar.open-limits
 ```
 
 After an agent turn completes on a supported pane (Claude / Codex / OpenCode /
-Grok), verify with `herdr pane get <pane-id>` that both `tokens.context` and
-`tokens.limit` are present. The sidebar should render limit above context.
+Grok / OMP / Pi), verify with `herdr pane get <pane-id>` that both
+`tokens.context` and `tokens.limit` are present. The sidebar should render
+limit above context. On OMP/Pi, `$provider` is the resolved subscription
+provider (`opencode-go`, `grok`, `claude`, or `codex`), or the current API
+backend.
 
 ### 9. Report back
 

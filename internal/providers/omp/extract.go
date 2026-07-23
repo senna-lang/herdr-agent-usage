@@ -108,11 +108,18 @@ func ExtractLatestBackendFromLines(lines []string) string {
 	return ""
 }
 
-// SumUsageFromLines sums assistant turn totals. When startMs/endMs > 0, only
-// events with timestamps inside [startMs, endMs] are counted. Timestamps of 0
-// are always included when a window is unset (startMs==0 && endMs==0), and
-// skipped when a window is active.
+// SumUsageFromLines sums assistant turn totals across all backends. When
+// startMs/endMs > 0, only events with timestamps inside [startMs, endMs] are
+// counted. Timestamps of 0 are always included when a window is unset
+// (startMs==0 && endMs==0), and skipped when a window is active.
 func SumUsageFromLines(lines []string, startMs, endMs int64) (tokens float64, costUSD float64) {
+	return SumUsageForProviderFromLines(lines, "", startMs, endMs)
+}
+
+// SumUsageForProviderFromLines sums assistant turn totals for one backend.
+// provider is empty to include all backends.
+func SumUsageForProviderFromLines(lines []string, provider string, startMs, endMs int64) (tokens float64, costUSD float64) {
+	provider = strings.TrimSpace(provider)
 	windowed := startMs > 0 || endMs > 0
 	for _, line := range lines {
 		parsed := parseAssistantLine(line)
@@ -120,6 +127,9 @@ func SumUsageFromLines(lines []string, startMs, endMs int64) (tokens float64, co
 			continue
 		}
 		msg := parsed.Message
+		if provider != "" && strings.TrimSpace(msg.Provider) != provider {
+			continue
+		}
 		if windowed {
 			ts := msg.Timestamp
 			if ts <= 0 {

@@ -15,6 +15,7 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 	_ "modernc.org/sqlite"
 )
 
@@ -34,7 +35,24 @@ func DefaultPaneActivityDeps() PaneActivityDeps {
 		TotalTokensForProvider: func(providerID string, startMs, endMs int64) float64 {
 			return totalTokensForProviderWith(profiles, providerID, startMs, endMs)
 		},
-		ResolvePaneProvider: BuildClaudePaneProviderResolver(profiles),
+		ResolvePaneProvider: BuildPaneActivityProviderResolver(profiles),
+	}
+}
+
+// BuildPaneActivityProviderResolver extends the normal harness resolver only
+// for the Limits pane's subscription activity: OMP/Pi subscription gateways
+// belong under their collector account.  Keep this separate from
+// BuildClaudePaneProviderResolver, which sidebar updates use to retain the
+// actual harness id before resolving its billing route.
+func BuildPaneActivityProviderResolver(profiles []claude.ClaudeProfile) PaneProviderResolver {
+	base := BuildClaudePaneProviderResolver(profiles)
+	return func(pane OpenPaneSnapshot) (string, bool) {
+		if pane.Agent == "omp" || pane.Agent == "pi" || pane.Agent == "opencode" {
+			if route, ok := paneSubscriptionRoute(pane.Agent, pane); ok {
+				return route.CollectorProviderID, true
+			}
+		}
+		return base(pane)
 	}
 }
 
@@ -85,6 +103,26 @@ func TokensForPaneDefault(providerID string, pane OpenPaneSnapshot, startMs, end
 // profile snapshot (see DefaultPaneActivityDeps): Claude ids resolve their
 // transcript root from profiles, other agents via the static switch.
 func tokensForPaneWith(profiles []claude.ClaudeProfile, providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+	if pane.Agent == "opencode" {
+		backendID := opencodePaneBackendID(pane)
+		if route, ok := paneSubscriptionRoute("opencode", pane); ok && route.CollectorProviderID == providerID {
+			return opencodeTokensForPane(pane, backendID, startMs, endMs)
+		}
+	}
+	// An OMP/Pi subscription session belongs to the gateway's quota account,
+	// but its local activity lives in the harness JSONL. Count only the gateway
+	// recorded on this session; never mix earlier API backends into its share.
+	if pane.Agent == "omp" || pane.Agent == "pi" {
+		backendID := ompPiPaneBackendID(pane.Agent, pane)
+		if route, ok := paneSubscriptionRoute(pane.Agent, pane); ok && route.CollectorProviderID == providerID {
+			if pane.Agent == "omp" {
+				tokens, _ := ompActivityForPaneBackend(pane, backendID, startMs, endMs)
+				return tokens
+			}
+			tokens, _ := piActivityForPaneBackend(pane, backendID, startMs, endMs)
+			return tokens
+		}
+	}
 	if profile, ok := profileByIDIn(profiles, providerID); ok {
 		return claudeTokensForPaneIn(profile.ProjectsRoot, pane, startMs, endMs)
 	}
@@ -124,10 +162,10 @@ func PaneTotalUsage(providerID string, pane OpenPaneSnapshot, nowMs int64) (toke
 		return opencodeActivityForPane(pane, backendID, 0, nowMs)
 	}
 	if providerID == "omp" {
-		return ompActivityForPane(pane, 0, nowMs)
+		return ompActivityForPaneBackend(pane, ompPaneBackendID(pane), 0, nowMs)
 	}
 	if providerID == "pi" {
-		return piActivityForPane(pane, 0, nowMs)
+		return piActivityForPaneBackend(pane, piPaneBackendID(pane), 0, nowMs)
 	}
 	return TokensForPaneAnyBackend(providerID, pane, 0, nowMs), 0
 }
@@ -152,19 +190,109 @@ func TotalTokensForProviderDefault(providerID string, startMs, endMs int64) floa
 // totalTokensForProviderWith is TotalTokensForProviderDefault dispatched against
 // an explicit profile snapshot (see DefaultPaneActivityDeps).
 func totalTokensForProviderWith(profiles []claude.ClaudeProfile, providerID string, startMs, endMs int64) float64 {
+	routed := routedSubscriptionTotal(providerID, startMs, endMs)
 	if profile, ok := profileByIDIn(profiles, providerID); ok {
-		return claudeTotalIn(profile.ProjectsRoot, startMs, endMs)
+		return claudeTotalIn(profile.ProjectsRoot, startMs, endMs) + routed
 	}
 	switch providerID {
 	case "codex":
-		return codexTotal(startMs, endMs)
+		return codexTotal(startMs, endMs) + routed
 	case "opencode":
-		return openCodeTotal(startMs, endMs)
+		return openCodeTotal(startMs, endMs) + routed
 	case "grok":
-		return grokTotal(startMs, endMs)
+		return grokTotal(startMs, endMs) + routed
 	default:
+		return routed
+	}
+}
+
+// routedSubscriptionTotal adds activity recorded by harnesses other than the
+// collector's native one. This keeps the provider block authoritative when
+// OMP/Pi/OpenCode all spend the same subscription account.
+func routedSubscriptionTotal(providerID string, startMs, endMs int64) float64 {
+	var total float64
+	for _, source := range []struct {
+		harness string
+		paths   []string
+	}{
+		{"omp", omp.ListAllOMPSessionFiles()},
+		{"pi", omp.ListAllPiSessionFiles()},
+	} {
+		byBackend := scanOMPPiRowsByBackend(source.paths, startMs)
+		for backendID, rows := range byBackend {
+			credentialType := ""
+			if source.harness == "omp" {
+				credentialType = omp.CredentialType(backendID)
+			} else {
+				credentialType = omp.PiCredentialType(backendID)
+			}
+			route, ok := SubscriptionRouteForProviderAuth(backendID, credentialType)
+			if !ok || route.CollectorProviderID != providerID {
+				continue
+			}
+			for _, row := range rows {
+				if row.CreatedMs >= startMs && row.CreatedMs <= endMs {
+					total += row.Tokens
+				}
+			}
+		}
+	}
+	// OpenCode Go is already included by openCodeTotal; only add OpenCode
+	// sessions routed to a different subscription collector (e.g. Codex).
+	if providerID != "opencode" {
+		total += openCodeRoutedSubscriptionTotal(providerID, startMs, endMs)
+	}
+	return total
+}
+
+func openCodeRoutedSubscriptionTotal(providerID string, startMs, endMs int64) float64 {
+	dbPath := ResolveOpenCodeLimitsDBPath()
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
+	if err != nil {
 		return 0
 	}
+	defer db.Close()
+	rows, err := db.Query(
+		`SELECT DISTINCT json_extract(data, '$.providerID') FROM message
+		 WHERE time_created >= ? AND time_created <= ? AND json_valid(data)
+		   AND json_extract(data, '$.role') = 'assistant'`, startMs, endMs)
+	if err != nil {
+		return 0
+	}
+	defer rows.Close()
+	var backendIDs []string
+	for rows.Next() {
+		var backendID string
+		if rows.Scan(&backendID) == nil && backendID != "" {
+			backendIDs = append(backendIDs, backendID)
+		}
+	}
+	var total float64
+	for _, backendID := range backendIDs {
+		route, ok := SubscriptionRouteForProviderAuth(backendID, opencode.CredentialType(backendID))
+		if !ok || route.CollectorProviderID != providerID {
+			continue
+		}
+		query := `SELECT data, time_created FROM message
+		 WHERE time_created >= ? AND time_created <= ? AND json_valid(data)
+		   AND json_extract(data, '$.role') = 'assistant'
+		   AND json_extract(data, '$.providerID') = ?`
+		messageRows, err := db.Query(query, startMs, endMs, backendID)
+		if err != nil {
+			continue
+		}
+		var list []OpenCodeTokenRow
+		for messageRows.Next() {
+			var data string
+			var created int64
+			if messageRows.Scan(&data, &created) == nil {
+				list = append(list, OpenCodeTokenRow{Data: data, TimeCreated: created})
+			}
+		}
+		messageRows.Close()
+		total += SumOpenCodeProviderTokensInWindow(list, backendID, startMs, endMs)
+	}
+	return total
 }
 
 func sessionIDStr(pane OpenPaneSnapshot) string {
@@ -441,10 +569,26 @@ func ompActivityForPane(pane OpenPaneSnapshot, startMs, endMs int64) (tokens flo
 	return omp.ActivityForPath(path, startMs, endMs)
 }
 
+func ompActivityForPaneBackend(pane OpenPaneSnapshot, backendID string, startMs, endMs int64) (tokens float64, costUSD float64) {
+	path := ompSessionPath(pane)
+	if path == "" || backendID == "" {
+		return 0, 0
+	}
+	return omp.ActivityForProviderPath(path, backendID, startMs, endMs)
+}
+
 func piActivityForPane(pane OpenPaneSnapshot, startMs, endMs int64) (tokens float64, costUSD float64) {
 	path := piSessionPath(pane)
 	if path == "" {
 		return 0, 0
 	}
 	return omp.ActivityForPath(path, startMs, endMs)
+}
+
+func piActivityForPaneBackend(pane OpenPaneSnapshot, backendID string, startMs, endMs int64) (tokens float64, costUSD float64) {
+	path := piSessionPath(pane)
+	if path == "" || backendID == "" {
+		return 0, 0
+	}
+	return omp.ActivityForProviderPath(path, backendID, startMs, endMs)
 }

@@ -31,6 +31,16 @@ func isSettledStatus(status string) bool {
 	return status != "working"
 }
 
+// paneCwdForUpdate chooses the directory used to resolve agent-local session
+// files. OMP/Pi may put a language-server process in the foreground, whose
+// cwd is inside a virtual environment rather than the agent's project. Their
+// session fallback is keyed by the pane's project cwd, so prefer it whenever
+// Herdr has not supplied a session path. Other agents preserve the existing
+// foreground-cwd preference.
+func paneCwdForUpdate(pane herdrcli.PaneInfo) *string {
+	return herdrcli.PaneSessionCwd(pane)
+}
+
 // resolveSidebarAccountLabel picks the text that identifies profile in the
 // sidebar's $limit slot once it has been displaced by the account row: the
 // real login email when readable, otherwise the profile's own label (which
@@ -69,17 +79,14 @@ func combineLimitAndContext(limitText, statusText string) string {
 }
 
 // formatSidebarProvider renders the sidebar's agent line: the backend name on
-// a pay-as-you-go pane ("deepseek"), the harness name otherwise ("opencode").
+// a pay-as-you-go pane ("deepseek"), and the harness name as a provisional
+// fallback until a subscription route supplies its quota-provider label.
 //
 // The backend replaces the harness rather than joining it — the sidebar is
 // too narrow for both, and on a pay-as-you-go pane the backend is the more
 // informative half (the harness is already implied by the pane's agent icon).
 // It stands in for Herdr's built-in `agent` token, which is why it must carry
-// the harness name in the subscription case.
-//
-// OMP / Pi are the exception: their message.provider is model routing inside
-// one agent, and the adjacent burn total spans every backend in the session,
-// so $provider keeps the harness name.
+// a fallback name when no more specific label is available.
 func formatSidebarProvider(agentName, providerID string, pane limits.OpenPaneSnapshot) string {
 	return formatSidebarProviderWith(limits.PaneBackendID, agentName, providerID, pane)
 }
@@ -92,10 +99,13 @@ func formatSidebarProviderWith(
 	if agentName == "" {
 		return ""
 	}
+	backendID := backendFor(providerID, pane)
 	if providerID == "omp" || providerID == "pi" {
-		return agentName
+		// Without a recorded backend, leaving this blank is more accurate than
+		// naming the harness beside an empty or unscoped burn total.
+		return backendID
 	}
-	if backendID := backendFor(providerID, pane); backendID != "" {
+	if backendID != "" {
 		return backendID
 	}
 	return agentName
@@ -152,10 +162,7 @@ func RunUpdate(force bool) {
 		return
 	}
 
-	cwd := pane.ForegroundCwd
-	if cwd == nil {
-		cwd = pane.Cwd
-	}
+	cwd := paneCwdForUpdate(pane)
 	nowMs := time.Now().UnixMilli()
 	limitText := ""
 	// Subscription limits only apply when the pane's session is billed against
@@ -183,14 +190,17 @@ func RunUpdate(force bool) {
 		return
 	}
 
-	if limits.PaneBillingMode(providerID, snapshot, limits.DefaultBillingDeps()) == limits.BillingPayAsYouGo {
+	billingMode := limits.PaneBillingMode(providerID, snapshot, limits.DefaultBillingDeps())
+	limitsProviderID := limits.SubscriptionLimitsProviderID(providerID, snapshot)
+	displayProviderID := limits.SubscriptionDisplayProviderID(providerID, snapshot)
+	if billingMode == limits.BillingPayAsYouGo {
 		totalTokens, totalCostUSD := limits.PaneTotalUsage(providerID, snapshot, nowMs)
 		limitText = limits.FormatSidebarBurn(totalTokens, totalCostUSD)
 	} else {
 		collectOptions := limits.DefaultCollectOptions()
 		// Sidebar refresh deliberately collects only this pane's provider and leaves
 		// Attach nil, avoiding the heavier cross-pane activity aggregation path.
-		collectOptions.Only = map[string]bool{providerID: true}
+		collectOptions.Only = map[string]bool{limitsProviderID: true}
 		providerLimits := limits.CollectAllProviderLimits(cwd, nowMs, collectOptions)
 		if len(providerLimits) > 0 {
 			limitText = limits.FormatSidebarLimit(providerLimits[0], nowMs)
@@ -217,7 +227,11 @@ func RunUpdate(force bool) {
 
 	// Stands in for Herdr's `agent` token so a pay-as-you-go pane names the
 	// backend it is actually billing ("deepseek") instead of the harness.
-	writeMetadataToken(paneID, "provider", formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot), force)
+	providerText := formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot)
+	if billingMode == limits.BillingSubscription {
+		providerText = displayProviderID
+	}
+	writeMetadataToken(paneID, "provider", providerText, force)
 
 	// Context tokens: claude is read from its resolved profile's own transcript
 	// root (bypassing the registry's default-root lookup) so a non-default

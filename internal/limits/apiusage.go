@@ -6,8 +6,9 @@
  * USD, when the harness records it) over 24h / 7d / 30d, a per-model
  * breakdown, and the same 24h pane share the subscription blocks show.
  *
- * Every harness can contribute a pay-as-you-go block when it has an open
- * API-billed pane. Only OpenCode records per-message cost; Claude / Codex /
+ * Every harness can contribute observations when it has an open API-billed
+ * pane; observations sharing a backend id are merged into one provider block.
+ * Only OpenCode records per-message cost; Claude / Codex /
  * Grok blocks are token-only. Backend labels come from session providerIDs
  * (OpenCode, Codex), deployment env (Claude), or modelId+config.toml (Grok).
  *
@@ -188,6 +189,111 @@ func AnyAPICost(windows []APIUsageWindow) bool {
 		}
 	}
 	return false
+}
+
+// MergeAPIProviderUsage collapses harness-specific observations into one
+// block per billed backend. Harnesses are input adapters; BackendID is the
+// identity displayed and aggregated by the Usage pane.
+func MergeAPIProviderUsage(blocks []APIProviderUsage) []APIProviderUsage {
+	byBackend := make(map[string]*APIProviderUsage)
+	order := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		if block.BackendID == "" {
+			continue
+		}
+		dst, ok := byBackend[block.BackendID]
+		if !ok {
+			dst = &APIProviderUsage{BackendID: block.BackendID, Label: block.Label}
+			byBackend[block.BackendID] = dst
+			order = append(order, block.BackendID)
+		}
+		if dst.Label == "" {
+			dst.Label = block.Label
+		}
+		mergeAPIWindows(dst, block.Windows)
+		mergeAPIModels(dst, block.Models)
+		mergeAPIActivity(dst, block.PaneActivity)
+	}
+	out := make([]APIProviderUsage, 0, len(order))
+	for _, id := range order {
+		block := byBackend[id]
+		sort.Slice(block.Windows, func(i, j int) bool { return block.Windows[i].WindowMinutes < block.Windows[j].WindowMinutes })
+		sort.Slice(block.Models, func(i, j int) bool {
+			if block.Models[i].CostUSD != block.Models[j].CostUSD {
+				return block.Models[i].CostUSD > block.Models[j].CostUSD
+			}
+			if block.Models[i].Tokens != block.Models[j].Tokens {
+				return block.Models[i].Tokens > block.Models[j].Tokens
+			}
+			return block.Models[i].ModelID < block.Models[j].ModelID
+		})
+		block.HasCost = AnyAPICost(block.Windows)
+		out = append(out, *block)
+	}
+	return out
+}
+
+func mergeAPIWindows(dst *APIProviderUsage, src []APIUsageWindow) {
+	index := make(map[int]int, len(dst.Windows))
+	for i, w := range dst.Windows {
+		index[w.WindowMinutes] = i
+	}
+	for _, w := range src {
+		if i, ok := index[w.WindowMinutes]; ok {
+			dst.Windows[i].Tokens += w.Tokens
+			dst.Windows[i].CostUSD += w.CostUSD
+		} else {
+			index[w.WindowMinutes] = len(dst.Windows)
+			dst.Windows = append(dst.Windows, w)
+		}
+	}
+}
+
+func mergeAPIModels(dst *APIProviderUsage, src []APIModelUsage) {
+	index := make(map[string]int, len(dst.Models))
+	for i, m := range dst.Models {
+		index[m.ModelID] = i
+	}
+	for _, m := range src {
+		if i, ok := index[m.ModelID]; ok {
+			dst.Models[i].Tokens += m.Tokens
+			dst.Models[i].CostUSD += m.CostUSD
+		} else {
+			index[m.ModelID] = len(dst.Models)
+			dst.Models = append(dst.Models, m)
+		}
+	}
+}
+
+func mergeAPIActivity(dst *APIProviderUsage, src *ProviderPaneActivity) {
+	if src == nil {
+		return
+	}
+	if dst.PaneActivity == nil {
+		dst.PaneActivity = &ProviderPaneActivity{WindowMinutes: src.WindowMinutes}
+	}
+	activity := dst.PaneActivity
+	activity.TotalTokens += src.TotalTokens
+	rows := make(map[string]PaneTokenRow)
+	for _, existing := range activity.Panes {
+		rows[existing.PaneID] = PaneTokenRow{PaneID: existing.PaneID, Label: existing.Label, Tokens: existing.Tokens}
+	}
+	for _, pane := range src.Panes {
+		row := rows[pane.PaneID]
+		row.PaneID = pane.PaneID
+		if row.Label == "" {
+			row.Label = pane.Label
+		}
+		row.Tokens += pane.Tokens
+		rows[pane.PaneID] = row
+	}
+	actual := make([]PaneTokenRow, 0, len(rows))
+	for id, row := range rows {
+		if id != OtherPaneID {
+			actual = append(actual, row)
+		}
+	}
+	_, activity.Panes = ComputeSharesWithOther(DisambiguateLabels(actual), float64(activity.TotalTokens))
 }
 
 // HumanizeBackendID is the label fallback when a backend is absent from

@@ -88,8 +88,15 @@ func BackendIDForPath(path string) string {
 	return ExtractLatestBackendFromLines(lines)
 }
 
-// ActivityForPath sums token/cost totals for the session, optionally windowed.
+// ActivityForPath sums token/cost totals across every backend in the session,
+// optionally windowed.
 func ActivityForPath(path string, startMs, endMs int64) (tokens float64, costUSD float64) {
+	return ActivityForProviderPath(path, "", startMs, endMs)
+}
+
+// ActivityForProviderPath sums token/cost totals for one backend in the
+// session. provider is empty to include every backend.
+func ActivityForProviderPath(path, provider string, startMs, endMs int64) (tokens float64, costUSD float64) {
 	path = expandHome(path)
 	if path == "" {
 		return 0, 0
@@ -113,5 +120,5 @@ func ActivityForPath(path string, startMs, endMs int64) (tokens float64, costUSD
 		// Fail closed: a truncated scan would undercount silently.
 		return 0, 0
 	}
-	return SumUsageFromLines(lines, startMs, endMs)
+	return SumUsageForProviderFromLines(lines, provider, startMs, endMs)
 }

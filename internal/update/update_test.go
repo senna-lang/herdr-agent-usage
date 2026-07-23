@@ -8,8 +8,39 @@ import (
 	"testing"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/herdrcli"
 	"github.com/senna-lang/herdr-agent-usage/internal/limits"
 )
+
+func stringPtr(s string) *string { return &s }
+
+func TestPaneCwdForUpdate_OMPPiPreferPaneCwdWithoutSession(t *testing.T) {
+	paneCwd := "/project"
+	foregroundCwd := "/project/.venv/lib"
+	for _, agent := range []string{"omp", "pi"} {
+		got := paneCwdForUpdate(herdrcli.PaneInfo{
+			Agent:         stringPtr(agent),
+			Cwd:           &paneCwd,
+			ForegroundCwd: &foregroundCwd,
+		})
+		if got == nil || *got != paneCwd {
+			t.Fatalf("%s: got %v want %q", agent, got, paneCwd)
+		}
+	}
+}
+
+func TestPaneCwdForUpdate_OtherAgentsPreferForegroundCwd(t *testing.T) {
+	paneCwd := "/project"
+	foregroundCwd := "/project/subdir"
+	got := paneCwdForUpdate(herdrcli.PaneInfo{
+		Agent:         stringPtr("codex"),
+		Cwd:           &paneCwd,
+		ForegroundCwd: &foregroundCwd,
+	})
+	if got == nil || *got != foregroundCwd {
+		t.Fatalf("got %v want %q", got, foregroundCwd)
+	}
+}
 
 func TestWriteMetadataTokenWith_SetSuccessDeduplicates(t *testing.T) {
 	t.Setenv("HERDR_PLUGIN_STATE_DIR", t.TempDir())
@@ -105,15 +136,25 @@ func TestFormatSidebarProviderWith_EmptyAgentRendersNothing(t *testing.T) {
 	}
 }
 
-func TestFormatSidebarProviderWith_OMPPiKeepHarnessName(t *testing.T) {
+func TestFormatSidebarProviderWith_OMPPiNameCurrentBackend(t *testing.T) {
 	backendFor := func(providerID string, pane limits.OpenPaneSnapshot) string {
 		return "deepseek"
 	}
-	if got := formatSidebarProviderWith(backendFor, "omp", "omp", limits.OpenPaneSnapshot{}); got != "omp" {
-		t.Fatalf("omp: got %q want omp", got)
+	if got := formatSidebarProviderWith(backendFor, "omp", "omp", limits.OpenPaneSnapshot{}); got != "deepseek" {
+		t.Fatalf("omp: got %q want deepseek", got)
 	}
-	if got := formatSidebarProviderWith(backendFor, "pi", "pi", limits.OpenPaneSnapshot{}); got != "pi" {
-		t.Fatalf("pi: got %q want pi", got)
+	if got := formatSidebarProviderWith(backendFor, "pi", "pi", limits.OpenPaneSnapshot{}); got != "deepseek" {
+		t.Fatalf("pi: got %q want deepseek", got)
+	}
+}
+
+func TestFormatSidebarProviderWith_OMPPiWithoutBackendRendersNothing(t *testing.T) {
+	backendFor := func(providerID string, pane limits.OpenPaneSnapshot) string { return "" }
+	if got := formatSidebarProviderWith(backendFor, "omp", "omp", limits.OpenPaneSnapshot{}); got != "" {
+		t.Fatalf("omp: got %q want empty", got)
+	}
+	if got := formatSidebarProviderWith(backendFor, "pi", "pi", limits.OpenPaneSnapshot{}); got != "" {
+		t.Fatalf("pi: got %q want empty", got)
 	}
 }
 
