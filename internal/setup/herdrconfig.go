@@ -48,7 +48,8 @@ func ToastConfigSnippet() string {
 //
 // $provider replaces the built-in `agent` token: it renders the harness name
 // ("opencode") on a subscription pane and the backend name ("deepseek") on a
-// pay-as-you-go one, where the backend is the more informative half.
+// pay-as-you-go one, where the backend is the more informative half. OMP / Pi
+// keep the harness name because their backends are in-pane model routing.
 func SidebarRowsSnippet() string {
 	return strings.Join([]string{
 		"[ui.sidebar.agents]",

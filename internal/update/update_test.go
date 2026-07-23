@@ -102,3 +102,15 @@ func TestFormatSidebarProviderWith_EmptyAgentRendersNothing(t *testing.T) {
 		t.Fatalf("got %q want empty", got)
 	}
 }
+
+func TestFormatSidebarProviderWith_OMPPiKeepHarnessName(t *testing.T) {
+	backendFor := func(providerID string, pane limits.OpenPaneSnapshot) string {
+		return "deepseek"
+	}
+	if got := formatSidebarProviderWith(backendFor, "omp", "omp", limits.OpenPaneSnapshot{}); got != "omp" {
+		t.Fatalf("omp: got %q want omp", got)
+	}
+	if got := formatSidebarProviderWith(backendFor, "pi", "pi", limits.OpenPaneSnapshot{}); got != "pi" {
+		t.Fatalf("pi: got %q want pi", got)
+	}
+}

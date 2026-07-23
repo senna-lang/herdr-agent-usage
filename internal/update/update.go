@@ -27,6 +27,10 @@ func isSettledStatus(status string) bool {
 // informative half (the harness is already implied by the pane's agent icon).
 // It stands in for Herdr's built-in `agent` token, which is why it must carry
 // the harness name in the subscription case.
+//
+// OMP / Pi are the exception: their message.provider is model routing inside
+// one agent, and the adjacent burn total spans every backend in the session,
+// so $provider keeps the harness name.
 func formatSidebarProvider(agentName, providerID string, pane limits.OpenPaneSnapshot) string {
 	return formatSidebarProviderWith(limits.PaneBackendID, agentName, providerID, pane)
 }
@@ -38,6 +42,9 @@ func formatSidebarProviderWith(
 ) string {
 	if agentName == "" {
 		return ""
+	}
+	if providerID == "omp" || providerID == "pi" {
+		return agentName
 	}
 	if backendID := backendFor(providerID, pane); backendID != "" {
 		return backendID
