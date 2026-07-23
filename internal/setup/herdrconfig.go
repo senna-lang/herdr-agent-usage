@@ -46,10 +46,9 @@ func ToastConfigSnippet() string {
 // an existing [ui.sidebar.agents] section must merge these tokens into it
 // instead of appending a duplicate TOML table.
 //
-// $provider replaces the built-in `agent` token: it renders the harness name
-// ("opencode") on a subscription pane and the backend name ("deepseek") on a
-// pay-as-you-go one, where the backend is the more informative half. OMP / Pi
-// keep the harness name because their backends are in-pane model routing.
+// $provider replaces the built-in `agent` token: it renders the subscription
+// provider ("opencode-go", "grok", "claude") when one owns the pane's
+// limit, and the backend name ("deepseek") on a pay-as-you-go pane.
 func SidebarRowsSnippet() string {
 	return strings.Join([]string{
 		"[ui.sidebar.agents]",

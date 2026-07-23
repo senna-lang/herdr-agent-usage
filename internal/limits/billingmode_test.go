@@ -115,6 +115,52 @@ func TestGrokBillingModeFromAuthMode(t *testing.T) {
 	}
 }
 
+func TestOMPPiSubscriptionRoute(t *testing.T) {
+	cases := []struct {
+		backend, collector, display string
+		ok                          bool
+	}{
+		{"opencode-go", "opencode", "opencode-go", true},
+		{" OpenCode-Go ", "opencode", "opencode-go", true},
+		{"xai-oauth", "grok", "grok", true},
+		{"XAI-OAUTH", "grok", "grok", true},
+		{"xai", "", "", false},
+		{"anthropic", "", "", false}, // can be API key or OAuth; do not guess
+	}
+	for _, c := range cases {
+		route, ok := OMPPiSubscriptionRoute(c.backend)
+		if ok != c.ok || route.CollectorProviderID != c.collector || route.DisplayProviderID != c.display {
+			t.Fatalf("OMPPiSubscriptionRoute(%q) = %#v, %v", c.backend, route, ok)
+		}
+	}
+}
+
+func TestSubscriptionRouteForProviderAuth(t *testing.T) {
+	cases := []struct {
+		provider, credential, collector string
+		ok                              bool
+	}{
+		{"anthropic", "oauth", "claude", true},
+		{"anthropic", "api_key", "", false},
+		{"anthropic", "", "", false},
+		{"openai-codex", "oauth", "codex", true},
+		{"openai", "oauth", "codex", true},
+		{"openai-codex", "api_key", "", false},
+		{"openai-codex", "", "", false},
+		{"openai-codex-oauth", "", "codex", true},
+		{"openai", "api", "", false},
+		{"opencode-go", "api_key", "opencode", true},
+		{"xai-oauth", "oauth", "grok", true},
+		{"github-copilot", "oauth", "", false},
+	}
+	for _, c := range cases {
+		route, ok := SubscriptionRouteForProviderAuth(c.provider, c.credential)
+		if ok != c.ok || route.CollectorProviderID != c.collector {
+			t.Fatalf("SubscriptionRouteForProviderAuth(%q, %q) = %#v, %v", c.provider, c.credential, route, ok)
+		}
+	}
+}
+
 func TestCombineBillingModes_ClaudeEnvOverridesSubscription(t *testing.T) {
 	// Stripe subscription account running through Bedrock must hide sub windows.
 	if got := CombineBillingModes(BillingSubscription, BillingPayAsYouGo); got != BillingPayAsYouGo {
@@ -157,6 +203,23 @@ func TestBillingProviderFilter_MixedPanesKeepProvider(t *testing.T) {
 	set := BillingProviderFilter(panes, true, deps)
 	if !set["opencode"] {
 		t.Fatalf("opencode should stay included: %#v", set)
+	}
+}
+
+func TestBillingProviderFilter_RoutedHarnessUsesBilledProvider(t *testing.T) {
+	panes := []OpenPaneSnapshot{{PaneID: "omp-go", Agent: "omp"}}
+	deps := BillingDeps{
+		ResolvePane: func(OpenPaneSnapshot) (string, string, bool) { return "opencode", "omp", true },
+		PaneMode: func(providerID string, _ OpenPaneSnapshot) BillingMode {
+			if providerID != "omp" {
+				t.Fatalf("PaneMode provider=%q want harness omp", providerID)
+			}
+			return BillingSubscription
+		},
+	}
+	set := BillingProviderFilter(panes, true, deps)
+	if !set["opencode"] {
+		t.Fatalf("routed provider missing: %#v", set)
 	}
 }
 

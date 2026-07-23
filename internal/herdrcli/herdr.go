@@ -70,6 +70,20 @@ type OpenAgentPane struct {
 	PaneInfo
 }
 
+// PaneSessionCwd chooses the project directory used to resolve local session
+// files. OMP/Pi can leave a language server in the foreground with a cwd
+// inside a virtualenv; without an explicit agent session their pane cwd is
+// the stable project identity. Other harnesses retain foreground-cwd priority.
+func PaneSessionCwd(pane PaneInfo) *string {
+	if pane.Agent != nil && (*pane.Agent == "omp" || *pane.Agent == "pi") && pane.AgentSession == nil && pane.Cwd != nil {
+		return pane.Cwd
+	}
+	if pane.ForegroundCwd != nil {
+		return pane.ForegroundCwd
+	}
+	return pane.Cwd
+}
+
 func firstNonEmpty(values ...string) *string {
 	for _, v := range values {
 		if v != "" {

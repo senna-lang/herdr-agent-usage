@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/claude"
 )
 
 // isolatePluginConfig points HERDR_PLUGIN_CONFIG_DIR at an empty temp dir so
@@ -110,5 +112,24 @@ config_dir = "` + t.TempDir() + `"
 	got := ActiveProviderSet(panes)
 	if len(got) != 2 || !got["claude"] || !got["claude-secondary"] {
 		t.Fatalf("got %v, want {claude, claude-secondary}", got)
+	}
+}
+
+func TestActiveAndBillingFilters_RoutedOMPClaudeSurvivesIntersection(t *testing.T) {
+	profiles := []claude.ClaudeProfile{{ID: "claude"}}
+	panes := []OpenPaneSnapshot{{PaneID: "omp-claude", Agent: "omp"}}
+	active := activeProviderSetWith(profiles, panes, func(OpenPaneSnapshot) (string, bool) {
+		return "claude", true
+	})
+	billing := BillingProviderFilter(panes, true, BillingDeps{
+		ClaudeProfileIDs: []string{"claude"},
+		ResolvePane: func(OpenPaneSnapshot) (string, string, bool) {
+			return "claude", "omp", true
+		},
+		PaneMode: func(string, OpenPaneSnapshot) BillingMode { return BillingSubscription },
+	})
+	got := IntersectFilters(active, billing)
+	if !got["claude"] || len(got) != 1 {
+		t.Fatalf("active=%#v billing=%#v intersection=%#v", active, billing, got)
 	}
 }
