@@ -64,9 +64,13 @@ func formatCompactTokens(tokens float64) string {
 	}
 }
 
-// FormatSidebarLimit returns the shortest unexpired provider window as a
-// standalone sidebar row. Context usage remains in its own $context row.
-func FormatSidebarLimit(provider ProviderLimits, nowMs int64) string {
+// FormatSidebarLimit returns the shortest available provider window as a
+// standalone sidebar row. A window is not displaced merely because its last
+// recorded reset time has passed: providers may refresh that window shortly
+// after the boundary, and switching to a longer window makes the sidebar
+// unstable. Collection freshness is handled by the provider adapters.
+// Context usage remains in its own $context row.
+func FormatSidebarLimit(provider ProviderLimits, _ int64) string {
 	candidates := []struct {
 		window   *LimitWindow
 		fallback string
@@ -78,9 +82,6 @@ func FormatSidebarLimit(provider ProviderLimits, nowMs int64) string {
 	for _, candidate := range candidates {
 		window := candidate.window
 		if window == nil {
-			continue
-		}
-		if window.ResetsAt != nil && *window.ResetsAt > 0 && *window.ResetsAt <= nowMs/1000 {
 			continue
 		}
 		return fmt.Sprintf("%s %d%%", windowTag(window, candidate.fallback), remainingOf(window.UsedPercentage))

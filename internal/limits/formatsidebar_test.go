@@ -30,7 +30,7 @@ func TestFormatSidebarLimit_NoWindows(t *testing.T) {
 	}
 }
 
-func TestFormatSidebarLimit_SkipsExpiredWindow(t *testing.T) {
+func TestFormatSidebarLimit_KeepsShortestWindowAcrossResetBoundary(t *testing.T) {
 	five := 300
 	seven := 10080
 	expired := sidebarNowMs / 1000
@@ -47,15 +47,15 @@ func TestFormatSidebarLimit_SkipsExpiredWindow(t *testing.T) {
 			ResetsAt:       &future,
 		},
 	}
-	if got := FormatSidebarLimit(p, sidebarNowMs); got != "7d 58%" {
+	if got := FormatSidebarLimit(p, sidebarNowMs); got != "5h 3%" {
 		t.Fatalf("got %q", got)
 	}
 }
 
-func TestFormatSidebarLimit_AllWindowsExpired(t *testing.T) {
+func TestFormatSidebarLimit_ReturnsShortestWhenAllWindowsPassedReset(t *testing.T) {
 	expired := sidebarNowMs/1000 - 1
 	p := ProviderLimits{Primary: &LimitWindow{UsedPercentage: 97, ResetsAt: &expired}}
-	if got := FormatSidebarLimit(p, sidebarNowMs); got != "" {
+	if got := FormatSidebarLimit(p, sidebarNowMs); got != "5h 3%" {
 		t.Fatalf("got %q", got)
 	}
 }
