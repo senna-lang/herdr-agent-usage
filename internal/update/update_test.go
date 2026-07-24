@@ -158,6 +158,83 @@ func TestFormatSidebarProviderWith_OMPPiWithoutBackendRendersNothing(t *testing.
 	}
 }
 
+func TestSidebarSecondRowContract(t *testing.T) {
+	five, seven := 300, 10080
+	tests := []struct {
+		name                  string
+		mode                  limits.BillingMode
+		fallback, display     string
+		providerLimits        *limits.ProviderLimits
+		tokens, cost          float64
+		wantProvider, wantLim string
+	}{
+		{
+			name: "Claude subscription uses provider and shortest numeric window",
+			mode: limits.BillingSubscription, fallback: "claude", display: "claude",
+			providerLimits: &limits.ProviderLimits{
+				Primary:   &limits.LimitWindow{UsedPercentage: 66, WindowMinutes: &seven},
+				Secondary: &limits.LimitWindow{UsedPercentage: 13, WindowMinutes: &five},
+			},
+			wantProvider: "claude", wantLim: "5h 87%",
+		},
+		{
+			name: "routed harness subscription names billing provider",
+			mode: limits.BillingSubscription, fallback: "omp", display: "opencode-go",
+			providerLimits: &limits.ProviderLimits{
+				Primary: &limits.LimitWindow{UsedPercentage: 0, WindowMinutes: &five},
+			},
+			wantProvider: "opencode-go", wantLim: "5h 100%",
+		},
+		{
+			name: "Codex subscription keeps provider supplied seven day minimum",
+			mode: limits.BillingSubscription, fallback: "codex", display: "codex",
+			providerLimits: &limits.ProviderLimits{
+				Primary: &limits.LimitWindow{UsedPercentage: 67, WindowMinutes: &seven},
+			},
+			wantProvider: "codex", wantLim: "7d 33%",
+		},
+		{
+			name: "Grok subscription uses its seven day provider window",
+			mode: limits.BillingSubscription, fallback: "omp", display: "grok",
+			providerLimits: &limits.ProviderLimits{
+				Primary: &limits.LimitWindow{UsedPercentage: 86, WindowMinutes: &seven},
+			},
+			wantProvider: "grok", wantLim: "7d 14%",
+		},
+		{
+			name: "unknown billing preserves fail open subscription display",
+			mode: limits.BillingUnknown, fallback: "opencode", display: "",
+			providerLimits: &limits.ProviderLimits{
+				Primary: &limits.LimitWindow{UsedPercentage: 20, WindowMinutes: &five},
+			},
+			wantProvider: "opencode", wantLim: "5h 80%",
+		},
+		{
+			name: "token only API burn omits dollars",
+			mode: limits.BillingPayAsYouGo, fallback: "deepseek", display: "",
+			tokens:       425_000,
+			wantProvider: "deepseek", wantLim: "Σ 425k",
+		},
+		{
+			name: "cost capable harness includes dollars",
+			mode: limits.BillingPayAsYouGo, fallback: "deepseek", display: "",
+			tokens: 425_000, cost: 0.04,
+			wantProvider: "deepseek", wantLim: "Σ 425k $0.04",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			providerText, limitText := formatSidebarBillingTokens(
+				tt.mode, tt.fallback, tt.display, tt.providerLimits,
+				tt.tokens, tt.cost, 1_800_000_000_000,
+			)
+			if providerText != tt.wantProvider || limitText != tt.wantLim {
+				t.Fatalf("got provider=%q limit=%q, want provider=%q limit=%q", providerText, limitText, tt.wantProvider, tt.wantLim)
+			}
+		})
+	}
+}
+
 func TestResolveSidebarAccountLabel_PrefersEmailOverLabel(t *testing.T) {
 	dir := t.TempDir()
 	jsonPath := dir + "/.claude.json"
