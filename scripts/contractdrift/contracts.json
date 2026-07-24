@@ -1,0 +1,71 @@
+[
+  {
+    "id": "claude",
+    "label": "Claude Code",
+    "package": "@anthropic-ai/claude-code",
+    "testedVersion": "2.1.218",
+    "contracts": [
+      "assistant transcript message model and usage fields",
+      "~/.claude.json cachedUsageUtilization and oauthAccount fields",
+      "statusLine rate_limits five_hour and seven_day fields"
+    ]
+  },
+  {
+    "id": "codex",
+    "label": "Codex CLI",
+    "package": "@openai/codex",
+    "testedVersion": "0.145.0",
+    "contracts": [
+      "rollout event_msg token_count and model_context_window fields",
+      "rollout rate_limits primary secondary plan_type fields",
+      "session_meta model_provider billing identity"
+    ]
+  },
+  {
+    "id": "opencode",
+    "label": "OpenCode",
+    "package": "opencode-ai",
+    "testedVersion": "1.17.15",
+    "contracts": [
+      "opencode.db session and message tables plus message JSON fields",
+      "auth.json credential type fields",
+      "models catalog provider model limit.context fields"
+    ]
+  },
+  {
+    "id": "grok",
+    "label": "Grok Build",
+    "package": "@xai-official/grok",
+    "testedVersion": "0.2.111",
+    "contracts": [
+      "signals.json contextTokensUsed and contextWindowTokens fields",
+      "auth.json auth mode and access token fields",
+      "config.toml custom model endpoint fields",
+      "Grok credits and subscription response shapes"
+    ]
+  },
+  {
+    "id": "omp",
+    "label": "OMP",
+    "package": "@oh-my-pi/pi-coding-agent",
+    "testedVersion": "17.0.7",
+    "contracts": [
+      "assistant JSONL provider model contextSnapshot usage cost and timestamp fields",
+      "session directory and agent_session path conventions",
+      "models.db model_cache schema",
+      "agent.db auth_credentials credential_type schema"
+    ]
+  },
+  {
+    "id": "pi",
+    "label": "Pi coding agent",
+    "package": "@earendil-works/pi-coding-agent",
+    "testedVersion": "0.81.1",
+    "contracts": [
+      "assistant JSONL provider model contextSnapshot usage cost and timestamp fields",
+      "session directory and agent_session path conventions",
+      "models.db model_cache schema when present",
+      "auth.json credential type fields"
+    ]
+  }
+]
