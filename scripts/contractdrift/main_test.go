@@ -44,11 +44,54 @@ func TestCheckCleanAndDrift(t *testing.T) {
 	if len(drifts) != 1 || drifts[0].Contract.ID != "b" || drifts[0].Latest != "2.1.0" {
 		t.Fatalf("drifts = %#v", drifts)
 	}
-	out := report(drifts)
-	for _, want := range []string{"Upstream harness contract drift", "Tested: `2.0.0`", "Latest: `2.1.0`", "limit schema", "real authenticated pane"} {
+	out := report(drifts, nil)
+	for _, want := range []string{"Upstream contract drift", "Harness releases", "Tested: `2.0.0`", "Latest: `2.1.0`", "limit schema", "real authenticated pane"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in:\n%s", want, out)
 		}
+	}
+}
+
+func TestCheckPublicContractsCleanAndDrift(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/clean":
+			return response(http.StatusOK, "<p>Shared WEEKLY usage&nbsp;pool resets every week</p>"), nil
+		case "/drift":
+			return response(http.StatusOK, "<p>A new quota system</p>"), nil
+		default:
+			return response(http.StatusNotFound, "nope"), nil
+		}
+	})}
+	contracts := []publicContract{
+		{ID: "a", Label: "A", URL: "https://docs.test/clean", RequiredText: []string{"shared weekly usage pool", "resets every week"}, Contracts: []string{"weekly reset"}},
+		{ID: "b", Label: "B", URL: "https://docs.test/drift", RequiredText: []string{"five hour"}, Contracts: []string{"shortest window"}},
+	}
+	drifts, err := checkPublicContracts(client, contracts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drifts) != 1 || drifts[0].Contract.ID != "b" || len(drifts[0].Missing) != 1 {
+		t.Fatalf("drifts = %#v", drifts)
+	}
+	out := report(nil, drifts)
+	for _, want := range []string{"Public provider semantics", "https://docs.test/drift", "`five hour`", "shortest window"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestCheckPublicContractsRejectsManifestAndHTTPError(t *testing.T) {
+	if _, err := checkPublicContracts(&http.Client{}, []publicContract{{ID: "a"}}); err == nil {
+		t.Fatal("expected incomplete manifest error")
+	}
+	client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		return response(http.StatusBadGateway, "nope"), nil
+	})}
+	contracts := []publicContract{{ID: "a", Label: "A", URL: "https://docs.test/a", RequiredText: []string{"x"}, Contracts: []string{"y"}}}
+	if _, err := checkPublicContracts(client, contracts); err == nil || !strings.Contains(err.Error(), "status 502") {
+		t.Fatalf("expected provider status error, got %v", err)
 	}
 }
 

@@ -251,7 +251,13 @@ Two scheduled workflows keep those dependencies visible:
   model catalog.
 - **Upstream contract drift** compares the latest official npm releases of
   Claude Code, Codex CLI, OpenCode, Grok Build, OMP, and Pi with the versions
-  recorded in `scripts/contractdrift/contracts.json`.
+  recorded in `scripts/contractdrift/contracts.json`. It also checks the
+  provider-owned limit semantics recorded in
+  `scripts/contractdrift/provider-contracts.json` against official Claude,
+  Codex, OpenCode Go, and Grok pages. These semantic checks cover the concepts
+  the implementation depends on (window units, used/left meaning, shared
+  provider ownership, and subscription/API separation), not brittle whole-page
+  hashes.
 
 A harness version difference opens or updates one audit issue. It does not
 claim the plugin is broken. The issue lists the exact local/session/auth/limit
@@ -260,6 +266,13 @@ authenticated live-pane smoke test, update the implementation if necessary or
 advance that harness's `testedVersion`. Provider responses that require a real
 subscription cannot be safely exercised by public CI, so the live smoke step
 remains mandatory before advancing those baselines.
+
+There are therefore three drift gates: a harness release signal, public
+provider-semantic assertions, and an authenticated live response check. The
+last gate is intentionally manual because CI must not contain personal
+subscription credentials. In particular, OpenCode Go's unauthenticated local
+fallback currently assumes fixed 5h / 7d / 30d USD caps; those constants must
+be revalidated whenever the published Go quota model changes.
 
 ## Data handling
 

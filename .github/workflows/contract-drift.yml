@@ -1,6 +1,6 @@
-# Weekly audit trigger for upstream harness releases. A new version is not
-# assumed broken; it opens or updates one issue listing the local/session/auth/
-# billing contracts that must be reverified before advancing the baseline.
+# Weekly audit trigger for upstream harness releases and public provider limit
+# semantics. Drift is not assumed broken; it opens or updates one issue listing
+# the local/session/auth/billing contracts that must be reverified.
 name: Upstream contract drift
 
 on:
@@ -22,7 +22,7 @@ jobs:
         with:
           go-version: "1.25"
 
-      - name: Check supported harness releases
+      - name: Check harness releases and provider semantics
         id: check
         run: |
           go build -o "$RUNNER_TEMP/contractdrift" ./scripts/contractdrift
@@ -44,7 +44,7 @@ jobs:
         run: |
           gh label create upstream-contract-drift \
             --color D93F0B \
-            --description "Supported harness release requires contract revalidation" \
+            --description "Harness or provider contract requires revalidation" \
             --force
           existing="$(gh issue list --label upstream-contract-drift --state open --json number --jq '.[0].number')"
           if [ -n "$existing" ]; then
@@ -53,7 +53,7 @@ jobs:
           else
             gh issue create \
               --label upstream-contract-drift \
-              --title "Upstream harness contract drift detected" \
+              --title "Upstream contract drift detected" \
               --body-file report.md
           fi
 

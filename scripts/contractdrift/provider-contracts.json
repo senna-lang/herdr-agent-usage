@@ -1,0 +1,62 @@
+[
+  {
+    "id": "claude",
+    "label": "Claude subscription limits",
+    "url": "https://support.anthropic.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan",
+    "requiredText": [
+      "shared across claude and claude code",
+      "every 5 hours",
+      "api credits"
+    ],
+    "contracts": [
+      "subscription usage is shared by Claude and Claude Code",
+      "the shortest documented subscription window remains five hours",
+      "subscription allowance and pay-as-you-go API credits remain distinct"
+    ]
+  },
+  {
+    "id": "codex",
+    "label": "Codex subscription limits",
+    "url": "https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan",
+    "requiredText": [
+      "usage limits vary by plan",
+      "codex limit",
+      "credits"
+    ],
+    "contracts": [
+      "Codex subscription limits remain plan-owned rather than API rate limits",
+      "the provider can expose remaining allowance and reset behavior",
+      "included subscription usage and additional credits remain distinguishable"
+    ]
+  },
+  {
+    "id": "opencode-go",
+    "label": "OpenCode Go limits",
+    "url": "https://dev.opencode.ai/go",
+    "requiredText": [
+      "requests per 5 hour",
+      "use with any agent",
+      "subscription"
+    ],
+    "contracts": [
+      "the documented shortest window remains five hours",
+      "OpenCode Go remains a provider subscription usable from multiple harnesses",
+      "local fallback caps and windows must be revalidated whenever the published quota model changes"
+    ]
+  },
+  {
+    "id": "grok",
+    "label": "SuperGrok limits",
+    "url": "https://docs.x.ai/grok/faq",
+    "requiredText": [
+      "shared weekly usage pool",
+      "percentage used",
+      "resets every week"
+    ],
+    "contracts": [
+      "SuperGrok remains one provider-owned weekly pool shared across products",
+      "the reported percentage is used percentage and must be converted to percent left for display",
+      "the provider continues to expose a weekly reset schedule"
+    ]
+  }
+]
