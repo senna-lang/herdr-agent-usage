@@ -18,6 +18,7 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 	_ "modernc.org/sqlite"
 )
 
@@ -43,7 +44,25 @@ func DefaultBillingDeps() BillingDeps {
 			return accountBillingModeWith(profiles, providerID)
 		},
 		ClaudeProfileIDs: ids,
+		ResolvePane: func(pane OpenPaneSnapshot) (string, string, bool) {
+			return resolveBilledPane(profiles, pane)
+		},
 	}
+}
+
+func resolveBilledPane(profiles []claude.ClaudeProfile, pane OpenPaneSnapshot) (providerID, harnessID string, ok bool) {
+	harnessID, ok = agentToProvider[strings.ToLower(pane.Agent)]
+	if !ok {
+		return "", "", false
+	}
+	if harnessID == "claude" {
+		providerID, ok = BuildClaudePaneProviderResolver(profiles)(pane)
+		return providerID, harnessID, ok
+	}
+	if route, routed := paneSubscriptionRoute(harnessID, pane); routed {
+		return route.CollectorProviderID, harnessID, true
+	}
+	return harnessID, harnessID, true
 }
 
 // paneBillingModeWith dispatches by provider id against an explicit profile
@@ -57,9 +76,27 @@ func paneBillingModeWith(profiles []claude.ClaudeProfile, providerID string, pan
 	}
 	switch providerID {
 	case "opencode":
+		if _, ok := paneSubscriptionRoute(providerID, pane); ok {
+			return BillingSubscription
+		}
+		if paneHasOAuthCredential(providerID, pane) {
+			// This is a real subscription/login, but its collector is not
+			// implemented yet (for example Copilot). Never turn it into a
+			// fabricated API spend total merely because the collector is absent.
+			return BillingUnknown
+		}
 		return opencodePaneBillingMode(pane)
 	case "omp", "pi":
-		// OMP / stock Pi sessions are API-key / Cursor-backed; no subscription quota windows.
+		if _, ok := paneSubscriptionRoute(providerID, pane); ok {
+			// The session records a known subscription gateway.  Its quota is
+			// owned by that gateway's account, not by the OMP/Pi harness.
+			return BillingSubscription
+		}
+		if paneHasOAuthCredential(providerID, pane) {
+			return BillingUnknown
+		}
+		// Other OMP / stock Pi sessions have no positive subscription route
+		// evidence, so retain the backend-scoped PAYG behavior.
 		return BillingPayAsYouGo
 	case "codex":
 		return codexPaneBillingMode(pane)
@@ -68,6 +105,26 @@ func paneBillingModeWith(profiles []claude.ClaudeProfile, providerID string, pan
 	default:
 		return BillingUnknown
 	}
+}
+
+// SubscriptionLimitsProviderID maps a pane's harness provider to the account
+// provider that owns its subscription windows. OMP/Pi can run supported
+// subscription gateways inside their own harness sessions.
+func SubscriptionLimitsProviderID(providerID string, pane OpenPaneSnapshot) string {
+	if route, ok := paneSubscriptionRoute(providerID, pane); ok {
+		return route.CollectorProviderID
+	}
+	return providerID
+}
+
+// SubscriptionDisplayProviderID returns the provider label that should sit
+// beside a subscription limit.  It preserves the gateway's distinct name
+// (not the OMP/Pi harness and not the collector's internal id).
+func SubscriptionDisplayProviderID(providerID string, pane OpenPaneSnapshot) string {
+	if route, ok := paneSubscriptionRoute(providerID, pane); ok {
+		return route.DisplayProviderID
+	}
+	return providerID
 }
 
 func accountBillingModeWith(profiles []claude.ClaudeProfile, providerID string) BillingMode {
@@ -456,6 +513,54 @@ func ompPaneBackendID(pane OpenPaneSnapshot) string {
 		return ""
 	}
 	return omp.BackendIDForPath(path)
+}
+
+func ompPiPaneBackendID(providerID string, pane OpenPaneSnapshot) string {
+	if providerID == "omp" {
+		return ompPaneBackendID(pane)
+	}
+	if providerID == "pi" {
+		return piPaneBackendID(pane)
+	}
+	return ""
+}
+
+func ompPiSubscriptionRoute(providerID string, pane OpenPaneSnapshot) (SubscriptionRoute, bool) {
+	backendID := ompPiPaneBackendID(providerID, pane)
+	credentialType := paneCredentialType(providerID, pane)
+	return SubscriptionRouteForProviderAuth(backendID, credentialType)
+}
+
+func paneCredentialType(providerID string, pane OpenPaneSnapshot) string {
+	switch providerID {
+	case "omp":
+		return omp.CredentialType(ompPiPaneBackendID(providerID, pane))
+	case "pi":
+		return omp.PiCredentialType(ompPiPaneBackendID(providerID, pane))
+	case "opencode":
+		backendID := opencodePaneBackendID(pane)
+		return opencode.CredentialType(backendID)
+	default:
+		return ""
+	}
+}
+
+func paneHasOAuthCredential(providerID string, pane OpenPaneSnapshot) bool {
+	return strings.Contains(paneCredentialType(providerID, pane), "oauth")
+}
+
+// paneSubscriptionRoute resolves the subscription owner for harnesses that
+// may delegate a turn to another provider account.
+func paneSubscriptionRoute(providerID string, pane OpenPaneSnapshot) (SubscriptionRoute, bool) {
+	switch providerID {
+	case "omp", "pi":
+		return ompPiSubscriptionRoute(providerID, pane)
+	case "opencode":
+		backendID := opencodePaneBackendID(pane)
+		return SubscriptionRouteForProviderAuth(backendID, paneCredentialType(providerID, pane))
+	default:
+		return SubscriptionRoute{}, false
+	}
 }
 
 // ompSessionPath resolves the OMP jsonl path from SessionID, else newest cwd session.

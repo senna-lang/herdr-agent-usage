@@ -67,6 +67,53 @@ func OpenCodeBillingModeFromProviderID(providerID *string) BillingMode {
 	return BillingPayAsYouGo
 }
 
+// SubscriptionRoute identifies the quota collector and sidebar label for a
+// subscription gateway used inside another harness.  The harness and the
+// subscription are deliberately separate: OMP/Pi may execute through an
+// OpenCode Go or Grok login without themselves owning either quota.
+type SubscriptionRoute struct {
+	CollectorProviderID string
+	DisplayProviderID   string
+}
+
+// OMPPiSubscriptionRoute maps the provider id recorded in an OMP/Pi session
+// to one of the subscription collectors this plugin already implements.
+//
+// Keep this positive-evidence-only: an ordinary provider id such as
+// "anthropic" may mean an API key as well as an OAuth login, and must not be
+// guessed into a subscription account.
+func OMPPiSubscriptionRoute(backendID string) (SubscriptionRoute, bool) {
+	return SubscriptionRouteForProviderAuth(backendID, "")
+}
+
+// SubscriptionRouteForProviderAuth maps a session provider plus its recorded
+// credential kind to one of this plugin's subscription collectors.  OAuth is
+// required for ambiguous provider ids such as "anthropic"; the same id with
+// an API key remains pay-as-you-go.
+func SubscriptionRouteForProviderAuth(backendID, credentialType string) (SubscriptionRoute, bool) {
+	backendID = strings.ToLower(strings.TrimSpace(backendID))
+	credentialType = strings.ToLower(strings.TrimSpace(credentialType))
+	switch strings.ToLower(strings.TrimSpace(backendID)) {
+	case "opencode-go":
+		return SubscriptionRoute{CollectorProviderID: "opencode", DisplayProviderID: "opencode-go"}, true
+	case "xai-oauth":
+		return SubscriptionRoute{CollectorProviderID: "grok", DisplayProviderID: "grok"}, true
+	case "anthropic":
+		if strings.Contains(credentialType, "oauth") {
+			return SubscriptionRoute{CollectorProviderID: "claude", DisplayProviderID: "claude"}, true
+		}
+	case "openai", "openai-codex":
+		if strings.Contains(credentialType, "oauth") {
+			return SubscriptionRoute{CollectorProviderID: "codex", DisplayProviderID: "codex"}, true
+		}
+	case "openai-codex-oauth":
+		return SubscriptionRoute{CollectorProviderID: "codex", DisplayProviderID: "codex"}, true
+	default:
+		return SubscriptionRoute{}, false
+	}
+	return SubscriptionRoute{}, false
+}
+
 // CodexBillingModeFromLines inspects a rollout tail. A token_count event
 // carrying rate_limits proves a subscription backend (unless plan_type says
 // API key); token_count events without any rate_limits mean the backend
@@ -173,6 +220,9 @@ type BillingDeps struct {
 	// universe so each configured account is gated independently. Empty
 	// defaults to ["claude"] (today's single-profile behavior).
 	ClaudeProfileIDs []string
+	// ResolvePane maps one harness pane to its billed provider while retaining
+	// the harness id needed to read session-specific evidence.
+	ResolvePane func(pane OpenPaneSnapshot) (providerID, harnessID string, ok bool)
 }
 
 // PaneBillingMode combines account- and session-level evidence for one pane.
@@ -202,11 +252,21 @@ func BillingProviderFilter(openPanes []OpenPaneSnapshot, paneQueryOK bool, deps 
 	allIDs = append(allIDs, claudeIDs...)
 	allIDs = append(allIDs, nonClaudeProviderIDs...)
 
-	byProvider := make(map[string][]OpenPaneSnapshot)
+	type billedPane struct {
+		harnessID string
+		pane      OpenPaneSnapshot
+	}
+	byProvider := make(map[string][]billedPane)
 	if paneQueryOK {
 		for _, pane := range openPanes {
-			if providerID, ok := agentToProvider[strings.ToLower(pane.Agent)]; ok {
-				byProvider[providerID] = append(byProvider[providerID], pane)
+			providerID, harnessID, ok := "", "", false
+			if deps.ResolvePane != nil {
+				providerID, harnessID, ok = deps.ResolvePane(pane)
+			} else if id, found := agentToProvider[strings.ToLower(pane.Agent)]; found {
+				providerID, harnessID, ok = id, id, true
+			}
+			if ok {
+				byProvider[providerID] = append(byProvider[providerID], billedPane{harnessID: harnessID, pane: pane})
 			}
 		}
 	}
@@ -224,10 +284,10 @@ func BillingProviderFilter(openPanes []OpenPaneSnapshot, paneQueryOK bool, deps 
 			set[providerID] = true
 			continue
 		}
-		for _, pane := range panes {
+		for _, entry := range panes {
 			session := BillingUnknown
 			if deps.PaneMode != nil {
-				session = deps.PaneMode(providerID, pane)
+				session = deps.PaneMode(entry.harnessID, entry.pane)
 			}
 			if CombineBillingModes(account, session) != BillingPayAsYouGo {
 				set[providerID] = true

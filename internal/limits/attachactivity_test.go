@@ -107,4 +107,33 @@ func TestAttachPaneActivity_NoOpenPanes(t *testing.T) {
 	}
 }
 
+func TestAttachPaneActivity_GroupsHarnessesBySubscriptionProvider(t *testing.T) {
+	wm := 300
+	providers := []ProviderLimits{{
+		ProviderID: "opencode", Label: "OpenCode", Source: "test",
+		Primary: &LimitWindow{WindowMinutes: &wm},
+	}}
+	open := []OpenPaneSnapshot{
+		{PaneID: "open", Agent: "opencode", Label: "OpenCode pane"},
+		{PaneID: "omp", Agent: "omp", Label: "OMP pane"},
+	}
+	result := AttachPaneActivity(providers, open, 1_700_000_000_000, PaneActivityDeps{
+		ResolvePaneProvider: func(p OpenPaneSnapshot) (string, bool) {
+			// Both harnesses used the OpenCode Go subscription route.
+			return "opencode", true
+		},
+		TokensForPane: func(_ string, pane OpenPaneSnapshot, _, _ int64) float64 {
+			if pane.PaneID == "open" {
+				return 60
+			}
+			return 40
+		},
+		TotalTokensForProvider: func(string, int64, int64) float64 { return 100 },
+	})
+	activity := result[0].PaneActivity
+	if activity == nil || len(activity.Panes) != 2 || activity.Panes[0].Tokens != 60 || activity.Panes[1].Tokens != 40 {
+		t.Fatalf("activity=%+v", activity)
+	}
+}
+
 func strP(s string) *string { return &s }

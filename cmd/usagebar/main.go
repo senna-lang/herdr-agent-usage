@@ -198,10 +198,7 @@ func openPaneSnapshots() ([]limits.OpenPaneSnapshot, bool) {
 		if p.AgentSession != nil {
 			sid = &p.AgentSession.Value
 		}
-		cwd := p.ForegroundCwd
-		if cwd == nil {
-			cwd = p.Cwd
-		}
+		cwd := herdrcli.PaneSessionCwd(p.PaneInfo)
 		snaps = append(snaps, limits.OpenPaneSnapshot{
 			PaneID: p.PaneID, Agent: agent, Label: label,
 			SessionID: sid, Cwd: cwd,

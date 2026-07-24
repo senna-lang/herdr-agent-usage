@@ -61,6 +61,7 @@ func activeAPIPaneBackends(openPanes []OpenPaneSnapshot, harnessID string) []pan
 func CollectAPIProviderUsage(openPanes []OpenPaneSnapshot, nowMs int64) []APIProviderUsage {
 	out := collectOpenCodeAPIUsage(openPanes, nowMs)
 	out = append(out, collectFileHarnessAPIUsage(openPanes, nowMs)...)
+	out = MergeAPIProviderUsage(out)
 	sortAPIProviderUsage(out)
 	return out
 }

@@ -33,6 +33,22 @@ func TestSumUsageFromLines(t *testing.T) {
 	}
 }
 
+func TestSumUsageForProviderFromLines_FiltersBackend(t *testing.T) {
+	lines := []string{
+		`{"type":"message","message":{"role":"assistant","provider":"deepseek","timestamp":100,"usage":{"totalTokens":10,"cost":{"total":0.1}}}}`,
+		`{"type":"message","message":{"role":"assistant","provider":"openai","timestamp":200,"usage":{"totalTokens":20,"cost":{"total":0.2}}}}`,
+		`{"type":"message","message":{"role":"assistant","provider":"deepseek","timestamp":300,"usage":{"totalTokens":40,"cost":{"total":0.4}}}}`,
+	}
+	tokens, cost := SumUsageForProviderFromLines(lines, "deepseek", 0, 0)
+	if tokens != 50 || cost < 0.499 || cost > 0.501 {
+		t.Fatalf("deepseek: tokens=%v cost=%v", tokens, cost)
+	}
+	tokens, cost = SumUsageForProviderFromLines(lines, "openai", 0, 0)
+	if tokens != 20 || cost < 0.199 || cost > 0.201 {
+		t.Fatalf("openai: tokens=%v cost=%v", tokens, cost)
+	}
+}
+
 func TestExtractLatestBackendFromLines(t *testing.T) {
 	lines := []string{
 		`{"type":"message","message":{"role":"assistant","provider":"deepseek","model":"x","usage":{"totalTokens":1},"contextSnapshot":{"promptTokens":1}}}`,
