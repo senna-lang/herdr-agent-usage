@@ -27,8 +27,9 @@ jobs:
       - name: Check for model-window drift
         id: check
         run: |
+          go build -o "$RUNNER_TEMP/modeldrift" ./scripts/modeldrift
           set +e
-          go run ./scripts/modeldrift > report.md
+          "$RUNNER_TEMP/modeldrift" > report.md
           code=$?
           set -e
           echo "code=$code" >> "$GITHUB_OUTPUT"

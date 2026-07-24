@@ -1,0 +1,68 @@
+# Weekly audit trigger for upstream harness releases and public provider limit
+# semantics. Drift is not assumed broken; it opens or updates one issue listing
+# the local/session/auth/billing contracts that must be reverified.
+name: Upstream contract drift
+
+on:
+  schedule:
+    - cron: "20 6 * * 1" # Mondays 06:20 UTC (15:20 JST)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25"
+
+      - name: Check harness releases and provider semantics
+        id: check
+        run: |
+          go build -o "$RUNNER_TEMP/contractdrift" ./scripts/contractdrift
+          set +e
+          "$RUNNER_TEMP/contractdrift" > report.md
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 1 ]; then
+            echo "::error::contract-drift checker failed; no drift conclusion can be drawn"
+            exit 1
+          fi
+          cat report.md
+
+      - name: Open or update drift issue
+        if: steps.check.outputs.code == '2'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create upstream-contract-drift \
+            --color D93F0B \
+            --description "Harness or provider contract requires revalidation" \
+            --force
+          existing="$(gh issue list --label upstream-contract-drift --state open --json number --jq '.[0].number')"
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body-file report.md
+            echo "Updated existing drift issue #$existing"
+          else
+            gh issue create \
+              --label upstream-contract-drift \
+              --title "Upstream contract drift detected" \
+              --body-file report.md
+          fi
+
+      - name: Close resolved drift issue
+        if: steps.check.outputs.code == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing="$(gh issue list --label upstream-contract-drift --state open --json number --jq '.[0].number')"
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "All supported harness releases now match the tested contract baselines. Closing automatically."
+          fi
