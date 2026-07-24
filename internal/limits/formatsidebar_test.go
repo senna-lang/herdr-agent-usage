@@ -52,6 +52,25 @@ func TestFormatSidebarLimit_KeepsShortestWindowAcrossResetBoundary(t *testing.T)
 	}
 }
 
+func TestFormatSidebarLimit_ClaudeKeepsFiveHourAtResetBoundary(t *testing.T) {
+	raw := `{
+		"cachedUsageUtilization": {
+			"fetchedAtMs": 1799999999000,
+			"utilization": {
+				"five_hour": {"utilization": 13, "resets_at": "2027-01-15T07:59:59Z"},
+				"seven_day": {"utilization": 79, "resets_at": "2027-01-20T08:00:00Z"}
+			}
+		}
+	}`
+	provider := ProviderLimitsFromClaudeJSON(raw, sidebarNowMs)
+	if provider == nil {
+		t.Fatal("expected Claude limits")
+	}
+	if got := FormatSidebarLimit(*provider, sidebarNowMs); got != "5h 87%" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestFormatSidebarLimit_ReturnsShortestWhenAllWindowsPassedReset(t *testing.T) {
 	expired := sidebarNowMs/1000 - 1
 	p := ProviderLimits{Primary: &LimitWindow{UsedPercentage: 97, ResetsAt: &expired}}
