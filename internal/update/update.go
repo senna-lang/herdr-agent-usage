@@ -111,6 +111,34 @@ func formatSidebarProviderWith(
 	return agentName
 }
 
+// formatSidebarBillingTokens renders the sidebar's provider/limit pair after
+// billing identity and usage have been resolved. Subscription panes name the
+// quota provider and show its numerically shortest limit window. Pay-as-you-go
+// panes keep the resolved backend name and show backend-scoped session burn,
+// including USD only when the harness supplied a non-zero cost.
+func formatSidebarBillingTokens(
+	billingMode limits.BillingMode,
+	fallbackProviderText, displayProviderID string,
+	providerLimits *limits.ProviderLimits,
+	totalTokens, totalCostUSD float64,
+	nowMs int64,
+) (providerText, limitText string) {
+	providerText = fallbackProviderText
+	if billingMode != limits.BillingPayAsYouGo {
+		if billingMode == limits.BillingSubscription {
+			providerText = displayProviderID
+		}
+		if providerLimits != nil {
+			limitText = limits.FormatSidebarLimit(*providerLimits, nowMs)
+		}
+		return providerText, limitText
+	}
+	if billingMode == limits.BillingPayAsYouGo {
+		limitText = limits.FormatSidebarBurn(totalTokens, totalCostUSD)
+	}
+	return providerText, limitText
+}
+
 type metadataTokenWriter struct {
 	set   func(paneID, source, name, value string) bool
 	clear func(paneID, source, name string) bool
@@ -164,7 +192,6 @@ func RunUpdate(force bool) {
 
 	cwd := paneCwdForUpdate(pane)
 	nowMs := time.Now().UnixMilli()
-	limitText := ""
 	// Subscription limits only apply when the pane's session is billed against
 	// a subscription plan; a pay-as-you-go backend (API key, custom base_url)
 	// has no plan window to report against, so the row shows the pane's
@@ -193,19 +220,25 @@ func RunUpdate(force bool) {
 	billingMode := limits.PaneBillingMode(providerID, snapshot, limits.DefaultBillingDeps())
 	limitsProviderID := limits.SubscriptionLimitsProviderID(providerID, snapshot)
 	displayProviderID := limits.SubscriptionDisplayProviderID(providerID, snapshot)
+	var providerLimits *limits.ProviderLimits
+	var totalTokens, totalCostUSD float64
 	if billingMode == limits.BillingPayAsYouGo {
-		totalTokens, totalCostUSD := limits.PaneTotalUsage(providerID, snapshot, nowMs)
-		limitText = limits.FormatSidebarBurn(totalTokens, totalCostUSD)
+		totalTokens, totalCostUSD = limits.PaneTotalUsage(providerID, snapshot, nowMs)
 	} else {
 		collectOptions := limits.DefaultCollectOptions()
 		// Sidebar refresh deliberately collects only this pane's provider and leaves
 		// Attach nil, avoiding the heavier cross-pane activity aggregation path.
 		collectOptions.Only = map[string]bool{limitsProviderID: true}
-		providerLimits := limits.CollectAllProviderLimits(cwd, nowMs, collectOptions)
-		if len(providerLimits) > 0 {
-			limitText = limits.FormatSidebarLimit(providerLimits[0], nowMs)
+		collected := limits.CollectAllProviderLimits(cwd, nowMs, collectOptions)
+		if len(collected) > 0 {
+			providerLimits = &collected[0]
 		}
 	}
+	fallbackProviderText := formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot)
+	providerText, limitText := formatSidebarBillingTokens(
+		billingMode, fallbackProviderText, displayProviderID,
+		providerLimits, totalTokens, totalCostUSD, nowMs,
+	)
 
 	// With 2+ configured Claude accounts, the $limit row's job shifts from
 	// "show the limit" to "show which account this pane is" (joined with
@@ -227,10 +260,6 @@ func RunUpdate(force bool) {
 
 	// Stands in for Herdr's `agent` token so a pay-as-you-go pane names the
 	// backend it is actually billing ("deepseek") instead of the harness.
-	providerText := formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot)
-	if billingMode == limits.BillingSubscription {
-		providerText = displayProviderID
-	}
 	writeMetadataToken(paneID, "provider", providerText, force)
 
 	// Context tokens: claude is read from its resolved profile's own transcript
