@@ -16,6 +16,28 @@ func TestFormatSidebarLimit_PrefersShortestAvailableWindow(t *testing.T) {
 	}
 }
 
+func TestFormatSidebarLimit_UsesWindowDurationInsteadOfSlotOrder(t *testing.T) {
+	five := 300
+	seven := 10080
+	p := ProviderLimits{
+		Primary:   &LimitWindow{UsedPercentage: 70, WindowMinutes: &seven},
+		Secondary: &LimitWindow{UsedPercentage: 28.4, WindowMinutes: &five},
+	}
+	if got := FormatSidebarLimit(p, sidebarNowMs); got != "5h 72%" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFormatSidebarLimit_UsesSlotOrderWhenDurationsAreMissing(t *testing.T) {
+	p := ProviderLimits{
+		Primary:   &LimitWindow{UsedPercentage: 28.4},
+		Secondary: &LimitWindow{UsedPercentage: 70},
+	}
+	if got := FormatSidebarLimit(p, sidebarNowMs); got != "5h 72%" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestFormatSidebarLimit_FallsBackToNextWindow(t *testing.T) {
 	seven := 10080
 	p := ProviderLimits{Secondary: &LimitWindow{UsedPercentage: 41.6, WindowMinutes: &seven}}

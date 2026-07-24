@@ -79,12 +79,35 @@ func FormatSidebarLimit(provider ProviderLimits, _ int64) string {
 		{provider.Secondary, "7d"},
 		{provider.Tertiary, "30d"},
 	}
+	var fallback *struct {
+		window   *LimitWindow
+		fallback string
+	}
+	var shortest *struct {
+		window   *LimitWindow
+		fallback string
+	}
 	for _, candidate := range candidates {
 		window := candidate.window
 		if window == nil {
 			continue
 		}
-		return fmt.Sprintf("%s %d%%", windowTag(window, candidate.fallback), remainingOf(window.UsedPercentage))
+		candidate := candidate
+		if fallback == nil {
+			fallback = &candidate
+		}
+		if window.WindowMinutes == nil || *window.WindowMinutes <= 0 {
+			continue
+		}
+		if shortest == nil || *window.WindowMinutes < *shortest.window.WindowMinutes {
+			shortest = &candidate
+		}
 	}
-	return ""
+	if shortest == nil {
+		shortest = fallback
+	}
+	if shortest == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s %d%%", windowTag(shortest.window, shortest.fallback), remainingOf(shortest.window.UsedPercentage))
 }
