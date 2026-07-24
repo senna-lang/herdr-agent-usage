@@ -16,6 +16,28 @@ func TestFormatSidebarLimit_PrefersShortestAvailableWindow(t *testing.T) {
 	}
 }
 
+func TestFormatSidebarLimit_UsesWindowDurationInsteadOfSlotOrder(t *testing.T) {
+	five := 300
+	seven := 10080
+	p := ProviderLimits{
+		Primary:   &LimitWindow{UsedPercentage: 70, WindowMinutes: &seven},
+		Secondary: &LimitWindow{UsedPercentage: 28.4, WindowMinutes: &five},
+	}
+	if got := FormatSidebarLimit(p, sidebarNowMs); got != "5h 72%" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFormatSidebarLimit_UsesSlotOrderWhenDurationsAreMissing(t *testing.T) {
+	p := ProviderLimits{
+		Primary:   &LimitWindow{UsedPercentage: 28.4},
+		Secondary: &LimitWindow{UsedPercentage: 70},
+	}
+	if got := FormatSidebarLimit(p, sidebarNowMs); got != "5h 72%" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestFormatSidebarLimit_FallsBackToNextWindow(t *testing.T) {
 	seven := 10080
 	p := ProviderLimits{Secondary: &LimitWindow{UsedPercentage: 41.6, WindowMinutes: &seven}}
@@ -30,7 +52,7 @@ func TestFormatSidebarLimit_NoWindows(t *testing.T) {
 	}
 }
 
-func TestFormatSidebarLimit_SkipsExpiredWindow(t *testing.T) {
+func TestFormatSidebarLimit_KeepsShortestWindowAcrossResetBoundary(t *testing.T) {
 	five := 300
 	seven := 10080
 	expired := sidebarNowMs / 1000
@@ -47,15 +69,34 @@ func TestFormatSidebarLimit_SkipsExpiredWindow(t *testing.T) {
 			ResetsAt:       &future,
 		},
 	}
-	if got := FormatSidebarLimit(p, sidebarNowMs); got != "7d 58%" {
+	if got := FormatSidebarLimit(p, sidebarNowMs); got != "5h 3%" {
 		t.Fatalf("got %q", got)
 	}
 }
 
-func TestFormatSidebarLimit_AllWindowsExpired(t *testing.T) {
+func TestFormatSidebarLimit_ClaudeKeepsFiveHourAtResetBoundary(t *testing.T) {
+	raw := `{
+		"cachedUsageUtilization": {
+			"fetchedAtMs": 1799999999000,
+			"utilization": {
+				"five_hour": {"utilization": 13, "resets_at": "2027-01-15T07:59:59Z"},
+				"seven_day": {"utilization": 79, "resets_at": "2027-01-20T08:00:00Z"}
+			}
+		}
+	}`
+	provider := ProviderLimitsFromClaudeJSON(raw, sidebarNowMs)
+	if provider == nil {
+		t.Fatal("expected Claude limits")
+	}
+	if got := FormatSidebarLimit(*provider, sidebarNowMs); got != "5h 87%" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFormatSidebarLimit_ReturnsShortestWhenAllWindowsPassedReset(t *testing.T) {
 	expired := sidebarNowMs/1000 - 1
 	p := ProviderLimits{Primary: &LimitWindow{UsedPercentage: 97, ResetsAt: &expired}}
-	if got := FormatSidebarLimit(p, sidebarNowMs); got != "" {
+	if got := FormatSidebarLimit(p, sidebarNowMs); got != "5h 3%" {
 		t.Fatalf("got %q", got)
 	}
 }
