@@ -516,6 +516,11 @@ func runOpenCodeCheck() {
 	if env := strings.TrimSpace(os.Getenv("OPENCODE_GO_COOKIE")); env != "" {
 		cookie = env
 		fmt.Println("cookie: OPENCODE_GO_COOKIE is set (browser import skipped)")
+	} else if strings.TrimSpace(os.Getenv("USAGEBAR_DISABLE_BROWSER_COOKIES")) != "" {
+		// Distinguish "opted out" from "looked and found nothing".
+		fmt.Println("cookie: browser import is disabled by USAGEBAR_DISABLE_BROWSER_COOKIES")
+		fmt.Println("        unset it, or set OPENCODE_GO_COOKIE, to use official usage")
+		return
 	} else {
 		imported, probes, ok := limits.ImportBrowserCookieHeaderWithProbes(limits.OpenCodeCookieDomain, nowMs)
 		fmt.Printf("browser profiles probed: %d\n", len(probes))
