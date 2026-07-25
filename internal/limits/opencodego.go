@@ -249,9 +249,12 @@ func ProviderLimitsFromGoCostEvents(events []CostEvent, nowMs int64) ProviderLim
 }
 
 // ProviderLimitsFromWebSnapshot maps web usagePercent to used% + resetsAt.
+// No note: the windows, their resets, and the plan label already say
+// everything the page offers, and the workspace id it used to carry meant
+// nothing to a reader. The local-estimate path keeps its own "est. spent …"
+// note, which is what makes an estimate distinguishable from these numbers.
 func ProviderLimitsFromWebSnapshot(snap OpenCodeGoWebSnapshot, nowMs int64) ProviderLimits {
 	plan := planlabels.OpencodePlanLabel(strPtr("go"))
-	note := "workspace " + snap.WorkspaceID
 	var weekly, monthly *LimitWindow
 	if snap.Weekly != nil {
 		weekly = windowFromUsed(snap.Weekly.UsedPercentage, 10080, resetsAtFromResetInSec(nowMs, int64(snap.Weekly.ResetInSec)))
@@ -268,7 +271,6 @@ func ProviderLimitsFromWebSnapshot(snap OpenCodeGoWebSnapshot, nowMs int64) Prov
 		Tertiary:    monthly,
 		Source:      snap.Source,
 		FetchedAtMs: nowMs,
-		Note:        &note,
 	}
 }
 
