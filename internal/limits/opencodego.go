@@ -391,10 +391,25 @@ func loadCostEventsFromDB(dbPath string) ([]CostEvent, error) {
 	return CostEventsFromMessageDataJSONs(list), nil
 }
 
-// CollectOpenCodeLimits prefers web (OPENCODE_GO_COOKIE) then local DB.
+// CollectOpenCodeLimits prefers opencode.ai's own usage (authenticated with
+// OPENCODE_GO_COOKIE or an imported browser session) then the local DB
+// estimate. The web result — success or failure — is cached, because the
+// sidebar collects on every pane status change.
 func CollectOpenCodeLimits(nowMs int64, dbPath string) ProviderLimits {
-	if web := FetchOpenCodeGoWebUsage("", nowMs); web != nil {
-		return ProviderLimitsFromWebSnapshot(*web, nowMs)
+	// A fresh cache entry with no limits is a recent unsuccessful attempt:
+	// fall through to the local estimate without retrying the network.
+	if cached, fresh := loadOpenCodeWebCache(nowMs); fresh {
+		if cached != nil {
+			return *cached
+		}
+	} else if cookie := ReadOpenCodeGoCookieHeader(); cookie == "" {
+		saveOpenCodeWebCache(nil, openCodeWebNoSession, nowMs)
+	} else if web := FetchOpenCodeGoWebUsage(cookie, nowMs); web != nil {
+		pl := ProviderLimitsFromWebSnapshot(*web, nowMs)
+		saveOpenCodeWebCache(&pl, openCodeWebFetched, nowMs)
+		return pl
+	} else {
+		saveOpenCodeWebCache(nil, openCodeWebFetchFailed, nowMs)
 	}
 	if dbPath == "" {
 		dbPath = ResolveOpenCodeLimitsDBPath()

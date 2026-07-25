@@ -92,9 +92,23 @@ func extractUsageBlock(text, name string) *OpenCodeGoWebWindow {
 	return &OpenCodeGoWebWindow{UsedPercentage: used, ResetInSec: resetInSec}
 }
 
-// ReadOpenCodeGoCookieHeader returns OPENCODE_GO_COOKIE if set.
+// OpenCodeCookieDomain is the domain whose browser session authenticates the
+// usage pages.
+const OpenCodeCookieDomain = "opencode.ai"
+
+// ReadOpenCodeGoCookieHeader returns the Cookie header to send to opencode.ai:
+// OPENCODE_GO_COOKIE when set, otherwise a session imported from a local
+// Chromium-family browser profile. The env var stays authoritative so a manual
+// header can always override (or stand in for) the browser import.
 func ReadOpenCodeGoCookieHeader() string {
-	return strings.TrimSpace(os.Getenv("OPENCODE_GO_COOKIE"))
+	if v := strings.TrimSpace(os.Getenv("OPENCODE_GO_COOKIE")); v != "" {
+		return v
+	}
+	imported, ok := ImportBrowserCookieHeader(OpenCodeCookieDomain, time.Now().UnixMilli())
+	if !ok {
+		return ""
+	}
+	return imported.Header
 }
 
 func randomServerInstance() string {
