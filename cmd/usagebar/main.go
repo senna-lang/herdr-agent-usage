@@ -63,6 +63,9 @@ func main() {
 	case "collect":
 		// debug: print JSON of collected limits once
 		runCollectJSON(args)
+	case "opencode-check":
+		// debug: report each stage of the OpenCode Go usage path
+		runOpenCodeCheck()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		printUsage(os.Stderr)
@@ -85,6 +88,8 @@ Usage:
   usagebar statusline                Claude Code statusLine (stdin rate_limits)
   usagebar setup [--write-toast]     Seed plugin config / show snippets
   usagebar collect                   Debug: print collected limits as JSON
+  usagebar opencode-check            Debug: report the OpenCode Go usage path
+                                     (browser session import → opencode.ai fetch)
   usagebar version
 
 `)
@@ -499,6 +504,62 @@ func printStatusLineSummary(stdinJSON string) {
 	if summary != "" {
 		fmt.Println(summary)
 	}
+}
+
+// runOpenCodeCheck reports each stage of the OpenCode Go usage path so a
+// failure can be attributed to the browser session or to the fetch, without
+// printing any cookie value.
+func runOpenCodeCheck() {
+	nowMs := time.Now().UnixMilli()
+	cookie := ""
+
+	if env := strings.TrimSpace(os.Getenv("OPENCODE_GO_COOKIE")); env != "" {
+		cookie = env
+		fmt.Println("cookie: OPENCODE_GO_COOKIE is set (browser import skipped)")
+	} else if strings.TrimSpace(os.Getenv("USAGEBAR_DISABLE_BROWSER_COOKIES")) != "" {
+		// Distinguish "opted out" from "looked and found nothing".
+		fmt.Println("cookie: browser import is disabled by USAGEBAR_DISABLE_BROWSER_COOKIES")
+		fmt.Println("        unset it, or set OPENCODE_GO_COOKIE, to use official usage")
+		return
+	} else {
+		imported, probes, ok := limits.ImportBrowserCookieHeaderWithProbes(limits.OpenCodeCookieDomain, nowMs)
+		fmt.Printf("browser profiles probed: %d\n", len(probes))
+		for _, p := range probes {
+			switch {
+			case p.Rows == 0:
+				fmt.Printf("  - %s / %s: no %s cookies\n", p.Browser, p.Profile, limits.OpenCodeCookieDomain)
+			case !p.KeychainOK:
+				fmt.Printf("  - %s / %s: %d cookies, but the Keychain password was unavailable"+
+					" (access denied, or the Safe Storage item is named differently)\n", p.Browser, p.Profile, p.Rows)
+			case p.Decrypted == 0:
+				fmt.Printf("  - %s / %s: %d cookies, none decrypted (unexpected encryption scheme)\n", p.Browser, p.Profile, p.Rows)
+			default:
+				fmt.Printf("  - %s / %s: %d cookies, %d decrypted\n", p.Browser, p.Profile, p.Rows, p.Decrypted)
+			}
+		}
+		if !ok {
+			fmt.Printf("cookie: no %s session imported\n", limits.OpenCodeCookieDomain)
+			fmt.Println("        sign in to opencode.ai in Chrome/Arc, allow Keychain access when macOS asks,")
+			fmt.Println("        or set OPENCODE_GO_COOKIE manually")
+			return
+		}
+		cookie = imported.Header
+		fmt.Printf("cookie: imported from %s / %s (%d cookies: %s)\n",
+			imported.Browser, imported.Profile, len(imported.Names), strings.Join(imported.Names, ", "))
+	}
+
+	// Deliberately bypasses the collector's usage cache: this command exists to
+	// exercise the live path, so it always makes the request.
+	snap := limits.FetchOpenCodeGoWebUsage(cookie, nowMs)
+	if snap == nil {
+		fmt.Println("fetch: opencode.ai returned no usage (session expired, or the page changed)")
+		return
+	}
+	fmt.Printf("fetch: workspace %s via %s\n", snap.WorkspaceID, snap.Source)
+	pl := limits.ProviderLimitsFromWebSnapshot(*snap, nowMs)
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(pl)
 }
 
 func runCollectJSON(args []string) {

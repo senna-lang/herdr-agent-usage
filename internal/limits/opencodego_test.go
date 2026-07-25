@@ -114,6 +114,12 @@ func TestProviderLimitsFromWebSnapshot(t *testing.T) {
 	if limits.Source != "web" {
 		t.Fatalf("source=%q", limits.Source)
 	}
+	// Official numbers carry no note: the workspace id it used to show meant
+	// nothing to a reader, and an empty note is what distinguishes these from
+	// the local path's "est. spent …" line.
+	if limits.Note != nil {
+		t.Fatalf("web snapshot should carry no note, got %q", *limits.Note)
+	}
 }
 
 func mustJSONCost(v any) string {

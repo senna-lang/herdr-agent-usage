@@ -249,9 +249,12 @@ func ProviderLimitsFromGoCostEvents(events []CostEvent, nowMs int64) ProviderLim
 }
 
 // ProviderLimitsFromWebSnapshot maps web usagePercent to used% + resetsAt.
+// No note: the windows, their resets, and the plan label already say
+// everything the page offers, and the workspace id it used to carry meant
+// nothing to a reader. The local-estimate path keeps its own "est. spent …"
+// note, which is what makes an estimate distinguishable from these numbers.
 func ProviderLimitsFromWebSnapshot(snap OpenCodeGoWebSnapshot, nowMs int64) ProviderLimits {
 	plan := planlabels.OpencodePlanLabel(strPtr("go"))
-	note := "workspace " + snap.WorkspaceID
 	var weekly, monthly *LimitWindow
 	if snap.Weekly != nil {
 		weekly = windowFromUsed(snap.Weekly.UsedPercentage, 10080, resetsAtFromResetInSec(nowMs, int64(snap.Weekly.ResetInSec)))
@@ -268,7 +271,6 @@ func ProviderLimitsFromWebSnapshot(snap OpenCodeGoWebSnapshot, nowMs int64) Prov
 		Tertiary:    monthly,
 		Source:      snap.Source,
 		FetchedAtMs: nowMs,
-		Note:        &note,
 	}
 }
 
@@ -391,10 +393,25 @@ func loadCostEventsFromDB(dbPath string) ([]CostEvent, error) {
 	return CostEventsFromMessageDataJSONs(list), nil
 }
 
-// CollectOpenCodeLimits prefers web (OPENCODE_GO_COOKIE) then local DB.
+// CollectOpenCodeLimits prefers opencode.ai's own usage (authenticated with
+// OPENCODE_GO_COOKIE or an imported browser session) then the local DB
+// estimate. The web result — success or failure — is cached, because the
+// sidebar collects on every pane status change.
 func CollectOpenCodeLimits(nowMs int64, dbPath string) ProviderLimits {
-	if web := FetchOpenCodeGoWebUsage("", nowMs); web != nil {
-		return ProviderLimitsFromWebSnapshot(*web, nowMs)
+	// A fresh cache entry with no limits is a recent unsuccessful attempt:
+	// fall through to the local estimate without retrying the network.
+	if cached, fresh := loadOpenCodeWebCache(nowMs); fresh {
+		if cached != nil {
+			return *cached
+		}
+	} else if cookie := ReadOpenCodeGoCookieHeader(); cookie == "" {
+		saveOpenCodeWebCache(nil, openCodeWebNoSession, nowMs)
+	} else if web := FetchOpenCodeGoWebUsage(cookie, nowMs); web != nil {
+		pl := ProviderLimitsFromWebSnapshot(*web, nowMs)
+		saveOpenCodeWebCache(&pl, openCodeWebFetched, nowMs)
+		return pl
+	} else {
+		saveOpenCodeWebCache(nil, openCodeWebFetchFailed, nowMs)
 	}
 	if dbPath == "" {
 		dbPath = ResolveOpenCodeLimitsDBPath()

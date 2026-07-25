@@ -117,7 +117,7 @@ herdr plugin action invoke usagebar.setup
 | --- | --- | --- | --- |
 | Claude Code | Yes | Yes | Subscription windows from `~/.claude.json` / statusLine cache. Pay-as-you-go (API key, Bedrock, Vertex, Foundry, gateway) hides those windows and labels the backend from deployment env / settings |
 | Codex | Yes | Yes | Context + rate windows from local rollouts; custom `model_provider` panes are pay-as-you-go |
-| OpenCode | Yes | Yes | The `opencode-go` subscription uses official web usage when `OPENCODE_GO_COOKIE` is set, else local SQLite. Other backends (e.g. DeepSeek) show token/cost spend instead of plan windows |
+| OpenCode | Yes | Yes | The `opencode-go` subscription keeps no usage numbers on disk, so its windows come from opencode.ai, authenticated by `OPENCODE_GO_COOKIE` or a browser session imported via the Keychain ([details](#opencode-go-official-usage)); without either it degrades to a local SQLite estimate. Other backends (e.g. DeepSeek) show token/cost spend instead of plan windows |
 | Grok | Yes | Yes | Context from `signals.json`; SuperGrok credits when auth is present. Custom models (`~/.grok/config.toml` `[model.*]` with `base_url`) are pay-as-you-go and labelled from the endpoint host (openai, ollama, …) |
 | OMP (Oh My Pi) | Yes | Yes | Session jsonl plus its credential metadata. Subscription routes: OpenCode Go, Grok OAuth, Anthropic OAuth → Claude, and OpenAI Codex OAuth → Codex. API-key backends show backend-scoped session burn |
 | Pi coding agent | Yes | Yes | Session jsonl plus `~/.pi/agent/auth.json`; uses the same recognized OAuth/subscription routes and pay-as-you-go rules as OMP |
@@ -196,15 +196,77 @@ position = "bottom-left"
 
 `usagebar.enable-toast` **appends only when `[ui.toast]` is missing**. Existing toast settings are left alone.
 
-### OpenCode Go official usage (optional)
+### OpenCode Go official usage
 
-Set the Cookie request header if you want web-backed numbers from the OpenCode console:
+**OpenCode Go is the only supported subscription with no local source of usage
+truth, which is why it — and only it — needs the Keychain step below.**
+
+Every other provider's harness writes the server's own limit numbers to disk,
+so this plugin just reads them back:
+
+| provider | local source of truth |
+| --- | --- |
+| Claude | `~/.claude.json` `cachedUsageUtilization` (+ statusLine cache) |
+| Codex | `rate_limits` inside `event_msg` / `token_count` in the rollout jsonl |
+| Grok | agent stdio / `x.ai` billing |
+| **OpenCode Go** | **none** |
+
+`opencode.db` has no usage table at all, its `account` table is empty (auth is
+an API key in `auth.json`), and the OpenCode CLI never persists limit state.
+There is nothing on the machine to read. So the official 5h / 7d / 30d
+percentages can only come from opencode.ai over the network, and that request
+has to be authenticated — hence a browser session, and hence the Keychain,
+which is where the browser keeps the key to its own cookies.
+
+Anything else for this provider is an estimate, and an estimate cannot be made
+correct here: the amounts recorded locally are list-price arithmetic, not what
+opencode-go bills against the plan, and no set of caps reproduces the published
+percentages across all three windows.
+
+Two ways to authenticate that fetch, tried in this order:
+
+1. `OPENCODE_GO_COOKIE` — an explicit Cookie request header, which always wins:
+
+   ```bash
+   export OPENCODE_GO_COOKIE='auth=…'
+   ```
+
+2. **A local browser session**, imported automatically — the zero-setup path,
+   and the reason the Keychain is involved. If you are signed in to opencode.ai
+   in Chrome, Arc, Brave, Edge, or Chromium, the plugin reads that profile's
+   cookie for `opencode.ai` and reuses it. Chromium stores cookie values
+   encrypted, with the key held in the login Keychain as
+   `<Browser> Safe Storage`, so reading the cookie means reading that one
+   Keychain item:
+
+   - macOS asks for access the first time. Choose *Always Allow* to keep later
+     refreshes silent.
+   - The Keychain is only consulted for a profile that actually has an
+     opencode.ai cookie, so browsers where you are not signed in never raise a
+     prompt.
+   - The cookie database is opened read-only (`immutable=1`); nothing is ever
+     written back to the browser.
+   - The cookie itself is never persisted by this plugin. Only the resolved
+     usage snapshot is cached (2 min; 10 min after a fetch failure, 30 s when no
+     session was found so a fresh sign-in takes effect promptly).
+   - Opt out entirely with `USAGEBAR_DISABLE_BROWSER_COOKIES=1`, and use option
+     1 instead if you would rather paste a header than grant Keychain access.
+
+Without either, usage falls back to an estimate from local
+`~/.local/share/opencode/opencode.db` (5h rolling, UTC week, calendar month),
+labeled `est.` in the panel note. Be aware that this estimate only sees spend
+recorded by the OpenCode CLI itself: sessions billed to the same subscription
+through another harness (OMP / Pi) are not in that database, so a pane can look
+idle while the real window is nearly full.
+
+To see which stage is working:
 
 ```bash
-export OPENCODE_GO_COOKIE='auth=…'
+usagebar opencode-check
 ```
 
-Without it, usage is estimated from local `~/.local/share/opencode/opencode.db` (5h rolling, UTC week, calendar month).
+It prints the browser profiles found, which profile supplied the session (cookie
+names only, never values), and the fetched windows.
 
 ### Claude statusLine (optional)
 
@@ -282,7 +344,7 @@ Everything is computed from files that the agents already keep on your machine:
 | --- | --- |
 | Claude Code | `~/.claude.json`, statusLine cache under `~/.claude/herdr-usagebar/`, `settings.json` (deployment env) |
 | Codex | rollout files under `~/.codex/sessions/` |
-| OpenCode | `~/.local/share/opencode/opencode.db` (session usage), `~/.local/share/opencode/auth.json` (credential kind only) |
+| OpenCode | `~/.local/share/opencode/opencode.db` (session usage), `~/.local/share/opencode/auth.json` (credential kind only), and — for OpenCode Go's official windows — the `opencode.ai` cookie in a local Chromium profile plus that browser's Keychain "Safe Storage" password (read-only, never persisted; see [OpenCode Go official usage](#opencode-go-official-usage)) |
 | Grok | `~/.grok/sessions/**/signals.json`, `~/.grok/auth.json` (credentials for the credits fetch), `~/.grok/config.toml` (custom-model base URLs) |
 | OMP | `~/.omp/agent/sessions/**/*.jsonl`, `~/.omp/agent/models.db` (context window lookup), `~/.omp/agent/agent.db` (credential kind only) |
 | Pi coding agent | `~/.pi/agent/sessions/**/*.jsonl`, `~/.pi/agent/models.db` when present, `~/.pi/agent/auth.json` (credential kind only) |
@@ -290,7 +352,9 @@ Everything is computed from files that the agents already keep on your machine:
 Pay-as-you-go detection is not tied to any one harness: it reads the same
 per-harness files above (the backend a session used is already recorded there —
 OpenCode's `providerID`, Codex's `model_provider`, Claude's deployment env,
-Grok's `config.toml`, OMP/Pi `message.provider`). No extra data sources, no network calls.
+Grok's `config.toml`, OMP/Pi `message.provider`). No extra data sources; the
+only network calls are the authenticated provider usage fetches (Grok credits,
+OpenCode Go usage), and each one is skipped when its credential is absent.
 
 ### Harness and billing identity
 
@@ -326,7 +390,7 @@ and usage observations.
 
 Network requests happen in the following cases:
 
-- `opencode.ai` — only when you set `OPENCODE_GO_COOKIE`
+- `opencode.ai` — only when a session is available: `OPENCODE_GO_COOKIE`, or an `opencode.ai` cookie in a local Chromium profile. Results are cached for 2 minutes (10 after a failure), so a sidebar refresh does not mean a request. Disable with `USAGEBAR_DISABLE_BROWSER_COOKIES=1`
 - `grok.com` — only when `~/.grok/auth.json` exists (you ran `grok login`)
 - `api.github.com` — on the first pane focus and then at most once every 24 hours, to check this plugin's latest public release. The request has no credentials and sends no usage or session data.
 
