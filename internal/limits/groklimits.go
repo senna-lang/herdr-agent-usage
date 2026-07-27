@@ -220,6 +220,9 @@ func TryGrokBillingRPC(nowMs int64, email *string) *ProviderLimits {
 
 // CollectGrokLimits reads auth and applies identity / web billing.
 // When opts fetchers are nil, production HTTP implementations are used.
+// Every dead end falls back to another agent's observation of the same xAI
+// account (see windowpool.go): Grok's meters need a fresh `grok login`, which
+// a subscription driven through another harness never performs.
 func CollectGrokLimits(nowMs int64, opts CollectGrokLimitsOptions) ProviderLimits {
 	path := opts.AuthPath
 	if path == "" {
@@ -227,17 +230,26 @@ func CollectGrokLimits(nowMs int64, opts CollectGrokLimitsOptions) ProviderLimit
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
+		if b := borrowGrokWindows(nil, nil, nowMs); b != nil {
+			return *b
+		}
 		note := "no ~/.grok/auth.json — run `grok login`"
 		return ProviderLimits{ProviderID: "grok", Label: "Grok", Source: "none", FetchedAtMs: nowMs, Note: &note}
 	}
 	auth := ParseGrokAuthJSON(string(raw))
 	if auth == nil {
+		if b := borrowGrokWindows(nil, nil, nowMs); b != nil {
+			return *b
+		}
 		note := "no ~/.grok/auth.json — run `grok login`"
 		return ProviderLimits{ProviderID: "grok", Label: "Grok", Source: "none", FetchedAtMs: nowMs, Note: &note}
 	}
 
 	if auth.ExpiresAt != nil {
 		if t, err := time.Parse(time.RFC3339, *auth.ExpiresAt); err == nil && t.UnixMilli() < nowMs {
+			if b := borrowGrokWindows(auth.Email, nil, nowMs); b != nil {
+				return *b
+			}
 			note := "token expired"
 			if auth.Email != nil {
 				note = fmt.Sprintf("token expired (%s) — run `grok login`", *auth.Email)
@@ -295,6 +307,9 @@ func CollectGrokLimits(nowMs int64, opts CollectGrokLimitsOptions) ProviderLimit
 		return *fromRPC
 	}
 
+	if b := borrowGrokWindows(auth.Email, plan, nowMs); b != nil {
+		return *b
+	}
 	email := "signed in"
 	if auth.Email != nil {
 		email = *auth.Email
@@ -304,4 +319,19 @@ func CollectGrokLimits(nowMs int64, opts CollectGrokLimitsOptions) ProviderLimit
 		ProviderID: "grok", Label: "Grok", PlanType: plan,
 		Source: "grok auth.json (identity only)", FetchedAtMs: nowMs, Note: &note,
 	}
+}
+
+// borrowGrokWindows takes another agent's observation of this xAI account
+// when Grok's own meters are unavailable. A plan tier already resolved from
+// grok.com is kept: it is first-hand even when the windows are not.
+func borrowGrokWindows(email *string, plan *string, nowMs int64) *ProviderLimits {
+	account := ""
+	if email != nil {
+		account = *email
+	}
+	borrowed := borrowWindows("grok", "Grok", account, nowMs)
+	if borrowed != nil && plan != nil {
+		borrowed.PlanType = plan
+	}
+	return borrowed
 }

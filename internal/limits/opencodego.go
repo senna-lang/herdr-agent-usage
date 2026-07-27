@@ -397,6 +397,8 @@ func loadCostEventsFromDB(dbPath string) ([]CostEvent, error) {
 // OPENCODE_GO_COOKIE or an imported browser session) then the local DB
 // estimate. The web result — success or failure — is cached, because the
 // sidebar collects on every pane status change.
+// When that fetch is unavailable, another agent's observation of the same
+// account (see windowpool.go) is preferred over the local estimate.
 func CollectOpenCodeLimits(nowMs int64, dbPath string) ProviderLimits {
 	// A fresh cache entry with no limits is a recent unsuccessful attempt:
 	// fall through to the local estimate without retrying the network.
@@ -412,6 +414,12 @@ func CollectOpenCodeLimits(nowMs int64, dbPath string) ProviderLimits {
 		return pl
 	} else {
 		saveOpenCodeWebCache(nil, openCodeWebFetchFailed, nowMs)
+	}
+	// The web fetch is the only first-hand source of the official windows and
+	// the local DB below is list-price arithmetic. Another agent's observation
+	// of this opencode-go account is real server data, so it outranks it.
+	if borrowed := borrowWindows("opencode", "OpenCode", "", nowMs); borrowed != nil {
+		return *borrowed
 	}
 	if dbPath == "" {
 		dbPath = ResolveOpenCodeLimitsDBPath()

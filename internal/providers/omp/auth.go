@@ -14,11 +14,11 @@ import (
 // without reading its secret material. OMP records OAuth and API-key
 // credentials separately in agent.db.
 func CredentialType(provider string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	dbPath := ResolveAgentDBPath()
+	if dbPath == "" {
 		return ""
 	}
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(home, ".omp", "agent", "agent.db")+"?mode=ro")
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
 	if err != nil {
 		return ""
 	}

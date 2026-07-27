@@ -13,6 +13,7 @@ import (
 
 	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 	"github.com/senna-lang/herdr-agent-usage/internal/planlabels"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 )
 
 const codexTailScanBytes = 512 * 1024
@@ -22,6 +23,11 @@ const codexTailScanBytes = 512 * 1024
 // active session, so the first file almost always has it; the cap only guards
 // the pathological case of many just-opened sessions with no token_count yet.
 const codexMaxRolloutsToScan = 25
+
+// codexStaleAfterMinutes matches the statusLine cache tolerance in
+// claudecache.go. Past it the snapshot is labeled rather than trusted
+// silently — a rollout is only as current as the turn that wrote it.
+const codexStaleAfterMinutes = 30
 
 // ExtractedCodexRateLimits is the raw extract result (planType still raw).
 type ExtractedCodexRateLimits struct {
@@ -196,12 +202,13 @@ func codexHome() string {
 // matching the Claude/OpenCode/Grok collectors. Assumes a single Codex account
 // (~/.codex is single-auth); with multiple accounts this reports whichever
 // session turned most recently.
+//
+// A rollout snapshot is a cache with a timestamp, not live truth. When
+// another agent has observed this same account's windows more recently, that
+// reading wins (see windowpool.go) — which is also what makes a Codex
+// subscription driven through another harness report real numbers at all.
 func CollectCodexLimits(_ *string, nowMs int64) ProviderLimits {
 	paths := ListNewestRolloutPaths(codexMaxRolloutsToScan)
-	if len(paths) == 0 {
-		note := "no rollout jsonl under ~/.codex/sessions"
-		return ProviderLimits{ProviderID: "codex", Label: "Codex", Source: "none", FetchedAtMs: nowMs, Note: &note}
-	}
 	// Newest-first: take the first rollout that carries a rate_limits snapshot.
 	// A just-opened session has session_meta but no token_count yet, so the
 	// newest file is not always the one with data.
@@ -214,17 +221,58 @@ func CollectCodexLimits(_ *string, nowMs int64) ProviderLimits {
 		if extracted == nil {
 			continue
 		}
-		plan := planlabels.CodexPlanLabel(extracted.PlanType)
-		return ProviderLimits{
+		observedMs := rolloutObservedAtMs(path)
+		out := ProviderLimits{
 			ProviderID:  "codex",
 			Label:       "Codex",
 			Primary:     extracted.Primary,
 			Secondary:   extracted.Secondary,
-			PlanType:    plan,
+			PlanType:    planlabels.CodexPlanLabel(extracted.PlanType),
 			Source:      "codex rollout",
 			FetchedAtMs: nowMs,
 		}
+		if age := minutesBetween(observedMs, nowMs); age > codexStaleAfterMinutes {
+			note := "stale ~" + itoa(age) + "m ago"
+			out.Note = &note
+		}
+		if borrowed := borrowCodexWindows(nowMs); borrowed != nil && borrowed.FetchedAtMs > observedMs {
+			return *borrowed
+		}
+		return out
+	}
+	if borrowed := borrowCodexWindows(nowMs); borrowed != nil {
+		return *borrowed
+	}
+	if len(paths) == 0 {
+		note := "no rollout jsonl under ~/.codex/sessions"
+		return ProviderLimits{ProviderID: "codex", Label: "Codex", Source: "none", FetchedAtMs: nowMs, Note: &note}
 	}
 	note := "rollout found but no rate_limits in recent token_count"
 	return ProviderLimits{ProviderID: "codex", Label: "Codex", Source: "codex rollout", FetchedAtMs: nowMs, Note: &note}
+}
+
+// borrowCodexWindows takes another agent's observation of this Codex account.
+// Signed in locally? Then the observation must belong to that same account.
+// Signed out, there is no identity to contradict, and the pool's own
+// single-account rule is what keeps the borrow honest.
+func borrowCodexWindows(nowMs int64) *ProviderLimits {
+	return borrowWindows("codex", "Codex", codex.AccountID(), nowMs)
+}
+
+// rolloutObservedAtMs is when the rollout last recorded a turn, i.e. when its
+// rate-limit snapshot was taken. 0 when the file cannot be stat'd.
+func rolloutObservedAtMs(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.ModTime().UnixMilli()
+}
+
+// minutesBetween is whole elapsed minutes, never negative.
+func minutesBetween(fromMs, toMs int64) int {
+	if fromMs <= 0 || toMs <= fromMs {
+		return 0
+	}
+	return int((toMs - fromMs) / 60_000)
 }
