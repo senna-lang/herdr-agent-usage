@@ -62,3 +62,90 @@ func TestBuildOpenAgentPanes_SharedTab(t *testing.T) {
 		}
 	}
 }
+
+// Real `herdr tab get` / `herdr workspace get` payloads, kept verbatim so the
+// parsers fail loudly if the upstream JSON shape drifts.
+const liveTabJSON = `{"id":"cli:tab:get","result":{"tab":{"agent_status":"idle","focused":true,` +
+	`"label":"herdr-agent-usage","number":1,"pane_count":3,"tab_id":"w6:t1","workspace_id":"w6"},` +
+	`"type":"tab_info"}}`
+
+const liveWorkspaceJSON = `{"id":"cli:workspace:get","result":{"type":"workspace_info","workspace":{` +
+	`"active_tab_id":"w6:t1","agent_status":"idle","focused":true,"label":"herdr-agent-usage",` +
+	`"number":1,"pane_count":3,"tab_count":1,"workspace_id":"w6"}}}`
+
+func TestParseTabInfo_LivePayload(t *testing.T) {
+	got := parseTabInfo(liveTabJSON)
+	if got != (TabInfo{Label: "herdr-agent-usage", Number: 1}) {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestParseTabInfo_MalformedYieldsZero(t *testing.T) {
+	for _, in := range []string{"", "not json", `{"result":{}}`, `{"result":null}`} {
+		if got := parseTabInfo(in); got != (TabInfo{}) {
+			t.Fatalf("input %q: %+v", in, got)
+		}
+	}
+}
+
+func TestParseWorkspaceInfo_LivePayload(t *testing.T) {
+	if got := parseWorkspaceInfo(liveWorkspaceJSON); got.Label != "herdr-agent-usage" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestParseWorkspaceInfo_MalformedYieldsZero(t *testing.T) {
+	for _, in := range []string{"", "not json", `{"result":{}}`} {
+		if got := parseWorkspaceInfo(in); got != (WorkspaceInfo{}) {
+			t.Fatalf("input %q: %+v", in, got)
+		}
+	}
+}
+
+func namingPane(label, tabID, workspaceID string) PaneInfo {
+	return PaneInfo{Label: &label, TabID: &tabID, WorkspaceID: &workspaceID}
+}
+
+func TestBuildPaneNaming_RenamedTabSkipsWorkspaceRoundTrip(t *testing.T) {
+	workspaceCalls := 0
+	got := buildPaneNaming(
+		namingPane("Task A", "w6:t1", "w6"),
+		func(string) TabInfo { return TabInfo{Label: "herdr-agent-usage", Number: 1} },
+		func(string) WorkspaceInfo { workspaceCalls++; return WorkspaceInfo{Label: "unused"} },
+	)
+	if workspaceCalls != 0 {
+		t.Fatalf("workspace fetched %d times for a self-naming tab", workspaceCalls)
+	}
+	want := PaneNaming{PaneLabel: "Task A", TabLabel: "herdr-agent-usage", TabNumber: 1}
+	if got != want {
+		t.Fatalf("got %+v want %+v", got, want)
+	}
+}
+
+func TestBuildPaneNaming_DefaultTabFetchesWorkspace(t *testing.T) {
+	var gotWorkspaceID string
+	got := buildPaneNaming(
+		namingPane("", "wA:t1", "wA"),
+		func(string) TabInfo { return TabInfo{Label: "1", Number: 1} },
+		func(id string) WorkspaceInfo { gotWorkspaceID = id; return WorkspaceInfo{Label: "logosyncs"} },
+	)
+	if gotWorkspaceID != "wA" {
+		t.Fatalf("workspace id %q", gotWorkspaceID)
+	}
+	want := PaneNaming{TabLabel: "1", TabNumber: 1, WorkspaceLabel: "logosyncs"}
+	if got != want {
+		t.Fatalf("got %+v want %+v", got, want)
+	}
+}
+
+func TestBuildPaneNaming_NilPointersDoNotPanic(t *testing.T) {
+	var gotTabID string
+	got := buildPaneNaming(
+		PaneInfo{},
+		func(id string) TabInfo { gotTabID = id; return TabInfo{} },
+		func(string) WorkspaceInfo { return WorkspaceInfo{} },
+	)
+	if gotTabID != "" || got != (PaneNaming{}) {
+		t.Fatalf("tabID=%q naming=%+v", gotTabID, got)
+	}
+}

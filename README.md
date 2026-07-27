@@ -137,25 +137,32 @@ herdr plugin action invoke usagebar.open-limits
 
 ## Configuration
 
-### Sidebar limit row (Herdr 0.7.4+)
+### Sidebar rows (Herdr 0.7.4+)
 
-Add `$provider` and `$limit` as their own row so the existing context text remains unchanged:
+Add `$title`, `$provider`, and `$limit` as their own rows so the existing
+context text remains unchanged:
 
 ```toml
 [ui.sidebar.agents]
 row_gap = 0
 rows = [
-  ["state_icon", "tab", "pane"],
+  ["state_icon", "$title"],
   ["$provider", "$limit"],
   ["$context"],
 ]
 ```
 
+`$title` replaces Herdr's built-in `tab`/`pane` tokens, which render blank
+whenever a tab still carries its auto-assigned numeric label (e.g. a
+never-renamed tab 1 reports `"1"`) and the pane itself was never renamed.
+`$title` falls back to the workspace ("space") name in that case, then
+appends a pane rename when present: `tab` → `space` → `space・pane`.
+
 `$provider` replaces Herdr's built-in `agent` token: it renders the quota
 provider (`opencode-go`, `grok`, `claude`, …) on a subscription pane, and the
 backend (`deepseek`) on a pay-as-you-go pane. Herdr joins row tokens with `·`
 and has no separator setting, so the harness and billing identity are not
-shown side by side. This makes the standard display `tab · pane`,
+shown side by side. This makes the standard display `title`,
 `provider · limit`, then context. Run `herdr server reload-config` after
 editing. The limit disappears automatically when the matching provider has no
 limit data.

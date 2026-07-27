@@ -46,6 +46,12 @@ func ToastConfigSnippet() string {
 // an existing [ui.sidebar.agents] section must merge these tokens into it
 // instead of appending a duplicate TOML table.
 //
+// $title replaces the built-in `tab`/`pane` tokens: Herdr leaves that row
+// blank whenever a tab keeps its auto-assigned numeric label (e.g. "1")
+// and the pane was never renamed. $title falls back to the workspace
+// ("space") name in that case, then appends a pane rename when present
+// ("space・pane").
+//
 // $provider replaces the built-in `agent` token: it renders the subscription
 // provider ("opencode-go", "grok", "claude") when one owns the pane's
 // limit, and the backend name ("deepseek") on a pay-as-you-go pane.
@@ -54,7 +60,7 @@ func SidebarRowsSnippet() string {
 		"[ui.sidebar.agents]",
 		"row_gap = 0",
 		"rows = [",
-		`  ["state_icon", "tab", "pane"],`,
+		`  ["state_icon", "$title"],`,
 		`  ["$provider", "$limit"],`,
 		`  ["$context"],`,
 		"]",

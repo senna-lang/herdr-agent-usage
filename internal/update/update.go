@@ -190,6 +190,14 @@ func RunUpdate(force bool) {
 		return
 	}
 
+	// Row 1 stands in for Herdr's built-in `tab`/`pane` tokens, which render
+	// blank whenever a tab keeps its auto-assigned numeric label and the
+	// pane was never renamed. Fall back through the workspace ("space")
+	// name so the row is never empty.
+	naming := herdrcli.GetPaneNaming(pane)
+	title := core.ResolveSidebarTitle(naming.PaneLabel, naming.TabLabel, naming.TabNumber, naming.WorkspaceLabel)
+	writeMetadataToken(paneID, "title", title, force)
+
 	cwd := paneCwdForUpdate(pane)
 	nowMs := time.Now().UnixMilli()
 	// Subscription limits only apply when the pane's session is billed against
