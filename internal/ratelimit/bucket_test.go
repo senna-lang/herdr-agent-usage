@@ -89,3 +89,23 @@ func TestDecideBucket_NoThreshold(t *testing.T) {
 		t.Fatalf("notifiedBucket = %#v, want nil", result.NewState.NotifiedBucket)
 	}
 }
+
+func TestDecideBucketWithThresholds_UsesConfiguredBuckets(t *testing.T) {
+	first := DecideBucketWithThresholds(
+		WindowInput{UsedPercentage: 78, ResetsAt: resetsAt},
+		nil,
+		[]int{30, 10},
+	)
+	if first.BucketToNotify == nil || *first.BucketToNotify != Bucket("30") {
+		t.Fatalf("bucketToNotify = %#v, want 30", first.BucketToNotify)
+	}
+
+	second := DecideBucketWithThresholds(
+		WindowInput{UsedPercentage: 90, ResetsAt: resetsAt},
+		&first.NewState,
+		[]int{30, 10},
+	)
+	if second.BucketToNotify == nil || *second.BucketToNotify != Bucket10 {
+		t.Fatalf("bucketToNotify = %#v, want 10", second.BucketToNotify)
+	}
+}

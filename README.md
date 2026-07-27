@@ -182,6 +182,12 @@ enabled = true
 remaining_thresholds = [50, 20, 10, 5]
 ```
 
+`enabled = false` suppresses all Agent Usage toasts, including remaining-limit
+warnings and update-available notices; statusLine summaries and cached limits
+continue to refresh. `remaining_thresholds` accepts remaining percentages from
+1 through 100 (for example `[30, 10]`); each threshold can notify once per
+window, from least to most severe.
+
 ### Herdr toast delivery
 
 Required for notifications to appear on screen:

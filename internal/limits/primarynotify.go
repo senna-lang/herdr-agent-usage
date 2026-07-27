@@ -21,6 +21,7 @@ func processProvider(
 	provider ProviderLimits,
 	previous *ratelimit.WindowState,
 	nowMs int64,
+	thresholds []int,
 	notify NotifyFunc,
 ) *ratelimit.WindowState {
 	primary := provider.Primary
@@ -28,9 +29,10 @@ func processProvider(
 		return previous
 	}
 
-	decision := ratelimit.DecideBucket(
+	decision := ratelimit.DecideBucketWithThresholds(
 		ratelimit.WindowInput{UsedPercentage: primary.UsedPercentage, ResetsAt: *primary.ResetsAt},
 		previous,
+		thresholds,
 	)
 	if decision.BucketToNotify == nil {
 		next := decision.NewState
@@ -46,15 +48,14 @@ func processProvider(
 	return ratelimit.ApplyNotifyResult(previous, decision.NewState, notify(text.Title, text.Body))
 }
 
-// CheckProviderPrimaryLimits is the pure state transition for non-Claude
-// primary windows. Every configured Claude profile id is excluded (not just
-// the literal "claude") because Claude's statusLine already owns its own
-// per-profile alerts — without this, a non-default profile like
-// "claude-secondary" would double-notify through this generic loop too.
-func CheckProviderPrimaryLimits(
+// CheckProviderPrimaryLimitsWithThresholds is the pure state transition for
+// non-Claude primary windows. Every configured Claude profile id is excluded
+// because Claude's statusLine owns its own per-profile alerts.
+func CheckProviderPrimaryLimitsWithThresholds(
 	providers []ProviderLimits,
 	current ProviderNotifyState,
 	nowMs int64,
+	thresholds []int,
 	notify NotifyFunc,
 	claudeProfiles []claude.ClaudeProfile,
 ) ProviderNotifyState {
@@ -67,7 +68,18 @@ func CheckProviderPrimaryLimits(
 			continue
 		}
 		prev := current[provider.ProviderID]
-		next[provider.ProviderID] = processProvider(provider, prev, nowMs, notify)
+		next[provider.ProviderID] = processProvider(provider, prev, nowMs, thresholds, notify)
 	}
 	return next
+}
+
+// CheckProviderPrimaryLimits uses the default 50/20/10/5% thresholds.
+func CheckProviderPrimaryLimits(
+	providers []ProviderLimits,
+	current ProviderNotifyState,
+	nowMs int64,
+	notify NotifyFunc,
+	claudeProfiles []claude.ClaudeProfile,
+) ProviderNotifyState {
+	return CheckProviderPrimaryLimitsWithThresholds(providers, current, nowMs, nil, notify, claudeProfiles)
 }

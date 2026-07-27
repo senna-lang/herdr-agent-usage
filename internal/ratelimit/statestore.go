@@ -14,7 +14,7 @@ import (
 const (
 	lockRetryInterval = 20 * time.Millisecond
 	lockTimeout       = 2 * time.Second
-	lockStale         = 10 * time.Second
+	lockStale         = time.Minute
 )
 
 // baseDir is the single-default notify-state dir. Per-profile isolation is
@@ -180,19 +180,17 @@ func WithLockedState(update func(current ClaudeNotifyState) ClaudeNotifyState) C
 	return WithLockedStateIn("", update)
 }
 
-// WithLockedStateIn is WithLockedState scoped to an explicit state dir.
+// WithLockedStateIn is WithLockedState scoped to an explicit state dir. It
+// never runs update without the lock, since that decision could not persist.
 func WithLockedStateIn(dir string, update func(current ClaudeNotifyState) ClaudeNotifyState) ClaudeNotifyState {
-	locked := AcquireLockIn(dir)
-	defer func() {
-		if locked {
-			ReleaseLockIn(dir)
-		}
-	}()
+	if !AcquireLockIn(dir) {
+		return readClaudeStateIn(dir)
+	}
+	defer ReleaseLockIn(dir)
+
 	current := readClaudeStateIn(dir)
 	next := update(current)
-	if locked {
-		writeClaudeStateIn(dir, next)
-	}
+	writeClaudeStateIn(dir, next)
 	return next
 }
 
@@ -233,17 +231,16 @@ func writeProviderState(state ProviderNotifyStateMap) {
 }
 
 // WithLockedProviderState runs provider-primary notify under the same lock.
+// It does not run update without the lock because its deduplication result
+// would not be persisted.
 func WithLockedProviderState(update func(current ProviderNotifyStateMap) ProviderNotifyStateMap) ProviderNotifyStateMap {
-	locked := AcquireLock()
-	defer func() {
-		if locked {
-			ReleaseLock()
-		}
-	}()
+	if !AcquireLock() {
+		return readProviderState()
+	}
+	defer ReleaseLock()
+
 	current := readProviderState()
 	next := update(current)
-	if locked {
-		writeProviderState(next)
-	}
+	writeProviderState(next)
 	return next
 }

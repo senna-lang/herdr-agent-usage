@@ -105,7 +105,7 @@ func runUpdateCheck(args []string) {
 		CurrentVersion: currentVersion,
 		StateDir:       setup.ResolvePluginConfigDir(environment()),
 		Force:          hasFlag(args, "--force"),
-		Notify:         herdrcli.ShowNotification,
+		Notify:         updateNotification(environment()),
 	})
 	if quiet {
 		return
@@ -152,6 +152,37 @@ func environment() map[string]string {
 		}
 	}
 	return env
+}
+
+// notificationsEnabled returns the plugin-level switch for usage-limit toasts.
+// Statusline rendering and provider notifications remain available when off.
+func notificationsEnabled(env map[string]string) bool {
+	config := setup.LoadPluginConfig(setup.ResolvePluginConfigDir(env))
+	return config.NotifyEnabled
+}
+
+// updateNotification returns the update-toast callback only when plugin
+// notifications are enabled.
+func updateNotification(env map[string]string) updatecheck.NotifyFunc {
+	if !notificationsEnabled(env) {
+		return nil
+	}
+	return herdrcli.ShowNotification
+}
+
+// runStatusLineNotifications applies configured notification policy to one
+// statusline render while the caller continues rendering its summary.
+func runStatusLineNotifications(
+	profile claude.ClaudeProfile,
+	stdinJSON string,
+	nowMs int64,
+	config setup.PluginConfig,
+	notify ratelimit.ShowNotificationFn,
+) {
+	if !config.NotifyEnabled {
+		return
+	}
+	ratelimit.RunRateLimitCheckWithThresholdsIn(profile.StateDir, stdinJSON, nowMs, config.RemainingThresholds, notify)
 }
 
 func resolveCwd() *string {
@@ -425,13 +456,18 @@ func runLimitsPane(args []string) error {
 }
 
 func runNotify() {
+	env := environment()
+	if !notificationsEnabled(env) {
+		return
+	}
+	config := setup.LoadPluginConfig(setup.ResolvePluginConfigDir(env))
 	nowMs := time.Now().UnixMilli()
 	opts := limits.DefaultCollectOptions()
 	// Never toast about subscription windows for pay-as-you-go setups.
 	snaps, panesOK := openPaneSnapshots()
 	opts.Only = limits.BillingProviderFilter(snaps, panesOK, limits.DefaultBillingDeps())
 	providers := limits.CollectAllProviderLimits(resolveCwd(), nowMs, opts)
-	limits.NotifyProviderPrimaryLimits(providers, nowMs)
+	limits.NotifyProviderPrimaryLimitsWithThresholds(providers, nowMs, config.RemainingThresholds)
 }
 
 func runStatusLine() {
@@ -488,13 +524,14 @@ func runStatusLine() {
 		notify = func(title, body string) bool { return inner(label+": "+title, body) }
 	}
 
+	config := setup.LoadPluginConfig(setup.ResolvePluginConfigDir(env))
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
 				fmt.Fprintf(os.Stderr, "[usagebar-rate] check failed: %v\n", r)
 			}
 		}()
-		ratelimit.RunRateLimitCheckIn(profile.StateDir, stdinJSON, nowMs, notify)
+		runStatusLineNotifications(profile, stdinJSON, nowMs, config, notify)
 	}()
 	printStatusLineSummary(stdinJSON)
 }

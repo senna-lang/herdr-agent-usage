@@ -45,7 +45,7 @@ func formatDuration(remainingMs int64) string {
 }
 
 // FormatNotificationBody builds Claude window notification text.
-// remainingBucket is the bucket name (50/20/10/5).
+// remainingBucket is the configured remaining-percent threshold.
 func FormatNotificationBody(
 	windowKey WindowKey,
 	remainingBucket Bucket,
