@@ -145,7 +145,7 @@ Read the active Herdr config first. The target Agent layout is:
 [ui.sidebar.agents]
 row_gap = 0
 rows = [
-  ["state_icon", "tab", "pane"],
+  ["state_icon", "$title"],
   ["agent", "$limit"],
   ["$context"],
 ]
@@ -153,8 +153,13 @@ rows = [
 
 - If `[ui.sidebar.agents]` is absent, append the block above.
 - If it exists, do not append another table. Preserve its existing layout,
-  add `$limit` to the row containing `agent`, and add `$context` as the next
-  row. Do not remove unrelated tokens or rows.
+  replace a `["state_icon", "tab", "pane"]`-style row with
+  `["state_icon", "$title"]` (Herdr's built-in `tab`/`pane` tokens render
+  blank whenever a tab keeps its auto-assigned numeric label and the pane
+  was never renamed; `$title` falls back to the workspace/space name, then
+  appends a pane rename when present), add `$limit` to the row containing
+  `agent`, and add `$context` as the next row. Do not remove unrelated
+  tokens or rows.
 - If `[ui.sidebar.agents.rows_by_agent]` contains overrides for Claude,
   Codex, OpenCode, or Grok, merge `$limit` and `$context` into each relevant
   override too; an override replaces the default `rows`.

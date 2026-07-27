@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 	"github.com/senna-lang/herdr-agent-usage/internal/provider"
 )
 
@@ -48,6 +49,9 @@ type PaneInfo struct {
 	RowLabel      *string
 	Cwd           *string
 	ForegroundCwd *string
+	Label         *string // raw pane rename (unlike RowLabel, no agent/displayAgent fallback)
+	TabID         *string
+	WorkspaceID   *string
 }
 
 // RawPaneListEntry is a pane list row from herdr (for pure buildOpenAgentPanes).
@@ -151,6 +155,8 @@ func GetPaneInfo(paneID string) PaneInfo {
 				DisplayAgent  *string `json:"display_agent"`
 				Cwd           *string `json:"cwd"`
 				ForegroundCwd *string `json:"foreground_cwd"`
+				TabID         *string `json:"tab_id"`
+				WorkspaceID   *string `json:"workspace_id"`
 				AgentSession  *struct {
 					Kind  *string `json:"kind"`
 					Value *string `json:"value"`
@@ -179,7 +185,119 @@ func GetPaneInfo(paneID string) PaneInfo {
 		RowLabel:      rowLabel,
 		Cwd:           p.Cwd,
 		ForegroundCwd: p.ForegroundCwd,
+		Label:         p.Label,
+		TabID:         p.TabID,
+		WorkspaceID:   p.WorkspaceID,
 	}
+}
+
+// TabInfo is a tab's rename label and its auto-assigned number. Herdr
+// defaults a fresh tab's label to its own number as a string (e.g. tab 1
+// starts out labeled "1"), which callers use to detect an un-renamed tab.
+type TabInfo struct {
+	Label  string
+	Number int
+}
+
+// parseTabInfo is the pure core of GetTabInfo.
+func parseTabInfo(stdout string) TabInfo {
+	var parsed struct {
+		Result *struct {
+			Tab *struct {
+				Label  *string `json:"label"`
+				Number *int    `json:"number"`
+			} `json:"tab"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &parsed); err != nil || parsed.Result == nil || parsed.Result.Tab == nil {
+		return TabInfo{}
+	}
+	t := parsed.Result.Tab
+	info := TabInfo{Label: deref(t.Label)}
+	if t.Number != nil {
+		info.Number = *t.Number
+	}
+	return info
+}
+
+// GetTabInfo fetches tab get JSON for tabID.
+func GetTabInfo(tabID string) TabInfo {
+	if tabID == "" {
+		return TabInfo{}
+	}
+	stdout, ok := spawnHerdr("tab", "get", tabID)
+	if !ok || stdout == "" {
+		return TabInfo{}
+	}
+	return parseTabInfo(stdout)
+}
+
+// WorkspaceInfo is a workspace's ("space") rename label.
+type WorkspaceInfo struct {
+	Label string
+}
+
+// parseWorkspaceInfo is the pure core of GetWorkspaceInfo.
+func parseWorkspaceInfo(stdout string) WorkspaceInfo {
+	var parsed struct {
+		Result *struct {
+			Workspace *struct {
+				Label *string `json:"label"`
+			} `json:"workspace"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &parsed); err != nil || parsed.Result == nil || parsed.Result.Workspace == nil {
+		return WorkspaceInfo{}
+	}
+	return WorkspaceInfo{Label: deref(parsed.Result.Workspace.Label)}
+}
+
+// GetWorkspaceInfo fetches workspace get JSON for workspaceID.
+func GetWorkspaceInfo(workspaceID string) WorkspaceInfo {
+	if workspaceID == "" {
+		return WorkspaceInfo{}
+	}
+	stdout, ok := spawnHerdr("workspace", "get", workspaceID)
+	if !ok || stdout == "" {
+		return WorkspaceInfo{}
+	}
+	return parseWorkspaceInfo(stdout)
+}
+
+// PaneNaming is the naming context behind a pane's sidebar row-1 title,
+// flattened out of PaneInfo's pointers so callers compose plain strings.
+type PaneNaming struct {
+	PaneLabel      string
+	TabLabel       string
+	TabNumber      int
+	WorkspaceLabel string
+}
+
+// buildPaneNaming is the pure core of GetPaneNaming: the fetchers are
+// injected so the round-trip skip below is testable without a live herdr.
+func buildPaneNaming(
+	pane PaneInfo,
+	getTab func(string) TabInfo,
+	getWorkspace func(string) WorkspaceInfo,
+) PaneNaming {
+	tab := getTab(deref(pane.TabID))
+	naming := PaneNaming{
+		PaneLabel: deref(pane.Label),
+		TabLabel:  tab.Label,
+		TabNumber: tab.Number,
+	}
+	// The workspace name only ever serves as the tab name's fallback, so a
+	// tab that names itself costs one CLI round-trip here instead of two.
+	if core.TabLabelIsDefault(tab.Label, tab.Number) {
+		naming.WorkspaceLabel = getWorkspace(deref(pane.WorkspaceID)).Label
+	}
+	return naming
+}
+
+// GetPaneNaming resolves the pane's own label plus the tab and workspace
+// labels its sidebar title falls back through.
+func GetPaneNaming(pane PaneInfo) PaneNaming {
+	return buildPaneNaming(pane, GetTabInfo, GetWorkspaceInfo)
 }
 
 func deref(s *string) string {
