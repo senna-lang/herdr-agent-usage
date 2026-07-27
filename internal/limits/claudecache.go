@@ -1,6 +1,7 @@
 /**
- * Rate-limit collection for Claude Code.
- * Priority: ~/.claude.json cachedUsageUtilization -> statusLine cache
+ * Rate-limit collection for Claude.
+ * Priority: ~/.claude.json cachedUsageUtilization -> statusLine cache ->
+ * another agent's observation of the same account (see windowpool.go).
  */
 package limits
 
@@ -126,7 +127,11 @@ func collectFromStatusLineCache(nowMs int64, path string) *ProviderLimits {
 	return &out
 }
 
-// CollectClaudeLimits prefers claude.json; falls back to the statusLine cache.
+// CollectClaudeLimits returns the freshest observation of this account's
+// windows. Claude Code's own artifacts are consulted first, but they are
+// caches with a timestamp, not live truth: when another agent has observed
+// the same account's same window more recently, that reading wins. Provenance
+// does not make a snapshot current — only its timestamp does.
 func CollectClaudeLimits(nowMs int64, options CollectClaudeLimitsOptions) ProviderLimits {
 	statusPath := options.StatusLineCachePath
 	if statusPath == "" {
@@ -137,11 +142,20 @@ func CollectClaudeLimits(nowMs int64, options CollectClaudeLimitsOptions) Provid
 		jsonPath = ResolveClaudeJSONPath()
 	}
 
-	if fromJSON := CollectClaudeLimitsFromJSON(nowMs, jsonPath); fromJSON != nil {
-		return *fromJSON
+	native := CollectClaudeLimitsFromJSON(nowMs, jsonPath)
+	if native == nil {
+		native = collectFromStatusLineCache(nowMs, statusPath)
 	}
-	if fromCache := collectFromStatusLineCache(nowMs, statusPath); fromCache != nil {
-		return *fromCache
+	// The windows belong to the account, so any agent's reading of them
+	// counts — including when Claude Code wrote nothing at all.
+	account, _ := AccountEmailFromJSONPath(jsonPath)
+	if borrowed := borrowWindows("claude", "Claude", account, nowMs); borrowed != nil {
+		if native == nil || borrowed.FetchedAtMs > native.FetchedAtMs {
+			return *borrowed
+		}
+	}
+	if native != nil {
+		return *native
 	}
 	note := "no ~/.claude.json utilization and no statusLine cache"
 	return ProviderLimits{

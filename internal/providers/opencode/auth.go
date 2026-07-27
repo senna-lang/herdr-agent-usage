@@ -22,7 +22,17 @@ func CredentialType(providerID string) string {
 	if json.Unmarshal(raw, &entries) != nil {
 		return ""
 	}
-	for _, id := range []string{providerID, "openai-codex", "openai"} {
+	// OpenCode files the Codex OAuth entry under either openai key, so a Codex
+	// backend id may have to look at its sibling. Probing those keys for an
+	// unrelated provider (anthropic, …) would answer with a credential that
+	// has nothing to do with the queried account — and a route keyed on that
+	// answer binds the wrong subscription. The fallback stays in the family.
+	candidates := []string{providerID}
+	switch strings.ToLower(strings.TrimSpace(providerID)) {
+	case "openai", "openai-codex", "openai-codex-oauth":
+		candidates = append(candidates, "openai-codex", "openai")
+	}
+	for _, id := range candidates {
 		entry, ok := entries[id]
 		if !ok {
 			continue

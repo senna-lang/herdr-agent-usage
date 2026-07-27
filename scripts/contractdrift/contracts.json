@@ -53,7 +53,8 @@
       "assistant JSONL provider model contextSnapshot usage cost and timestamp fields",
       "session directory and agent_session path conventions",
       "models.db model_cache schema",
-      "agent.db auth_credentials credential_type schema"
+      "agent.db auth_credentials credential_type schema",
+      "agent.db usage_history schema (provider account_key email account_id limit_id used_fraction resets_at) and its limit_id vocabulary"
     ]
   },
   {

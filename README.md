@@ -213,10 +213,10 @@ so this plugin just reads them back:
 
 | provider | local source of truth |
 | --- | --- |
-| Claude | `~/.claude.json` `cachedUsageUtilization` (+ statusLine cache) |
-| Codex | `rate_limits` inside `event_msg` / `token_count` in the rollout jsonl |
-| Grok | agent stdio / `x.ai` billing |
-| **OpenCode Go** | **none** |
+| Claude | `~/.claude.json` `cachedUsageUtilization` (+ statusLine cache), or another agent's observation of the same account |
+| Codex | `rate_limits` inside `event_msg` / `token_count` in the rollout jsonl, or another agent's observation of the same account |
+| Grok | agent stdio / `x.ai` billing, or another agent's observation of the same account |
+| **OpenCode Go** | **none of its own** (an observation by another agent still counts) |
 
 `opencode.db` has no usage table at all, its `account` table is empty (auth is
 an API key in `auth.json`), and the OpenCode CLI never persists limit state.
@@ -353,7 +353,7 @@ Everything is computed from files that the agents already keep on your machine:
 | Codex | rollout files under `~/.codex/sessions/` |
 | OpenCode | `~/.local/share/opencode/opencode.db` (session usage), `~/.local/share/opencode/auth.json` (credential kind only), and — for OpenCode Go's official windows — the `opencode.ai` cookie in a local Chromium profile plus that browser's Keychain "Safe Storage" password (read-only, never persisted; see [OpenCode Go official usage](#opencode-go-official-usage)) |
 | Grok | `~/.grok/sessions/**/signals.json`, `~/.grok/auth.json` (credentials for the credits fetch), `~/.grok/config.toml` (custom-model base URLs) |
-| OMP | `~/.omp/agent/sessions/**/*.jsonl`, `~/.omp/agent/models.db` (context window lookup), `~/.omp/agent/agent.db` (credential kind only) |
+| OMP | `~/.omp/agent/sessions/**/*.jsonl`, `~/.omp/agent/models.db` (context window lookup), `~/.omp/agent/agent.db` (credential kind, and the `usage_history` windows OMP records for the accounts it drives) |
 | Pi coding agent | `~/.pi/agent/sessions/**/*.jsonl`, `~/.pi/agent/models.db` when present, `~/.pi/agent/auth.json` (credential kind only) |
 
 Pay-as-you-go detection is not tied to any one harness: it reads the same
@@ -362,6 +362,45 @@ OpenCode's `providerID`, Codex's `model_provider`, Claude's deployment env,
 Grok's `config.toml`, OMP/Pi `message.provider`). No extra data sources; the
 only network calls are the authenticated provider usage fetches (Grok credits,
 OpenCode Go usage), and each one is skipped when its credential is absent.
+
+### Where a window comes from
+
+A rate-limit window belongs to the **account**, not to the agent that observed
+it. Every collector already treats windows as account-wide, so the plugin
+treats the observer as interchangeable too: when a provider's own artifacts
+are absent, the account's newest observation by any agent on the machine is
+used instead.
+
+That is what makes a subscription driven entirely through another harness
+report real numbers. A Claude Team account driven by OMP writes no
+`~/.claude.json` utilization and no statusLine cache, because the Claude CLI
+never runs — but OMP records the same windows in `~/.omp/agent/agent.db`
+(`usage_history`), and those are the account's windows regardless of who
+asked for them.
+
+Borrowing is deliberately conservative:
+
+- **The freshest reading wins, not the closest one.** A provider's own
+  artifacts are consulted first, but `~/.claude.json` and a Codex rollout are
+  caches with a timestamp, not live truth. When another agent observed the
+  same window more recently, that number is shown — otherwise an idle CLI's
+  old snapshot would under-report usage right as a limit approaches. Live
+  authenticated fetches (Grok, OpenCode Go) are by definition current, so
+  nothing outranks them.
+- **The account must match.** If identities are known and none is the pane's
+  account, nothing is borrowed — showing another account's numbers is worse
+  than showing none. When no observer named the account, a borrow happens only
+  if exactly one account was observed for that provider.
+- **A borrowed row says so.** It carries the account (or `account unverified`),
+  the observer, and the age of the observation, e.g.
+  `account you@example.com · via OMP · ~3m ago`.
+
+A combination with no observer left is reported honestly rather than guessed:
+Pi never persists windows of its own, so a Claude or Codex account used
+exclusively through Pi, on a machine where neither the vendor CLI nor OMP has
+ever touched that account, still shows its "no data" note. Grok and OpenCode Go
+are unaffected either way — their usage fetches are authenticated over the
+network and need no local observer at all.
 
 ### Harness and billing identity
 
@@ -375,7 +414,8 @@ the matching quota collector. Today the supported subscription routes are:
 | Codex | ChatGPT login | Codex |
 | OpenCode | `opencode-go` | OpenCode Go |
 | OpenCode | OpenAI / Codex OAuth | Codex |
-| Grok | Grok OAuth | Grok |
+| OpenCode | `xai-oauth` | Grok |
+| OpenCode | `anthropic` + OAuth | Claude |
 | OMP / Pi | `opencode-go` | OpenCode Go |
 | OMP / Pi | `xai-oauth` | Grok |
 | OMP / Pi | `anthropic` + OAuth | Claude |
@@ -384,9 +424,11 @@ the matching quota collector. Today the supported subscription routes are:
 The same provider id with an API key is pay-as-you-go, so it is never routed
 to a subscription limit by name alone. A subscription whose collector is not
 implemented (for example Copilot) is intentionally not presented as API
-spend; add its collector and an explicit route first. OpenCode's official
-documentation does not support routing Claude Pro/Max through OpenCode, so it
-is not a supported Claude subscription route here.
+spend; add its collector and an explicit route first. The two OpenCode rows
+for Grok and Claude fire only when OpenCode's own `auth.json` holds a real
+OAuth credential for that provider; OpenCode's documentation does not offer
+those subscriptions, so most installs never hit them. A credential filed
+under one provider is never accepted as evidence for another.
 
 The Usage pane keys both subscription and API blocks by billing provider, not
 by harness. For example, OpenCode and OMP using OpenCode Go produce one
