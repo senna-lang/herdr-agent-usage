@@ -1,50 +1,73 @@
 /**
- * Pure function that decides the bucket (50/20/10/5%) from the remaining
- * rate-limit percentage.
+ * Decides rate-limit notification buckets from configured remaining-percent
+ * thresholds while retaining default 50/20/10/5% behavior when absent.
  */
 package ratelimit
 
-var bucketRemainingThreshold = map[Bucket]float64{
-	Bucket50: 50,
-	Bucket20: 20,
-	Bucket10: 10,
-	Bucket5:  5,
-}
+import (
+	"sort"
+	"strconv"
+)
 
 func remainingPercentageOf(usedPercentage float64) float64 {
 	return 100 - usedPercentage
 }
 
-// worstBucketFor returns the most severe bucket that remaining has entered, or nil.
-func worstBucketFor(remainingPercentage float64) *Bucket {
+func bucketsForThresholds(thresholds []int) []Bucket {
+	if len(thresholds) == 0 {
+		return BucketOrder
+	}
+
+	unique := make(map[int]struct{}, len(thresholds))
+	values := make([]int, 0, len(thresholds))
+	for _, threshold := range thresholds {
+		if threshold < 1 || threshold > 100 {
+			continue
+		}
+		if _, exists := unique[threshold]; exists {
+			continue
+		}
+		unique[threshold] = struct{}{}
+		values = append(values, threshold)
+	}
+	if len(values) == 0 {
+		return BucketOrder
+	}
+
+	sort.Slice(values, func(i, j int) bool { return values[i] > values[j] })
+	buckets := make([]Bucket, len(values))
+	for i, threshold := range values {
+		buckets[i] = Bucket(strconv.Itoa(threshold))
+	}
+	return buckets
+}
+
+// worstBucketFor returns the most severe configured bucket that remaining has entered.
+func worstBucketFor(remainingPercentage float64, buckets []Bucket) *Bucket {
 	var worst *Bucket
-	for i := range BucketOrder {
-		b := BucketOrder[i]
-		if remainingPercentage <= bucketRemainingThreshold[b] {
-			worst = &b
+	for i := range buckets {
+		bucket := buckets[i]
+		threshold, err := strconv.Atoi(string(bucket))
+		if err == nil && remainingPercentage <= float64(threshold) {
+			worst = &bucket
 		}
 	}
 	return worst
 }
 
-func severityRankOf(bucket *Bucket) int {
+func severityRankOf(bucket *Bucket, buckets []Bucket) int {
 	if bucket == nil {
 		return -1
 	}
-	for i, b := range BucketOrder {
-		if b == *bucket {
+	for i, candidate := range buckets {
+		if candidate == *bucket {
 			return i
 		}
 	}
 	return -1
 }
 
-// DecideBucket decides the next state and which bucket (if any) should trigger a notification.
-//
-// - When resetsAt differs from the previous reading, treat it as a new window and reset notified state.
-// - When multiple buckets are crossed in a single step, notify only for the most severe one.
-// - When the remaining percentage has improved (not worsened), do not notify.
-func DecideBucket(input WindowInput, previous *WindowState) BucketDecision {
+func decideBucket(input WindowInput, previous *WindowState, buckets []Bucket) BucketDecision {
 	isNewWindow := previous == nil || previous.ResetsAt != input.ResetsAt
 	var notifiedBucket *Bucket
 	if !isNewWindow && previous != nil {
@@ -52,9 +75,8 @@ func DecideBucket(input WindowInput, previous *WindowState) BucketDecision {
 	}
 
 	remaining := remainingPercentageOf(input.UsedPercentage)
-	currentWorst := worstBucketFor(remaining)
-
-	shouldNotify := currentWorst != nil && severityRankOf(currentWorst) > severityRankOf(notifiedBucket)
+	currentWorst := worstBucketFor(remaining, buckets)
+	shouldNotify := currentWorst != nil && severityRankOf(currentWorst, buckets) > severityRankOf(notifiedBucket, buckets)
 
 	var newNotified *Bucket
 	if shouldNotify {
@@ -76,4 +98,14 @@ func DecideBucket(input WindowInput, previous *WindowState) BucketDecision {
 		},
 		BucketToNotify: bucketToNotify,
 	}
+}
+
+// DecideBucket uses the default 50/20/10/5% remaining thresholds.
+func DecideBucket(input WindowInput, previous *WindowState) BucketDecision {
+	return decideBucket(input, previous, BucketOrder)
+}
+
+// DecideBucketWithThresholds uses remaining-percent thresholds from plugin config.
+func DecideBucketWithThresholds(input WindowInput, previous *WindowState, thresholds []int) BucketDecision {
+	return decideBucket(input, previous, bucketsForThresholds(thresholds))
 }
