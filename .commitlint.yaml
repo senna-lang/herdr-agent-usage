@@ -5,7 +5,9 @@
 #     (https://github.com/conventionalcommit/commitlint, a Go implementation
 #     of conventional commit linting, no Node.js required)
 #   - the lint-pr-title GitHub Action, which validates the PR title against
-#     the same `type-enum` rule with an equivalent header pattern.
+#     the same `type-enum` list but enforces neither this file's length
+#     rules nor the same scope charset — see the asymmetry note in
+#     .github/workflows/lint-pr-title.yml.
 #
 # Rule reference: https://github.com/conventionalcommit/commitlint#available-rules
 #
@@ -26,6 +28,9 @@ severity:
   default: error
   rules: {}
 settings:
+  # header-min-length / header-max-length count BYTES, not runes (see
+  # conventionalcommit/commitlint rule/rule.go). For Japanese subjects, 72
+  # bytes is roughly 22-24 characters, not 72.
   header-min-length:
     argument: 10
     flags: {}
