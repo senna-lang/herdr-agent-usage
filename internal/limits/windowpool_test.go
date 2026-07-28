@@ -215,6 +215,33 @@ func TestAccountWindowsFromOMP(t *testing.T) {
 		}
 	})
 
+	t.Run("uses the observed Codex duration instead of the primary ordinal", func(t *testing.T) {
+		rows := []omp.UsageWindow{{
+			Provider:     "openai-codex",
+			AccountKey:   wpKeyOAuthFull,
+			AccountID:    wpAccountID,
+			LimitID:      "openai-codex:primary",
+			WindowLabel:  "7 days",
+			UsedFraction: 0.09,
+			ResetsAtMs:   1785839498000,
+			RecordedAtMs: 1785235600947,
+		}}
+		got := AccountWindowsFromOMP(rows)
+		if len(got) != 1 {
+			t.Fatalf("got %d observations, want 1: %+v", len(got), got)
+		}
+		if got[0].Primary == nil {
+			t.Fatalf("Primary = nil, want the observed Codex window: %+v", got[0])
+		}
+		if wpMinutes(got[0].Primary) != "10080" {
+			t.Fatalf("Primary.WindowMinutes = %s, want 10080 for %q",
+				wpMinutes(got[0].Primary), rows[0].WindowLabel)
+		}
+		if got[0].Secondary != nil {
+			t.Fatalf("Secondary = %+v, want nil for a single observed window", *got[0].Secondary)
+		}
+	})
+
 	t.Run("one account under two account keys collapses", func(t *testing.T) {
 		// The regression this whole pool exists for: OMP composes account_key
 		// from the credential shape, so the same subscription shows up as both

@@ -21,6 +21,7 @@ import (
 var contextWindowTokens = map[string]int{
 	// --- 1M (Claude Code paid default / OpenCode anthropic catalog) ---
 	"claude-sonnet-5":   1_000_000,
+	"claude-opus-5":     1_000_000,
 	"claude-fable-5":    1_000_000,
 	"claude-opus-4-8":   1_000_000,
 	"claude-opus-4-7":   1_000_000,

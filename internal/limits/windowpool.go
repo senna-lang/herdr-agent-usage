@@ -98,11 +98,12 @@ const (
 	slotTertiary
 )
 
-// slotForLimitID maps an OMP limit_id to a display slot.
+// slotForLimitID maps an OMP limit_id to a display slot and fallback duration.
 //
 // The window vocabulary differs per provider, so the mapping is explicit
 // rather than pattern-matched: an unrecognized id is skipped, never guessed
-// into the wrong bar. The returned minutes label the window for display.
+// into the wrong bar. A recognized persisted window label overrides the
+// fallback duration when observations are folded below.
 func slotForLimitID(providerID, limitID string) (windowSlot, int) {
 	switch providerID {
 	case "claude":
@@ -140,6 +141,22 @@ func slotForLimitID(providerID, limitID string) (windowSlot, int) {
 		}
 	}
 	return slotNone, 0
+}
+
+// windowMinutesFromLabel returns the duration explicitly recorded by OMP.
+// Provider limit ids such as openai-codex:primary are ordinals, not durations:
+// the same primary id may represent the only 7-day window for an account.
+func windowMinutesFromLabel(label string) int {
+	switch strings.ToLower(strings.TrimSpace(label)) {
+	case "5h", "5 hour", "5 hours":
+		return 300
+	case "7d", "7 day", "7 days", "weekly":
+		return 10080
+	case "30d", "30 day", "30 days", "monthly":
+		return 43200
+	default:
+		return 0
+	}
 }
 
 // windowFromUsageFraction converts an OMP row to a display window. The
@@ -191,6 +208,9 @@ func AccountWindowsFromOMP(rows []omp.UsageWindow) []AccountWindows {
 			continue
 		}
 		slot, minutes := slotForLimitID(route.CollectorProviderID, row.LimitID)
+		if observedMinutes := windowMinutesFromLabel(row.WindowLabel); observedMinutes > 0 {
+			minutes = observedMinutes
+		}
 		if slot == slotNone {
 			continue
 		}
