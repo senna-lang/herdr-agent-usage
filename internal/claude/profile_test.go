@@ -349,11 +349,58 @@ func TestResolveProfiles_DedupesTildeAndAbsoluteSameDir(t *testing.T) {
 	}
 }
 
-func TestResolveProfiles_RelativeConfigDirIsNotCwdExpanded(t *testing.T) {
+func TestResolveProfiles_RejectsRelativeConfigDir(t *testing.T) {
 	// Resolving against the cwd would make the write side (cwd = project) and
-	// the read side (cwd = Herdr) disagree, so a relative dir stays relative.
-	p := ResolveProfiles([]ProfileSpec{{ID: "rel", ConfigDir: "./.claude"}}, map[string]string{}, "/home/u")[0]
-	if p.ConfigDir != ".claude" {
-		t.Fatalf("configDir = %q, want cleaned-but-relative", p.ConfigDir)
+	// the read side (cwd = Herdr) disagree, so a relative config_dir is
+	// rejected outright (not kept and compared relatively). The only spec is
+	// invalid, so this falls back to the non-implicit synthesized default.
+	home := "/home/u"
+	profiles := ResolveProfiles([]ProfileSpec{{ID: "rel", ConfigDir: "./.claude-rel"}}, map[string]string{}, home)
+	if len(profiles) != 1 || profiles[0].ID != DefaultProfileID || profiles[0].Implicit {
+		t.Fatalf("want non-implicit fallback default, got %+v", profiles[0])
+	}
+}
+
+func TestResolveActiveProfile_RelativeConfigDirNeverMatches(t *testing.T) {
+	// Even though the spec's (rejected) config_dir and the running
+	// CLAUDE_CONFIG_DIR are textually identical relative strings, the spec
+	// never became a profile and the fallback default must not match a
+	// relative env value either.
+	home := "/home/u"
+	profiles := ResolveProfiles([]ProfileSpec{{ID: "rel", ConfigDir: "./.claude-rel"}}, map[string]string{}, home)
+	if _, ok := ResolveActiveProfile(profiles, "./.claude-rel", home); ok {
+		t.Fatal("relative CLAUDE_CONFIG_DIR must never match")
+	}
+}
+
+func TestResolveActiveProfile_AllSpecsInvalidFallbackRequiresMatch(t *testing.T) {
+	// Every configured entry is malformed (empty id here). ResolveProfiles
+	// falls back to the default profile, but -- unlike true zero-config --
+	// that fallback must not silently absorb an unrelated account's usage.
+	home := "/home/u"
+	specs := []ProfileSpec{{ID: "", ConfigDir: "~/.claude-dev"}}
+	profiles := ResolveProfiles(specs, map[string]string{}, home)
+	if len(profiles) != 1 || profiles[0].Implicit {
+		t.Fatalf("want non-implicit fallback default, got %+v", profiles[0])
+	}
+	if _, ok := ResolveActiveProfile(profiles, filepath.Join(home, ".claude-dev"), home); ok {
+		t.Fatal("malformed-config fallback must not absorb an unrelated account's CLAUDE_CONFIG_DIR")
+	}
+	// The default account itself must still work.
+	if p, ok := ResolveActiveProfile(profiles, "", home); !ok || p.ID != DefaultProfileID {
+		t.Fatalf("default account must still match: ok=%v id=%q", ok, p.ID)
+	}
+}
+
+func TestValidProfileSpecCount(t *testing.T) {
+	home := "/home/u"
+	specs := []ProfileSpec{
+		{ID: "base", ConfigDir: "~/.claude"},
+		{ID: "base-again", ConfigDir: "/home/u/.claude/"}, // duplicate dir
+		{ID: "rel", ConfigDir: "./.claude-rel"},           // relative
+		{ID: "", ConfigDir: "/home/u/.claude-noid"},       // missing id
+	}
+	if n := ValidProfileSpecCount(specs, home); n != 1 {
+		t.Fatalf("ValidProfileSpecCount = %d, want 1", n)
 	}
 }

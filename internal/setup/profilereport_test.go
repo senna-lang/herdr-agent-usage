@@ -69,17 +69,20 @@ func TestClaudeProfileReport_WarnsWhenDefaultAccountUncovered(t *testing.T) {
 }
 
 func TestClaudeProfileReport_WarnsOnDroppedDuplicateAndRelativeDir(t *testing.T) {
+	// duplicate dir and a relative config_dir are both rejected before a
+	// ClaudeProfile is ever built for them, so they surface only via the
+	// dropped-entry count, not a per-profile row or a separate warning line.
 	home := "/home/u"
 	specs := []claude.ProfileSpec{
 		{ID: "base", ConfigDir: "~/.claude"},
 		{ID: "base-again", ConfigDir: "/home/u/.claude/"}, // duplicate dir -> dropped
-		{ID: "rel", ConfigDir: "./.claude-rel"},
+		{ID: "rel", ConfigDir: "./.claude-rel"},           // relative -> dropped
 	}
 	got := reportText(specs, home)
-	if !strings.Contains(got, "1 entry ignored") {
+	if !strings.Contains(got, "2 entries ignored") {
 		t.Fatalf("dropped-entry warning missing: %q", got)
 	}
-	if !strings.Contains(got, "rel: config_dir is not absolute") {
-		t.Fatalf("relative-dir warning missing: %q", got)
+	if strings.Contains(got, "rel") {
+		t.Fatalf("rejected relative entry must not appear as a profile row: %q", got)
 	}
 }
