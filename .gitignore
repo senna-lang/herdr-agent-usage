@@ -8,3 +8,8 @@
 # .commitlint.yaml). The directory is created and managed by commitlint
 # itself; do not commit it.
 .commitlint/
+# Local state for the Serena coding-agent MCP server (project config plus
+# generated memories). It is per-developer tooling, not part of the plugin, and
+# an untracked copy makes `git status --porcelain` non-empty, which blocks
+# scripts/release.sh's clean-worktree check.
+.serena/
