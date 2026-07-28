@@ -17,6 +17,7 @@ func TestNormalizeClaudeModelId_Strips1m(t *testing.T) {
 func TestContextWindowFor_1MDefaults(t *testing.T) {
 	models := []string{
 		"claude-sonnet-5",
+		"claude-opus-5",
 		"claude-fable-5",
 		"claude-opus-4-8",
 		"claude-opus-4-7",
