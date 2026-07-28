@@ -96,20 +96,24 @@ func DefaultPluginConfigTOML(config PluginConfig) string {
 		"# remaining % thresholds that may fire a toast (once per window/bucket)",
 		"remaining_thresholds = [" + thresholds + "]",
 		"",
-		"# Multi-account Claude: uncomment and add one block per CLAUDE_CONFIG_DIR.",
+		"# Multi-account Claude: uncomment and add one block per account.",
 		"# Absence of any profile keeps the single default account (fully backward",
-		"# compatible). config_dir must be unique per profile.",
+		"# compatible). config_dir must be unique per profile and may use ~.",
+		"#",
+		"# Once any profile exists, declare the default account too: bare `claude`",
+		"# sets no CLAUDE_CONFIG_DIR, so the ~/.claude account is only recorded if",
+		"# a profile claims that dir. `usagebar setup` warns when it is uncovered.",
 		"#",
 		"# [[claude.profiles]]",
 		"# id = \"claude\"",
 		"# label = \"Claude\"",
-		"# config_dir = \"/home/you/.claude\"",
-		"# claude_json_path = \"/home/you/.claude.json\"",
+		"# config_dir = \"~/.claude\"",
+		"# claude_json_path = \"~/.claude.json\"   # optional; defaults per config_dir",
 		"#",
 		"# [[claude.profiles]]",
 		"# id = \"claude-secondary\"",
 		"# label = \"Claude (secondary)\"",
-		"# config_dir = \"/home/you/.claude-secondary\"",
+		"# config_dir = \"~/.claude-secondary\"",
 		"",
 	}, "\n")
 }
@@ -177,6 +181,17 @@ func ResolveClaudeProfiles(env map[string]string) []claude.ClaudeProfile {
 	cfg := LoadPluginConfig(ResolvePluginConfigDir(env))
 	home, _ := os.UserHomeDir()
 	return claude.ResolveProfiles(cfg.ClaudeProfiles, env, home)
+}
+
+// ResolveActiveClaudeProfile resolves the configured profiles and picks the one
+// this process is running as, using its own CLAUDE_CONFIG_DIR. Write side only
+// (statusLine): the read side cannot see that env var. The full profile list is
+// returned alongside so a caller can report an unmatched config dir.
+func ResolveActiveClaudeProfile(env map[string]string) (claude.ClaudeProfile, []claude.ClaudeProfile, bool) {
+	profiles := ResolveClaudeProfiles(env)
+	home, _ := os.UserHomeDir()
+	profile, ok := claude.ResolveActiveProfile(profiles, env["CLAUDE_CONFIG_DIR"], home)
+	return profile, profiles, ok
 }
 
 // LoadPluginConfig loads config.toml or returns defaults.

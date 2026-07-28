@@ -52,8 +52,13 @@ func RunSetup(options SetupOptions) SetupReport {
 	}
 	lines = append(lines,
 		"  notify.enabled="+boolStr(pluginCfg.NotifyEnabled)+"  thresholds=["+strings.Join(thr, ", ")+"]",
-		"",
 	)
+	home, _ := os.UserHomeDir()
+	lines = append(lines, claudeProfileReportLines(
+		pluginCfg.ClaudeProfiles,
+		ResolveClaudeProfiles(env),
+		home,
+	)...)
 
 	toastWrote := false
 	if options.WriteToast {
