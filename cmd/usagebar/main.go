@@ -481,14 +481,18 @@ func runStatusLine() {
 
 	// Route this statusLine invocation to the profile matching its own
 	// CLAUDE_CONFIG_DIR. The statusLine runs inside the Claude process, so the
-	// env var is present and identifies the account unambiguously.
+	// env var identifies the account; when it is unset Claude is running the
+	// default account and the profile for ~/.claude is the match.
 	env := environment()
-	profiles := setup.ResolveClaudeProfiles(env)
-	profile, known := claude.ResolveActiveProfile(profiles, env["CLAUDE_CONFIG_DIR"])
+	profile, profiles, known := setup.ResolveActiveClaudeProfile(env)
 	if !known {
 		// Profiles are configured but none match this CLAUDE_CONFIG_DIR: skip all
-		// writes and notifications rather than misattribute the account. Still
-		// print the summary so the Claude status line renders.
+		// writes and notifications rather than misattribute the account. Name the
+		// mismatch on stderr — silently rendering correct numbers while never
+		// caching them is otherwise invisible. Still print the summary so the
+		// Claude status line renders.
+		fmt.Fprintf(os.Stderr, "[usagebar-rate] no claude profile matches CLAUDE_CONFIG_DIR=%s; configured config_dirs: %s (skipping cache write and notifications)\n",
+			describeConfigDir(env["CLAUDE_CONFIG_DIR"]), describeProfileDirs(profiles))
 		printStatusLineSummary(stdinJSON)
 		return
 	}
@@ -541,6 +545,24 @@ func printStatusLineSummary(stdinJSON string) {
 	if summary != "" {
 		fmt.Println(summary)
 	}
+}
+
+// describeConfigDir renders CLAUDE_CONFIG_DIR for the profile-miss diagnostic,
+// distinguishing "unset" (the default account) from an explicit value.
+func describeConfigDir(configDir string) string {
+	if configDir == "" {
+		return "(unset, i.e. the default account)"
+	}
+	return configDir
+}
+
+// describeProfileDirs lists the configured profiles as id=config_dir pairs.
+func describeProfileDirs(profiles []claude.ClaudeProfile) string {
+	parts := make([]string, len(profiles))
+	for i, p := range profiles {
+		parts[i] = p.ID + "=" + p.ConfigDir
+	}
+	return strings.Join(parts, ", ")
 }
 
 // runOpenCodeCheck reports each stage of the OpenCode Go usage path so a
