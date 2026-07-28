@@ -41,3 +41,4 @@ the submitted change. Write "None" if there is nothing to disclose.
 - [ ] This PR has one clear purpose and contains no unrelated changes
 - [ ] I understand the submitted change and have reviewed it for correctness
 - [ ] Documentation is updated where user-visible behavior changed
+- [ ] The PR title follows Conventional Commits (e.g. `fix: ...`, `feat(providers): ...`) — see CONTRIBUTING.md for the allowed types

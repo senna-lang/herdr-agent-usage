@@ -4,3 +4,7 @@
 *.test
 .DS_Store
 .shell-cwd
+# Local commit-msg hook installed by `make install-hooks` (see
+# .commitlint.yaml). The directory is created and managed by commitlint
+# itself; do not commit it.
+.commitlint/
