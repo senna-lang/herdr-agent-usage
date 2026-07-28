@@ -3,13 +3,18 @@
  *
  * A profile is one CLAUDE_CONFIG_DIR-scoped account. All plugin-derived files
  * (limits cache, notify state, transcript root) live under the profile's config
- * dir, so two accounts never collide. Absence of any configured profile
- * synthesizes today's single implicit "claude" profile, whose derived paths are
- * byte-identical to the historical ~/.claude defaults (env overrides still win).
+ * dir, so two accounts never collide. Configured paths are normalized (leading
+ * "~" expanded, cleaned) so config.toml and the env var can spell the same dir
+ * differently. Absence of any configured profile synthesizes today's single
+ * implicit "claude" profile, whose derived paths are byte-identical to the
+ * historical ~/.claude defaults (env overrides still win).
  */
 package claude
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"strings"
+)
 
 // DefaultProfileID is the provider id used for the single implicit profile.
 const DefaultProfileID = "claude"
@@ -34,6 +39,11 @@ type ClaudeProfile struct {
 	LimitsCache  string // statusLine limits cache
 	StateDir     string // notify state + lock dir
 	ProjectsRoot string // transcript projects root
+	// Implicit is true only for the synthesized default profile (no
+	// [[claude.profiles]] configured at all). It marks the profile that must
+	// absorb every statusLine invocation regardless of CLAUDE_CONFIG_DIR, since
+	// zero-config installs have no other place to attribute usage to.
+	Implicit bool
 }
 
 // derivedLimitsCache is the per-config-dir limits cache path.
@@ -61,6 +71,27 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// normalizePath makes a configured or env-provided path comparable: it expands a
+// leading "~" (nothing expands it when the value comes from TOML) and cleans the
+// result, so "~/.claude", "/home/u/.claude/" and "/home/u/./.claude" all reduce
+// to the same string.
+//
+// Relative paths are deliberately NOT resolved against the cwd. The write side
+// (statusLine) runs inside the Claude process with cwd = the user's project,
+// while the read side (panel/sidebar/notify) runs as a Herdr plugin action with
+// an unrelated cwd; expanding against cwd would make the two sides disagree
+// about the same profile. A relative config_dir therefore stays relative and
+// simply fails to match, which the caller reports.
+func normalizePath(path, home string) string {
+	if path == "" {
+		return ""
+	}
+	if home != "" && (path == "~" || strings.HasPrefix(path, "~/")) {
+		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+	}
+	return filepath.Clean(path)
+}
+
 // synthesizeDefaultProfile builds the single implicit "claude" profile.
 //
 // Its derived paths are anchored to the historical ~/.claude location, NOT
@@ -84,6 +115,7 @@ func synthesizeDefaultProfile(env map[string]string, home string) ClaudeProfile 
 		LimitsCache:  firstNonEmpty(env["USAGEBAR_CLAUDE_LIMITS_PATH"], derivedLimitsCache(configDir)),
 		StateDir:     firstNonEmpty(env["USAGEBAR_STATE_DIR"], derivedStateDir(configDir)),
 		ProjectsRoot: firstNonEmpty(env["CLAUDE_PROJECTS_ROOT"], derivedProjectsRoot(configDir)),
+		Implicit:     true,
 	}
 }
 
@@ -107,17 +139,22 @@ func defaultJSONPathFor(configDir, home string) string {
 // resolveSpec builds a concrete profile from one config entry. Env path
 // overrides are deliberately ignored in multi-profile mode: a single global
 // override cannot be attributed to one of several profiles.
+//
+// Paths are normalized (leading "~" expanded, cleaned) before anything is
+// derived from them: a literal "~/.claude-dev" would otherwise become a
+// derived cache under a directory actually named "~".
 func resolveSpec(spec ProfileSpec, home string) ClaudeProfile {
 	label := firstNonEmpty(spec.Label, spec.ID)
-	jsonPath := firstNonEmpty(spec.JSONPath, defaultJSONPathFor(spec.ConfigDir, home))
+	configDir := normalizePath(spec.ConfigDir, home)
+	jsonPath := firstNonEmpty(normalizePath(spec.JSONPath, home), defaultJSONPathFor(configDir, home))
 	return ClaudeProfile{
 		ID:           spec.ID,
 		Label:        label,
-		ConfigDir:    spec.ConfigDir,
+		ConfigDir:    configDir,
 		JSONPath:     jsonPath,
-		LimitsCache:  derivedLimitsCache(spec.ConfigDir),
-		StateDir:     derivedStateDir(spec.ConfigDir),
-		ProjectsRoot: derivedProjectsRoot(spec.ConfigDir),
+		LimitsCache:  derivedLimitsCache(configDir),
+		StateDir:     derivedStateDir(configDir),
+		ProjectsRoot: derivedProjectsRoot(configDir),
 	}
 }
 
@@ -127,6 +164,8 @@ func resolveSpec(spec ProfileSpec, home string) ClaudeProfile {
 //   - Otherwise each valid spec becomes a profile. Entries missing id or
 //     config_dir are skipped, as are duplicate ids and duplicate config dirs
 //     (first wins), so malformed config degrades safely rather than colliding.
+//     Duplicate detection compares normalized dirs, so "~/.claude" and
+//     "/home/you/.claude" count as the same account.
 func ResolveProfiles(specs []ProfileSpec, env map[string]string, home string) []ClaudeProfile {
 	if len(specs) == 0 {
 		return []ClaudeProfile{synthesizeDefaultProfile(env, home)}
@@ -135,14 +174,15 @@ func ResolveProfiles(specs []ProfileSpec, env map[string]string, home string) []
 	seenID := map[string]bool{}
 	seenDir := map[string]bool{}
 	for _, spec := range specs {
-		if spec.ID == "" || spec.ConfigDir == "" {
+		configDir := normalizePath(spec.ConfigDir, home)
+		if spec.ID == "" || configDir == "" {
 			continue
 		}
-		if seenID[spec.ID] || seenDir[spec.ConfigDir] {
+		if seenID[spec.ID] || seenDir[configDir] {
 			continue
 		}
 		seenID[spec.ID] = true
-		seenDir[spec.ConfigDir] = true
+		seenDir[configDir] = true
 		out = append(out, resolveSpec(spec, home))
 	}
 	if len(out) == 0 {
@@ -152,17 +192,28 @@ func ResolveProfiles(specs []ProfileSpec, env map[string]string, home string) []
 }
 
 // ResolveActiveProfile picks the profile whose ConfigDir matches the given
-// configDir (typically the in-process CLAUDE_CONFIG_DIR on the write side).
+// configDir (the in-process CLAUDE_CONFIG_DIR on the write side).
 //
-//   - Single profile: always returns it (ok=true) — the single-profile fallback.
-//   - Multiple profiles: returns the config-dir match, or ok=false when none
-//     match, so the caller can skip writes rather than misattribute the account.
-func ResolveActiveProfile(profiles []ClaudeProfile, configDir string) (ClaudeProfile, bool) {
-	if len(profiles) == 1 {
+//   - Lone synthesized default (no [[claude.profiles]] at all): always returns
+//     it, so a zero-config install with a relocated CLAUDE_CONFIG_DIR keeps
+//     caching to the historical ~/.claude location both sides agree on.
+//   - Configured profiles: returns the normalized config-dir match, or ok=false
+//     when none match, so the caller can skip writes rather than misattribute
+//     the account. This holds for a single configured profile too: matching one
+//     account's usage onto another profile is worse than not recording it.
+//   - An empty configDir means Claude Code was started without the env var,
+//     i.e. it is running the default account, so it resolves to ~/.claude —
+//     the convention is to set CLAUDE_CONFIG_DIR only for additional accounts.
+func ResolveActiveProfile(profiles []ClaudeProfile, configDir, home string) (ClaudeProfile, bool) {
+	if len(profiles) == 1 && profiles[0].Implicit {
 		return profiles[0], true
 	}
+	if configDir == "" {
+		configDir = filepath.Join(home, ".claude")
+	}
+	want := normalizePath(configDir, home)
 	for _, p := range profiles {
-		if p.ConfigDir == configDir {
+		if normalizePath(p.ConfigDir, home) == want {
 			return p, true
 		}
 	}

@@ -188,6 +188,36 @@ continue to refresh. `remaining_thresholds` accepts remaining percentages from
 1 through 100 (for example `[30, 10]`); each threshold can notify once per
 window, from least to most severe.
 
+### Multiple Claude accounts
+
+Add one `[[claude.profiles]]` block per account to the plugin config. Each
+profile owns its own limits cache, notify state, and transcript root under its
+`config_dir`, so accounts never share readings. With no profile configured the
+plugin tracks a single account at `~/.claude` (unchanged behavior).
+
+```toml
+[[claude.profiles]]
+id = "base"                    # provider id; must be unique
+label = "personal"             # optional, shown in the pane and toasts
+config_dir = "~/.claude"       # the default account
+
+[[claude.profiles]]
+id = "work"
+config_dir = "~/.claude-work"  # started via CLAUDE_CONFIG_DIR=~/.claude-work claude
+```
+
+- **Declare the default account too.** Bare `claude` sets no
+  `CLAUDE_CONFIG_DIR` — the convention is to set it only for *additional*
+  accounts — so once any profile exists, the account at `~/.claude` needs an
+  entry of its own to be recorded.
+- `config_dir` may use `~`; it is expanded and each account is matched to its
+  profile by the resolved path. `claude_json_path` is optional and only needed
+  for a non-default `.claude.json` location.
+- A statusLine invocation whose config dir matches no profile writes nothing
+  and names the mismatch on stderr rather than attributing usage to the wrong
+  account. `usagebar setup` lists the resolved profiles and warns when an entry
+  was ignored or the default account is uncovered.
+
 ### Herdr toast delivery
 
 Required for notifications to appear on screen:

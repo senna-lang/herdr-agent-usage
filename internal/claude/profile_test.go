@@ -151,9 +151,12 @@ func TestIsClaudeProviderID(t *testing.T) {
 	}
 }
 
-func TestResolveActiveProfile_SingleAlwaysMatches(t *testing.T) {
+func TestResolveActiveProfile_LoneSynthesizedDefaultAlwaysMatches(t *testing.T) {
+	// Zero-config install: a relocated CLAUDE_CONFIG_DIR still attributes to the
+	// synthesized ~/.claude profile, which is the only place both the write and
+	// read sides agree on.
 	profiles := ResolveProfiles(nil, map[string]string{"CLAUDE_CONFIG_DIR": "/x"}, "/home/u")
-	p, ok := ResolveActiveProfile(profiles, "/totally/different")
+	p, ok := ResolveActiveProfile(profiles, "/totally/different", "/home/u")
 	if !ok || p.ID != "claude" {
 		t.Fatalf("single-profile fallback failed: ok=%v id=%q", ok, p.ID)
 	}
@@ -165,7 +168,7 @@ func TestResolveActiveProfile_MultiMatchesConfigDir(t *testing.T) {
 		{ID: "claude-m", ConfigDir: "/b"},
 	}
 	profiles := ResolveProfiles(specs, map[string]string{}, "/home/u")
-	p, ok := ResolveActiveProfile(profiles, "/b")
+	p, ok := ResolveActiveProfile(profiles, "/b", "/home/u")
 	if !ok || p.ID != "claude-m" {
 		t.Fatalf("want claude-m, ok=%v id=%q", ok, p.ID)
 	}
@@ -177,8 +180,77 @@ func TestResolveActiveProfile_MultiUnknownSkips(t *testing.T) {
 		{ID: "claude-m", ConfigDir: "/b"},
 	}
 	profiles := ResolveProfiles(specs, map[string]string{}, "/home/u")
-	if _, ok := ResolveActiveProfile(profiles, "/unknown"); ok {
+	if _, ok := ResolveActiveProfile(profiles, "/unknown", "/home/u"); ok {
 		t.Fatal("unknown CLAUDE_CONFIG_DIR must not match under multi-profile")
+	}
+}
+
+func TestResolveActiveProfile_UnsetConfigDirMatchesDefaultDirProfile(t *testing.T) {
+	// Bare `claude` sets no CLAUDE_CONFIG_DIR: the convention is to set it only
+	// for additional accounts, so an empty value means the default ~/.claude
+	// account and must match the profile declaring that dir.
+	home := "/home/u"
+	specs := []ProfileSpec{
+		{ID: "base", ConfigDir: filepath.Join(home, ".claude")},
+		{ID: "dev", ConfigDir: filepath.Join(home, ".claude-dev")},
+	}
+	profiles := ResolveProfiles(specs, map[string]string{}, home)
+	p, ok := ResolveActiveProfile(profiles, "", home)
+	if !ok || p.ID != "base" {
+		t.Fatalf("unset CLAUDE_CONFIG_DIR: ok=%v id=%q, want base", ok, p.ID)
+	}
+}
+
+func TestResolveActiveProfile_UnsetConfigDirWithoutDefaultDirProfileSkips(t *testing.T) {
+	home := "/home/u"
+	specs := []ProfileSpec{
+		{ID: "dev", ConfigDir: filepath.Join(home, ".claude-dev")},
+		{ID: "work", ConfigDir: filepath.Join(home, ".claude-work")},
+	}
+	profiles := ResolveProfiles(specs, map[string]string{}, home)
+	if _, ok := ResolveActiveProfile(profiles, "", home); ok {
+		t.Fatal("default account must not be attributed to an unrelated profile")
+	}
+}
+
+func TestResolveActiveProfile_TildeProfileMatchesAbsoluteConfigDir(t *testing.T) {
+	home := "/home/u"
+	specs := []ProfileSpec{
+		{ID: "base", ConfigDir: "~/.claude"},
+		{ID: "dev", ConfigDir: "~/.claude-dev"},
+	}
+	profiles := ResolveProfiles(specs, map[string]string{}, home)
+	p, ok := ResolveActiveProfile(profiles, filepath.Join(home, ".claude-dev"), home)
+	if !ok || p.ID != "dev" {
+		t.Fatalf("tilde config_dir must match absolute env: ok=%v id=%q", ok, p.ID)
+	}
+}
+
+func TestResolveActiveProfile_TrailingSlashAndDotSegmentsMatch(t *testing.T) {
+	home := "/home/u"
+	specs := []ProfileSpec{
+		{ID: "base", ConfigDir: "/home/u/.claude/"},
+		{ID: "dev", ConfigDir: "/home/u/./.claude-dev"},
+	}
+	profiles := ResolveProfiles(specs, map[string]string{}, home)
+	if p, ok := ResolveActiveProfile(profiles, "/home/u/.claude", home); !ok || p.ID != "base" {
+		t.Fatalf("trailing slash: ok=%v id=%q", ok, p.ID)
+	}
+	if p, ok := ResolveActiveProfile(profiles, "/home/u/.claude-dev/", home); !ok || p.ID != "dev" {
+		t.Fatalf("dot segment: ok=%v id=%q", ok, p.ID)
+	}
+}
+
+func TestResolveActiveProfile_SingleConfiguredProfileStillRequiresMatch(t *testing.T) {
+	// One configured profile must not absorb every account: silently reporting
+	// one account's usage as another's is worse than recording nothing.
+	home := "/home/u"
+	profiles := ResolveProfiles([]ProfileSpec{{ID: "dev", ConfigDir: "~/.claude-dev"}}, map[string]string{}, home)
+	if _, ok := ResolveActiveProfile(profiles, filepath.Join(home, ".claude-other"), home); ok {
+		t.Fatal("single configured profile must not match a foreign config dir")
+	}
+	if p, ok := ResolveActiveProfile(profiles, filepath.Join(home, ".claude-dev"), home); !ok || p.ID != "dev" {
+		t.Fatalf("its own config dir must match: ok=%v id=%q", ok, p.ID)
 	}
 }
 
@@ -221,5 +293,67 @@ func TestResolveProfiles_ExplicitJSONPathOverridesDefaultDirHeuristic(t *testing
 	p := ResolveProfiles(specs, map[string]string{}, home)[0]
 	if p.JSONPath != "/custom/path.json" {
 		t.Fatalf("explicit claude_json_path must win, got %q", p.JSONPath)
+	}
+}
+
+func TestResolveProfiles_ExpandsTildeInPaths(t *testing.T) {
+	// A "~" in config.toml is never expanded by a shell, so derived paths would
+	// otherwise land under a directory literally named "~".
+	home := "/home/u"
+	specs := []ProfileSpec{
+		{ID: "dev", ConfigDir: "~/.claude-dev", JSONPath: "~/custom/dev.json"},
+	}
+	p := ResolveProfiles(specs, map[string]string{}, home)[0]
+	if p.ConfigDir != filepath.Join(home, ".claude-dev") {
+		t.Fatalf("configDir = %q", p.ConfigDir)
+	}
+	if p.JSONPath != filepath.Join(home, "custom", "dev.json") {
+		t.Fatalf("jsonPath = %q", p.JSONPath)
+	}
+	if p.LimitsCache != filepath.Join(home, ".claude-dev", "herdr-usagebar", "claude-limits-latest.json") {
+		t.Fatalf("limitsCache = %q", p.LimitsCache)
+	}
+	if p.StateDir != filepath.Join(home, ".claude-dev", "herdr-usagebar") {
+		t.Fatalf("stateDir = %q", p.StateDir)
+	}
+	if p.ProjectsRoot != filepath.Join(home, ".claude-dev", "projects") {
+		t.Fatalf("projectsRoot = %q", p.ProjectsRoot)
+	}
+}
+
+func TestResolveProfiles_TildeDefaultDirUsesSiblingJSONPath(t *testing.T) {
+	// The sibling-.claude.json rule must survive tilde notation too.
+	home := "/home/u"
+	specs := []ProfileSpec{
+		{ID: "base", ConfigDir: "~/.claude"},
+		{ID: "dev", ConfigDir: "~/.claude-dev"},
+	}
+	profiles := ResolveProfiles(specs, map[string]string{}, home)
+	if profiles[0].JSONPath != filepath.Join(home, ".claude.json") {
+		t.Fatalf("tilde default-dir jsonPath = %q, want sibling ~/.claude.json", profiles[0].JSONPath)
+	}
+	if profiles[1].JSONPath != filepath.Join(home, ".claude-dev", ".claude.json") {
+		t.Fatalf("tilde separate-dir jsonPath = %q", profiles[1].JSONPath)
+	}
+}
+
+func TestResolveProfiles_DedupesTildeAndAbsoluteSameDir(t *testing.T) {
+	home := "/home/u"
+	specs := []ProfileSpec{
+		{ID: "base", ConfigDir: "~/.claude"},
+		{ID: "base-again", ConfigDir: "/home/u/.claude/"},
+	}
+	profiles := ResolveProfiles(specs, map[string]string{}, home)
+	if len(profiles) != 1 || profiles[0].ID != "base" {
+		t.Fatalf("want only the first spec for one dir, got %+v", profiles)
+	}
+}
+
+func TestResolveProfiles_RelativeConfigDirIsNotCwdExpanded(t *testing.T) {
+	// Resolving against the cwd would make the write side (cwd = project) and
+	// the read side (cwd = Herdr) disagree, so a relative dir stays relative.
+	p := ResolveProfiles([]ProfileSpec{{ID: "rel", ConfigDir: "./.claude"}}, map[string]string{}, "/home/u")[0]
+	if p.ConfigDir != ".claude" {
+		t.Fatalf("configDir = %q, want cleaned-but-relative", p.ConfigDir)
 	}
 }
