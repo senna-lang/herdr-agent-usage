@@ -13,14 +13,20 @@
 #   - `synchronize` is included so the check re-runs on every push; omit it
 #     only if you do not mark this as a required status check.
 #
-# The action uses its default header pattern. That pattern is slightly
-# more permissive on scope characters than commitlint-go's default scope
-# charset, but in practice the unused extra characters (uppercase, `$`, `*`,
-# spaces in the scope) never appear in this repo, so a PR title that passes
-# here also passes `commitlint lint` locally against the same message. The
-# reverse is not guaranteed: `feat(API): ...` is accepted locally but
-# rejected here. Contributors wanting uppercase scopes should rewrite the
-# scope in lowercase.
+# Known asymmetries between this action and .commitlint.yaml (both verified
+# against commitlint-go v0.12.0 source, not just its README):
+#   - Length: this action enforces no title-length rule at all, while
+#     .commitlint.yaml sets header-min-length 10 / header-max-length 72
+#     (measured in BYTES). `fix: typo` (9 bytes) passes here and is
+#     rejected by the local hook; a 90-byte title does the opposite.
+#   - Scope charset: commitlint-go enables no scope rule, so any rune except
+#     newline/parens passes locally (e.g. `feat(データ層): ...`). This
+#     action's default headerPattern restricts the scope to `[\w$.\-*/ ]`,
+#     which is ASCII-only, so a non-ASCII scope fails here but passes
+#     locally. An uppercase ASCII scope such as `feat(API): ...` passes
+#     BOTH tools (`\w` includes A-Z; commitlint-go has no charset rule).
+# Net effect: passing here does not guarantee passing locally, and vice
+# versa. Treat the local hook as the stricter, authoritative check.
 name: Lint PR title
 
 on:

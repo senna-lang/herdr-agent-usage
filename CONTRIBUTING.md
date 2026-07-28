@@ -34,8 +34,13 @@ Build and test the project from the repository root:
 make build
 make test
 ```
-Before opening a pull request, run the same core checks used by CI
-(`gofmt -l .` should produce no output):
+
+Add or update tests for the behavior you change. Prefer focused tests beside
+the affected package, and include regression coverage for bug fixes when
+practical.
+
+Format changed Go files with `gofmt`. Before opening a pull request, run the
+same core checks used by CI (`gofmt -l .` should produce no output):
 
 ```sh
 gofmt -l .
@@ -81,13 +86,19 @@ Allowed `<type>` values:
 
 Use a lowercase scope in parentheses to identify the affected package when
 it is obvious (for example `chore(deps): bump actions/checkout to v7`).
-Keep the summary line under 72 characters and use the imperative mood
-("add", not "added" or "adds").
+Keep the summary line between 10 and 72 bytes (measured in bytes, not
+characters — roughly 3-24 characters for Japanese text) and use the
+imperative mood ("add", not "added" or "adds"). If squash-merge defaults to
+the PR title (see "Maintainer notes" below), GitHub appends " (#123)" to
+the merged commit header, so leave a few bytes of headroom below 72 for the
+PR title itself.
 
 PR titles must follow the same format. They are validated by the
 `Lint PR title` GitHub Actions workflow
 (`.github/workflows/lint-pr-title.yml`), which uses the same type list as
-the local hook.
+the local hook. The two tools are not fully equivalent — see the asymmetry
+note at the top of that workflow file — so treat the local hook as the
+stricter, authoritative check before pushing.
 
 To lint commits locally before pushing, install the commit-msg hook:
 
@@ -100,7 +111,11 @@ This installs
 (a Go implementation, no Node.js required) and configures it against
 `.commitlint.yaml`. After installation, a non-conforming message such as
 `git commit -m "fix typo"` will be rejected; rewrite it as
-`fix: correct typo in setup output` and try again.
+`fix: correct typo in setup output` and try again. The hook exits non-zero
+whenever `commitlint` is missing from `PATH` (for example after
+`go clean -modcache`), which blocks every local commit until it is
+reinstalled; run `git config --unset core.hooksPath` to disable the hook if
+you need to commit before reinstalling.
 
 ### Maintainer notes (enforcing the rule)
 
@@ -110,7 +125,8 @@ must apply both of the following GitHub repository settings once this
 commit lands on `main`:
 
 1. **Required status check.** Under *Settings → Branches → Branch
-   protection rules*, mark `Lint PR title / Validate PR title` as a
+   protection rules*, mark **Validate PR title** (the job name; shown in
+   the check list as `Lint PR title / Validate PR title`) as a
    required check for `main`. `synchronize` is included in the workflow
    trigger so the check re-runs on every push and stays current as
    required checks require it.
@@ -122,7 +138,7 @@ commit lands on `main`:
 
 These settings live in GitHub, not in the repository, so they are not
 versioned here. Re-apply them after creating a new repository or
-re import.
+reimporting this one.
 
 ## Pull requests
 

@@ -25,8 +25,11 @@ install-plugin: build
 # pre-push, ...) stop running until you copy them under
 # `.commitlint/hooks/` or unset `core.hooksPath`.
 install-hooks:
-	@command -v commitlint >/dev/null 2>&1 || \
-	  (echo "installing commitlint v0.12.0..." && \
-	   go install github.com/conventionalcommit/commitlint@v0.12.0)
-	commitlint init
-	@echo "commit-msg hook installed. Try: git commit -m 'foo: bad'"
+	@CL=commitlint; \
+	if ! command -v commitlint >/dev/null 2>&1 || ! commitlint --version 2>/dev/null | grep -q '0\.12\.0'; then \
+	  echo "installing commitlint v0.12.0..."; \
+	  go install github.com/conventionalcommit/commitlint@v0.12.0; \
+	  CL="$$(go env GOPATH)/bin/commitlint"; \
+	fi; \
+	"$$CL" init; \
+	echo "commit-msg hook installed. Try: git commit -m 'foo: bad'"
