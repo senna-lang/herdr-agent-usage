@@ -52,7 +52,7 @@ func TestClaudeLimitsCache_WriteAndRead(t *testing.T) {
 	}
 }
 
-func TestClaudeLimitsCache_PrefersJSON(t *testing.T) {
+func TestClaudeLimitsCache_PrefersFresherStatusLine(t *testing.T) {
 	dir := t.TempDir()
 	cachePath := filepath.Join(dir, "cache.json")
 	jsonPath := filepath.Join(dir, "claude.json")
@@ -75,6 +75,42 @@ func TestClaudeLimitsCache_PrefersJSON(t *testing.T) {
 			ResetsAt       int64
 		}{99, 2},
 	}, 5_000, cachePath)
+
+	limits := CollectClaudeLimits(6_000, CollectClaudeLimitsOptions{
+		StatusLineCachePath: cachePath,
+		ClaudeJSONPath:      jsonPath,
+	})
+	if limits.Primary == nil || limits.Primary.UsedPercentage != 99 {
+		t.Fatalf("%+v", limits.Primary)
+	}
+	if limits.Source != "claude statusLine cache" {
+		t.Fatalf("source=%q", limits.Source)
+	}
+}
+
+func TestClaudeLimitsCache_PrefersFresherJSON(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "cache.json")
+	jsonPath := filepath.Join(dir, "claude.json")
+	_ = os.WriteFile(jsonPath, []byte(`{
+		"cachedUsageUtilization": {
+			"fetchedAtMs": 5000,
+			"utilization": {
+				"five_hour": { "utilization": 1, "resets_at": "2026-07-15T00:00:00.000Z" },
+				"seven_day": { "utilization": 2, "resets_at": "2026-07-20T00:00:00.000Z" }
+			}
+		}
+	}`), 0o644)
+	_ = WriteClaudeLimitsCache(RateLimitsInput{
+		FiveHour: &struct {
+			UsedPercentage float64
+			ResetsAt       int64
+		}{99, 1},
+		SevenDay: &struct {
+			UsedPercentage float64
+			ResetsAt       int64
+		}{99, 2},
+	}, 1_000, cachePath)
 
 	limits := CollectClaudeLimits(6_000, CollectClaudeLimitsOptions{
 		StatusLineCachePath: cachePath,
