@@ -143,8 +143,10 @@ func CollectClaudeLimits(nowMs int64, options CollectClaudeLimitsOptions) Provid
 	}
 
 	native := CollectClaudeLimitsFromJSON(nowMs, jsonPath)
-	if native == nil {
-		native = collectFromStatusLineCache(nowMs, statusPath)
+	if fromStatusLine := collectFromStatusLineCache(nowMs, statusPath); fromStatusLine != nil {
+		if native == nil || fromStatusLine.FetchedAtMs > native.FetchedAtMs {
+			native = fromStatusLine
+		}
 	}
 	// The windows belong to the account, so any agent's reading of them
 	// counts — including when Claude Code wrote nothing at all.
