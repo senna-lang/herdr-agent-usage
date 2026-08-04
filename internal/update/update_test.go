@@ -42,8 +42,7 @@ func TestPaneCwdForUpdate_OtherAgentsPreferForegroundCwd(t *testing.T) {
 	}
 }
 
-func TestWriteMetadataTokenWith_SetSuccessDeduplicates(t *testing.T) {
-	t.Setenv("HERDR_PLUGIN_STATE_DIR", t.TempDir())
+func TestWriteMetadataTokenWith_SkipsWhenServerCurrent(t *testing.T) {
 	setCalls := 0
 	clearCalls := 0
 	writer := metadataTokenWriter{
@@ -57,15 +56,34 @@ func TestWriteMetadataTokenWith_SetSuccessDeduplicates(t *testing.T) {
 		},
 	}
 
-	writeMetadataTokenWith(writer, "w1:p1", "limit", "5h 72%", false)
-	writeMetadataTokenWith(writer, "w1:p1", "limit", "5h 72%", false)
+	current := map[string]string{"limit": "5h 72%"}
+	writeMetadataTokenWith(writer, current, "w1:p1", "limit", "5h 72%", false)
+	if setCalls != 0 || clearCalls != 0 {
+		t.Fatalf("set=%d clear=%d", setCalls, clearCalls)
+	}
+	writeMetadataTokenWith(writer, current, "w1:p1", "limit", "5h 60%", false)
 	if setCalls != 1 || clearCalls != 0 {
 		t.Fatalf("set=%d clear=%d", setCalls, clearCalls)
 	}
 }
 
-func TestWriteMetadataTokenWith_ClearSuccessDeduplicates(t *testing.T) {
-	t.Setenv("HERDR_PLUGIN_STATE_DIR", t.TempDir())
+func TestWriteMetadataTokenWith_WritesWhenServerLacksToken(t *testing.T) {
+	setCalls := 0
+	writer := metadataTokenWriter{
+		set: func(_, _, _, _ string) bool {
+			setCalls++
+			return true
+		},
+		clear: func(_, _, _ string) bool { return true },
+	}
+
+	writeMetadataTokenWith(writer, nil, "w1:p1", "provider", "claude", false)
+	if setCalls != 1 {
+		t.Fatalf("set=%d", setCalls)
+	}
+}
+
+func TestWriteMetadataTokenWith_ClearOfAbsentTokenIsNoOp(t *testing.T) {
 	setCalls := 0
 	clearCalls := 0
 	writer := metadataTokenWriter{
@@ -79,28 +97,13 @@ func TestWriteMetadataTokenWith_ClearSuccessDeduplicates(t *testing.T) {
 		},
 	}
 
-	writeMetadataTokenWith(writer, "w1:p1", "context", "", false)
-	writeMetadataTokenWith(writer, "w1:p1", "context", "", false)
-	if setCalls != 0 || clearCalls != 1 {
+	writeMetadataTokenWith(writer, nil, "w1:p1", "context", "", false)
+	if setCalls != 0 || clearCalls != 0 {
 		t.Fatalf("set=%d clear=%d", setCalls, clearCalls)
 	}
-}
-
-func TestWriteMetadataTokenWith_FailureRetries(t *testing.T) {
-	t.Setenv("HERDR_PLUGIN_STATE_DIR", t.TempDir())
-	setCalls := 0
-	writer := metadataTokenWriter{
-		set: func(_, _, _, _ string) bool {
-			setCalls++
-			return false
-		},
-		clear: func(_, _, _ string) bool { return false },
-	}
-
-	writeMetadataTokenWith(writer, "w1:p1", "limit", "7d 42%", false)
-	writeMetadataTokenWith(writer, "w1:p1", "limit", "7d 42%", false)
-	if setCalls != 2 {
-		t.Fatalf("set=%d want 2 retries", setCalls)
+	writeMetadataTokenWith(writer, map[string]string{"context": "old"}, "w1:p1", "context", "", false)
+	if setCalls != 0 || clearCalls != 1 {
+		t.Fatalf("set=%d clear=%d", setCalls, clearCalls)
 	}
 }
 

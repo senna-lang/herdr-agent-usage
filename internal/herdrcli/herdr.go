@@ -52,6 +52,7 @@ type PaneInfo struct {
 	Label         *string // raw pane rename (unlike RowLabel, no agent/displayAgent fallback)
 	TabID         *string
 	WorkspaceID   *string
+	Tokens        map[string]string // current server-side metadata tokens; nil when none
 }
 
 // RawPaneListEntry is a pane list row from herdr (for pure buildOpenAgentPanes).
@@ -149,14 +150,15 @@ func GetPaneInfo(paneID string) PaneInfo {
 	var parsed struct {
 		Result *struct {
 			Pane *struct {
-				Agent         *string `json:"agent"`
-				AgentStatus   *string `json:"agent_status"`
-				Label         *string `json:"label"`
-				DisplayAgent  *string `json:"display_agent"`
-				Cwd           *string `json:"cwd"`
-				ForegroundCwd *string `json:"foreground_cwd"`
-				TabID         *string `json:"tab_id"`
-				WorkspaceID   *string `json:"workspace_id"`
+				Agent         *string           `json:"agent"`
+				AgentStatus   *string           `json:"agent_status"`
+				Label         *string           `json:"label"`
+				DisplayAgent  *string           `json:"display_agent"`
+				Cwd           *string           `json:"cwd"`
+				ForegroundCwd *string           `json:"foreground_cwd"`
+				TabID         *string           `json:"tab_id"`
+				WorkspaceID   *string           `json:"workspace_id"`
+				Tokens        map[string]string `json:"tokens"`
 				AgentSession  *struct {
 					Kind  *string `json:"kind"`
 					Value *string `json:"value"`
@@ -188,6 +190,7 @@ func GetPaneInfo(paneID string) PaneInfo {
 		Label:         p.Label,
 		TabID:         p.TabID,
 		WorkspaceID:   p.WorkspaceID,
+		Tokens:        p.Tokens,
 	}
 }
 
