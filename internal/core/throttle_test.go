@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestShouldWriteToken(t *testing.T) {
@@ -58,5 +59,47 @@ func TestMarkTokenWritten_RemovesLegacyStatusFile(t *testing.T) {
 	MarkTokenWritten("w1:p1", "context", "new")
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
 		t.Fatalf("legacy state still exists: %v", err)
+	}
+}
+
+func TestShouldWriteToken_ServerRestartInvalidatesState(t *testing.T) {
+	t.Setenv("HERDR_PLUGIN_STATE_DIR", t.TempDir())
+	sock := filepath.Join(t.TempDir(), "herdr.sock")
+	if err := os.WriteFile(sock, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HERDR_SOCKET_PATH", sock)
+
+	MarkTokenWritten("w1:p1", "provider", "claude")
+	if ShouldWriteToken("w1:p1", "provider", "claude", false) {
+		t.Fatal("identical value within one server generation should skip")
+	}
+
+	// A restarted server recreates its socket and wipes its in-memory
+	// tokens, so the unchanged value must be re-reported.
+	restarted := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(sock, restarted, restarted); err != nil {
+		t.Fatal(err)
+	}
+	if !ShouldWriteToken("w1:p1", "provider", "claude", false) {
+		t.Fatal("state from a previous server generation must not suppress writes")
+	}
+}
+
+func TestShouldWriteToken_EpochlessLegacyStateIsStale(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HERDR_PLUGIN_STATE_DIR", dir)
+	t.Setenv("HERDR_SOCKET_PATH", "")
+	legacy := filepath.Join(dir, "last-token-w1_p1-provider.txt")
+	if err := os.WriteFile(legacy, []byte("claude"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if !ShouldWriteToken("w1:p1", "provider", "claude", false) {
+		t.Fatal("pre-epoch state files must not suppress writes")
+	}
+	MarkTokenWritten("w1:p1", "provider", "claude")
+	if ShouldWriteToken("w1:p1", "provider", "claude", false) {
+		t.Fatal("rewritten state should dedupe again within the same generation")
 	}
 }
