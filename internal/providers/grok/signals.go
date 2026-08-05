@@ -12,9 +12,11 @@ import (
 
 // Signals is the parsed shape of signals.json.
 type Signals struct {
-	ContextTokensUsed   *float64 `json:"contextTokensUsed"`
-	ContextWindowTokens *float64 `json:"contextWindowTokens"`
-	ContextWindowUsage  *float64 `json:"contextWindowUsage"`
+	ContextTokensUsed           *float64 `json:"contextTokensUsed"`
+	ContextWindowTokens         *float64 `json:"contextWindowTokens"`
+	ContextWindowUsage          *float64 `json:"contextWindowUsage"`
+	TotalTokensBeforeCompaction *float64 `json:"totalTokensBeforeCompaction"`
+	CompactionCount             *float64 `json:"compactionCount"`
 }
 
 // UsageFromSignals builds usage from a parsed signals.json object.

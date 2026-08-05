@@ -140,6 +140,55 @@ func TestFormatUsageStatus_Below1000NoK(t *testing.T) {
 	}
 }
 
+func TestFormatCompactContextTokens(t *testing.T) {
+	if got := FormatCompactContextTokens(usage(94_000, intPtr(200_000))); got != "⛁ 94k" {
+		t.Fatalf("got %q want ⛁ 94k", got)
+	}
+	if got := FormatCompactContextTokens(usage(5_000, nil)); got != "⛁ 5.0k" {
+		t.Fatalf("got %q want ⛁ 5.0k", got)
+	}
+	if got := FormatCompactContextTokens(usage(0, intPtr(200_000))); got != "" {
+		t.Fatalf("got %q want empty", got)
+	}
+}
+
+func TestContextTierTokenName(t *testing.T) {
+	cases := []struct {
+		tokens int
+		want   string
+	}{
+		{0, ""},
+		{99_999, ContextTokenOK},
+		{100_000, ContextTokenSoft},
+		{149_999, ContextTokenSoft},
+		{150_000, ContextTokenWarn},
+		{179_999, ContextTokenWarn},
+		{180_000, ContextTokenCritical},
+		{250_000, ContextTokenCritical},
+	}
+	for _, tc := range cases {
+		if got := ContextTierTokenName(tc.tokens); got != tc.want {
+			t.Fatalf("ContextTierTokenName(%d)=%q want %q", tc.tokens, got, tc.want)
+		}
+	}
+}
+
+func TestContextTierTokenValues_Exclusive(t *testing.T) {
+	got := ContextTierTokenValues(usage(185_000, nil))
+	if got[ContextTokenCritical] != "⛁ 185k" {
+		t.Fatalf("crit=%q", got[ContextTokenCritical])
+	}
+	if got[ContextTokenOK] != "" || got[ContextTokenSoft] != "" || got[ContextTokenWarn] != "" {
+		t.Fatalf("non-exclusive: %#v", got)
+	}
+	empty := ContextTierTokenValues(usage(0, nil))
+	for _, name := range AllContextTierTokenNames {
+		if empty[name] != "" {
+			t.Fatalf("%s should be empty", name)
+		}
+	}
+}
+
 func TestFormatUsageStatus_Exactly1000OneDecimal(t *testing.T) {
 	got := FormatUsageStatus(usage(1000, intPtr(1_000_000)), FormatUsageOptions{})
 	if got != "⛁ 0% (1.0k)" {

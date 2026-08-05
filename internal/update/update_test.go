@@ -271,6 +271,82 @@ func TestCombineLimitAndContext(t *testing.T) {
 	}
 }
 
+func TestWriteLimitToken_PreservesOnCollectMiss(t *testing.T) {
+	setCalls := 0
+	clearCalls := 0
+	var lastSet string
+	writer := metadataTokenWriter{
+		set: func(_, _, _, value string) bool {
+			setCalls++
+			lastSet = value
+			return true
+		},
+		clear: func(_, _, _ string) bool {
+			clearCalls++
+			return true
+		},
+	}
+	// Temporarily swap the package writer used by writeLimitToken → writeMetadataToken.
+	// writeLimitToken goes through writeMetadataToken → herdrMetadataTokenWriter.
+	old := herdrMetadataTokenWriter
+	herdrMetadataTokenWriter = writer
+	t.Cleanup(func() { herdrMetadataTokenWriter = old })
+
+	current := map[string]string{"limit": "7d 73%"}
+	// Transient collect miss must not clear.
+	writeLimitToken(current, "w1:p1", "", limits.BillingSubscription, false, false)
+	if setCalls != 0 || clearCalls != 0 {
+		t.Fatalf("collect miss wrote set=%d clear=%d", setCalls, clearCalls)
+	}
+	// Real empty (collected, no windows) clears.
+	writeLimitToken(current, "w1:p1", "", limits.BillingSubscription, true, false)
+	if clearCalls != 1 {
+		t.Fatalf("expected clear, clear=%d set=%d last=%q", clearCalls, setCalls, lastSet)
+	}
+	// Non-empty always writes.
+	writeLimitToken(current, "w1:p1", "7d 70%", limits.BillingSubscription, true, false)
+	if setCalls != 1 || lastSet != "7d 70%" {
+		t.Fatalf("set=%d last=%q", setCalls, lastSet)
+	}
+}
+
+func TestWriteContextTierTokens_NilUsageClearsStale(t *testing.T) {
+	clearCalls := 0
+	old := herdrMetadataTokenWriter
+	herdrMetadataTokenWriter = metadataTokenWriter{
+		set: func(_, _, _, _ string) bool { return true },
+		clear: func(_, _, _ string) bool {
+			clearCalls++
+			return true
+		},
+	}
+	t.Cleanup(func() { herdrMetadataTokenWriter = old })
+
+	// Stale sibling meter must not stick when resolve returns nil.
+	current := map[string]string{"ctx_r": "⛁ 146k"}
+	writeContextTierTokens(current, "w1:p1", nil, false)
+	if clearCalls != 1 {
+		// only ctx_r is present so ShouldWriteToken clears that one; empty tiers skip
+		t.Fatalf("expected clear of stale ctx_r, clear=%d", clearCalls)
+	}
+}
+
+func TestCombineLimitAndCompactContext(t *testing.T) {
+	cases := []struct{ limitText, compact, want string }{
+		{"7d 77%", "⛁ 94k", "7d 77%  ⛁ 94k"},
+		{"5h 88%", "⛁ 136k", "5h 88%  ⛁ 136k"},
+		{"", "⛁ 94k", "⛁ 94k"},
+		{"7d 77%", "", "7d 77%"},
+		{"Σ 425k", "⛁ 94k", "Σ 425k  ⛁ 94k"},
+		{"", "", ""},
+	}
+	for _, c := range cases {
+		if got := combineLimitAndCompactContext(c.limitText, c.compact); got != c.want {
+			t.Fatalf("combineLimitAndCompactContext(%q, %q) = %q, want %q", c.limitText, c.compact, got, c.want)
+		}
+	}
+}
+
 func TestReserveColumnsFor(t *testing.T) {
 	base := 20
 	got := reserveColumnsFor(&base, "you@example.com")
