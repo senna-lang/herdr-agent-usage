@@ -46,7 +46,7 @@ herdr plugin action invoke usagebar.enable-toast
 herdr server reload-config
 ```
 
-`usagebar.setup` resolves the `usagebar` binary automatically on first run: it builds with the local Go toolchain (≥ 1.25) when available, and otherwise downloads a prebuilt binary from [GitHub Releases](https://github.com/senna-lang/herdr-agent-usage/releases) (macOS / Linux, arm64 / amd64). To build manually instead, run `make build` in the plugin root.
+`herdr plugin install` provisions the `usagebar` binary automatically as part of install/update (via the manifest's `[[build]]` hook): it builds with the local Go toolchain (≥ 1.25) when available, and otherwise downloads a prebuilt binary from [GitHub Releases](https://github.com/senna-lang/herdr-agent-usage/releases) (macOS / Linux, arm64 / amd64). `usagebar.setup` repeats this resolution as a fallback for installs predating the build hook. To build manually instead, run `make build` in the plugin root.
 
 ## Let an LLM set it up
 
