@@ -6,6 +6,17 @@ min_herdr_version = "0.7.4"
 description = "Sidebar context meters, provider limit windows, and rate-limit toasts for Claude, Codex, OpenCode Go, OMP, Pi coding agent, and Grok"
 platforms = ["macos", "linux"]
 
+# Runs on every `herdr plugin install` (including reinstall/update — there is
+# no separate update command). Install replaces the whole managed directory
+# with a fresh checkout, which never carries the gitignored bin/usagebar, so
+# without this hook the meters, rate-limit cache, and statusLine bridge go
+# silently dead until the user runs `make build` by hand. If the hook fails
+# (offline, no Go, no gh/curl) the install aborts and the previous working
+# install is left untouched.
+# See https://github.com/senna-lang/herdr-agent-usage/issues/48
+[[build]]
+command = ["bash", "bin/ensure-binary.sh", "--in-tree"]
+
 [[events]]
 on = "pane.agent_status_changed"
 command = ["bash", "bin/run-status.sh"]
