@@ -1,6 +1,7 @@
 /**
  * UsageProvider for Claude Code.
- * Uses the UUID from herdr's agent_session (kind === "id") as the session key.
+ * Uses the UUID from herdr's agent_session (kind === "id") as the session key,
+ * falling back to the newest transcript for the pane's cwd.
  */
 package claude
 
@@ -16,11 +17,15 @@ var Provider = provider.FuncProvider{
 }
 
 func resolveClaudeUsage(input provider.UsageResolveInput) *core.ContextUsage {
-	session := input.Session
-	if session == nil || session.Kind != "id" || session.Value == "" {
-		return nil
+	var transcript *TranscriptUsage
+	if sid := provider.SessionID(input); sid != nil {
+		transcript = ResolveUsageForSession(*sid)
 	}
-	transcript := ResolveUsageForSession(session.Value)
+	// No session ID (snatched/adopted panes) or its transcript is gone: follow
+	// the most recently active session in the pane's cwd, like codex does.
+	if transcript == nil && input.Cwd != nil {
+		transcript = ResolveLatestUsageForCwd(*input.Cwd)
+	}
 	if transcript == nil {
 		return nil
 	}
