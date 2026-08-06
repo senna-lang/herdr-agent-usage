@@ -77,6 +77,24 @@ func formatTokenCount(tokens int) string {
 func UsageStatusCandidates(usage ContextUsage) []string {
 	tokenLabel := formatTokenCount(usage.ContextTokens)
 
+	if usage.Compacted {
+		// ContextTokens is the compact boundary's own estimate here, not an
+		// API-reported size — label it instead of dressing it up as a
+		// measurement.
+		var percent *int
+		if usage.WindowTokens != nil && *usage.WindowTokens > 0 {
+			p := int(math.Min(100, math.Round(float64(usage.ContextTokens)/float64(*usage.WindowTokens)*100)))
+			percent = &p
+		}
+		label := fmt.Sprintf("compacted (%s)", tokenLabel)
+		return []string{
+			fmt.Sprintf("%s %s", iconFor(percent), label),
+			label,
+			"compacted",
+			tokenLabel,
+		}
+	}
+
 	if usage.WindowTokens == nil {
 		return []string{fmt.Sprintf("⛁ %s", tokenLabel), tokenLabel}
 	}

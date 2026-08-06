@@ -130,6 +130,7 @@ Percentages in the limits pane are **remaining** (`% left`). Higher is safer.
 - OpenCode Go may show three windows (**5h / 7d / 30d**). Other providers show whichever usage windows their data sources make available.
 - Open pane **token share** is local activity share within the shortest window (including a **closed / other** bucket for usage outside open panes). It is not account quota attribution.
 - Sidebar meters update after the agent has **settled** (not while `working`), so they match the last completed turn. If the session cannot be resolved, the `$context` token is cleared rather than showing another session’s numbers.
+- After a Claude Code **compaction**, the meter shows `⛁ compacted (14k)` — the boundary’s own post-compaction estimate — instead of the stale pre-compact size, until the next completed turn reports real usage again.
 
 ```bash
 herdr plugin action invoke usagebar.open-limits

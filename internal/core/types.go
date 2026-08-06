@@ -11,4 +11,7 @@ type ContextUsage struct {
 	ContextTokens int
 	// WindowTokens is the context window size if known. When nil, only the absolute token count is shown.
 	WindowTokens *int
+	// Compacted marks a post-compaction estimate (no real usage row yet):
+	// the display shows a "compacted" label instead of a measured size.
+	Compacted bool
 }

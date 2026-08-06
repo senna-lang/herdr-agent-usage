@@ -72,16 +72,26 @@ func totalTokensOf(usage TranscriptUsage) int {
 
 // ExtractLatestUsageFromLines walks jsonl lines from the end and returns the
 // latest assistant usage row with isSidechain=false and real token counts.
+// A compact_boundary newer than that row supersedes it: compaction writes no
+// assistant usage row of its own, so until the next turn the latest usage
+// still reports the pre-compact context; the boundary's postTokens is the
+// live size.
 func ExtractLatestUsageFromLines(lines []string) *TranscriptUsage {
+	seenCompactBoundary := false
+	compactPostTokens := 0
 	for i := len(lines) - 1; i >= 0; i-- {
 		raw := strings.TrimSpace(lines[i])
 		if raw == "" {
 			continue
 		}
 		var parsed struct {
-			Type        string `json:"type"`
-			IsSidechain bool   `json:"isSidechain"`
-			Message     *struct {
+			Type            string `json:"type"`
+			Subtype         string `json:"subtype"`
+			IsSidechain     bool   `json:"isSidechain"`
+			CompactMetadata *struct {
+				PostTokens *float64 `json:"postTokens"`
+			} `json:"compactMetadata"`
+			Message *struct {
 				Model string `json:"model"`
 				Usage *struct {
 					InputTokens              *float64 `json:"input_tokens"`
@@ -92,6 +102,17 @@ func ExtractLatestUsageFromLines(lines []string) *TranscriptUsage {
 			} `json:"message"`
 		}
 		if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+			continue
+		}
+		if parsed.Type == "system" && parsed.Subtype == "compact_boundary" {
+			// Only the newest boundary counts; older ones are already
+			// superseded by whatever followed them.
+			if !seenCompactBoundary {
+				seenCompactBoundary = true
+				if parsed.CompactMetadata != nil {
+					compactPostTokens = intOrZero(parsed.CompactMetadata.PostTokens)
+				}
+			}
 			continue
 		}
 		if parsed.Type != "assistant" || parsed.IsSidechain {
@@ -111,7 +132,17 @@ func ExtractLatestUsageFromLines(lines []string) *TranscriptUsage {
 		if totalTokensOf(candidate) == 0 {
 			continue
 		}
+		if compactPostTokens > 0 {
+			// Keep the model so the context-window lookup still works.
+			return &TranscriptUsage{Model: candidate.Model, InputTokens: compactPostTokens, Compacted: true}
+		}
 		return &candidate
+	}
+	if compactPostTokens > 0 {
+		// Boundary in the tail window but the pre-compact assistant row is
+		// not (e.g. cut off by tailScanBytes): report the size without a
+		// model rather than nothing.
+		return &TranscriptUsage{InputTokens: compactPostTokens, Compacted: true}
 	}
 	return nil
 }

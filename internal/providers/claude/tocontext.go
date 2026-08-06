@@ -13,8 +13,8 @@ func ToContextUsage(usage TranscriptUsage) core.ContextUsage {
 	contextTokens := ContextTokensOf(usage)
 	window := claudemodels.ContextWindowFor(usage.Model)
 	if window == nil {
-		return core.ContextUsage{ContextTokens: contextTokens}
+		return core.ContextUsage{ContextTokens: contextTokens, Compacted: usage.Compacted}
 	}
 	w := *window
-	return core.ContextUsage{ContextTokens: contextTokens, WindowTokens: &w}
+	return core.ContextUsage{ContextTokens: contextTokens, WindowTokens: &w, Compacted: usage.Compacted}
 }

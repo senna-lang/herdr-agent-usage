@@ -146,3 +146,45 @@ func TestFormatUsageStatus_Exactly1000OneDecimal(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestUsageStatusCandidates_Compacted(t *testing.T) {
+	u := usage(13_820, intPtr(200_000))
+	u.Compacted = true
+	got := UsageStatusCandidates(u)
+	want := []string{"⛁ compacted (14k)", "compacted (14k)", "compacted", "14k"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("candidates[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestFormatUsageStatus_CompactedLabel(t *testing.T) {
+	u := usage(13_820, intPtr(200_000))
+	u.Compacted = true
+	if got := FormatUsageStatus(u, FormatUsageOptions{}); got != "⛁ compacted (14k)" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFormatUsageStatus_CompactedDegrades(t *testing.T) {
+	u := usage(13_820, intPtr(200_000))
+	u.Compacted = true
+	max := 9
+	if got := FormatUsageStatus(u, FormatUsageOptions{MaxColumns: &max}); got != "compacted" {
+		t.Fatalf("got %q", got)
+	}
+	max = 4
+	if got := FormatUsageStatus(u, FormatUsageOptions{MaxColumns: &max}); got != "14k" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFormatUsageStatus_CompactedWithoutWindow(t *testing.T) {
+	if got := FormatUsageStatus(ContextUsage{ContextTokens: 13_820, Compacted: true}, FormatUsageOptions{}); got != "⛁ compacted (14k)" {
+		t.Fatalf("got %q", got)
+	}
+}
