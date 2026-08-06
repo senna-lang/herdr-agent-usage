@@ -132,7 +132,66 @@ func ResolveUsageForSession(sessionID string) *TranscriptUsage {
 // ResolveUsageForSessionIn is ResolveUsageForSession scoped to an explicit
 // projects root.
 func ResolveUsageForSessionIn(root, sessionID string) *TranscriptUsage {
-	path := findSessionFileIn(root, sessionID)
+	return usageFromTranscript(findSessionFileIn(root, sessionID))
+}
+
+// EncodeProjectDir returns the ~/.claude/projects entry name for a cwd:
+// every non-alphanumeric character becomes "-".
+func EncodeProjectDir(cwd string) string {
+	out := []byte(cwd)
+	for i, c := range out {
+		isAlnum := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if !isAlnum {
+			out[i] = '-'
+		}
+	}
+	return string(out)
+}
+
+// findLatestTranscriptForCwdIn returns the most recently modified transcript
+// in cwd's project directory under root, or empty.
+func findLatestTranscriptForCwdIn(root, cwd string) string {
+	if root == "" || cwd == "" {
+		return ""
+	}
+	dir := filepath.Join(root, EncodeProjectDir(cwd))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	newest := ""
+	var newestMod int64
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if mod := info.ModTime().UnixNano(); newest == "" || mod > newestMod {
+			newest = filepath.Join(dir, e.Name())
+			newestMod = mod
+		}
+	}
+	return newest
+}
+
+// ResolveLatestUsageForCwd resolves usage from the newest transcript whose
+// project directory matches cwd, under the default projects root. Fallback
+// for panes where herdr has no session ID (or the ID's transcript is gone);
+// with several sessions in one cwd it follows the most recently active one.
+func ResolveLatestUsageForCwd(cwd string) *TranscriptUsage {
+	return ResolveLatestUsageForCwdIn(projectsRoot(), cwd)
+}
+
+// ResolveLatestUsageForCwdIn is ResolveLatestUsageForCwd scoped to an explicit
+// projects root, so a multi-profile caller can search one profile's root.
+func ResolveLatestUsageForCwdIn(root, cwd string) *TranscriptUsage {
+	return usageFromTranscript(findLatestTranscriptForCwdIn(root, cwd))
+}
+
+func usageFromTranscript(path string) *TranscriptUsage {
 	if path == "" {
 		return nil
 	}

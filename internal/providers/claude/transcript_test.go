@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func assistantLine(isSidechain bool, model string, usage map[string]int) string {
@@ -144,5 +145,52 @@ func TestResolveProfileForSession_NoMatchRefuses(t *testing.T) {
 func TestResolveProfileForSession_EmptySessionID(t *testing.T) {
 	if _, ok := ResolveProfileForSession("", map[string]string{"claude": t.TempDir()}); ok {
 		t.Fatal("empty session id must not match")
+	}
+}
+
+func TestEncodeProjectDir(t *testing.T) {
+	cases := map[string]string{
+		"/home/user/tmp/box.like_x": "-home-user-tmp-box-like-x",
+		"/repo/.worktrees/cel-1pky": "-repo--worktrees-cel-1pky",
+	}
+	for in, want := range cases {
+		if got := EncodeProjectDir(in); got != want {
+			t.Fatalf("EncodeProjectDir(%q)=%q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestResolveLatestUsageForCwd_PicksNewestTranscript(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CLAUDE_PROJECTS_ROOT", root)
+	dir := filepath.Join(root, "-work-proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := assistantLine(false, "claude-sonnet-5", map[string]int{"input_tokens": 100, "output_tokens": 1})
+	fresh := assistantLine(false, "claude-sonnet-5", map[string]int{"input_tokens": 999, "output_tokens": 1})
+	writeTranscript(t, filepath.Join(dir, "aaa.jsonl"), old, time.Now().Add(-time.Hour))
+	writeTranscript(t, filepath.Join(dir, "bbb.jsonl"), fresh, time.Now())
+
+	usage := ResolveLatestUsageForCwd("/work/proj")
+	if usage == nil || usage.InputTokens != 999 {
+		t.Fatalf("usage=%+v, want newest transcript (input 999)", usage)
+	}
+}
+
+func TestResolveLatestUsageForCwd_NoProjectDir(t *testing.T) {
+	t.Setenv("CLAUDE_PROJECTS_ROOT", t.TempDir())
+	if usage := ResolveLatestUsageForCwd("/no/such/cwd"); usage != nil {
+		t.Fatalf("usage=%+v, want nil", usage)
+	}
+}
+
+func writeTranscript(t *testing.T, path, line string, mtime time.Time) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatal(err)
 	}
 }

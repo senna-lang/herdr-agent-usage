@@ -165,7 +165,9 @@ func writeMetadataTokenWith(writer metadataTokenWriter, current map[string]strin
 }
 
 // RunUpdate resolves usage for HERDR_PANE_ID and updates its sidebar tokens.
-// force=true (plugin action) updates even while working.
+// Working panes update too (a fresh pane may never have settled yet); the only
+// thing a working pane cannot do is clear a previously-written context value,
+// so a transiently unresolvable session mid-run keeps its last good meter.
 func RunUpdate(force bool) {
 	paneID := os.Getenv("HERDR_PANE_ID")
 	if paneID == "" {
@@ -182,9 +184,7 @@ func RunUpdate(force bool) {
 		return
 	}
 
-	if pane.AgentStatus != nil && !isSettledStatus(*pane.AgentStatus) && !force {
-		return
-	}
+	settled := pane.AgentStatus == nil || isSettledStatus(*pane.AgentStatus)
 
 	// Row 1 stands in for Herdr's built-in `tab`/`pane` tokens, which render
 	// blank whenever a tab keeps its auto-assigned numeric label and the
@@ -214,10 +214,14 @@ func RunUpdate(force bool) {
 	providerID, resolved := limits.BuildClaudePaneProviderResolver(claudeProfiles)(snapshot)
 	if !resolved {
 		// Cannot tell which account this pane belongs to: clear rather than
-		// guess into the wrong account's limits/tokens.
-		writeMetadataToken(pane.Tokens, paneID, "limit", "", force)
-		writeMetadataToken(pane.Tokens, paneID, "provider", formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot), force)
-		writeMetadataToken(pane.Tokens, paneID, "context", "", force)
+		// guess into the wrong account's limits/tokens — but only once the
+		// pane has settled, so a mid-run resolution hiccup keeps the last
+		// good values.
+		if settled || force {
+			writeMetadataToken(pane.Tokens, paneID, "limit", "", force)
+			writeMetadataToken(pane.Tokens, paneID, "provider", formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot), force)
+			writeMetadataToken(pane.Tokens, paneID, "context", "", force)
+		}
 		return
 	}
 
@@ -271,8 +275,18 @@ func RunUpdate(force bool) {
 	// account's context display doesn't fall back to ~/.claude/projects.
 	var usage *core.ContextUsage
 	if *pane.Agent == "claude" {
-		if profile, ok := findClaudeProfile(claudeProfiles, providerID); ok && sid != nil {
-			if transcript := claudeprovider.ResolveUsageForSessionIn(profile.ProjectsRoot, *sid); transcript != nil {
+		if profile, ok := findClaudeProfile(claudeProfiles, providerID); ok {
+			var transcript *claudeprovider.TranscriptUsage
+			if sid != nil {
+				transcript = claudeprovider.ResolveUsageForSessionIn(profile.ProjectsRoot, *sid)
+			}
+			// No session ID (snatched/adopted panes) or its transcript is
+			// gone: follow the most recently active session in the pane's
+			// cwd, like codex does — still scoped to this profile's root.
+			if transcript == nil && cwd != nil {
+				transcript = claudeprovider.ResolveLatestUsageForCwdIn(profile.ProjectsRoot, *cwd)
+			}
+			if transcript != nil {
 				u := claudeprovider.ToContextUsage(*transcript)
 				usage = &u
 			}
@@ -290,7 +304,9 @@ func RunUpdate(force bool) {
 	}
 
 	if usage == nil {
-		writeMetadataToken(pane.Tokens, paneID, "context", contextPrefix, force)
+		if settled || force {
+			writeMetadataToken(pane.Tokens, paneID, "context", contextPrefix, force)
+		}
 		return
 	}
 
