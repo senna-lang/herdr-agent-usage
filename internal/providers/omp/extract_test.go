@@ -58,3 +58,62 @@ func TestExtractLatestBackendFromLines(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestExtractLatestUsageFromStockPi(t *testing.T) {
+	lines := []string{
+		`{"type":"message","message":{"role":"assistant","provider":"openai-codex","model":"gpt-5.6-sol","usage":{"input":100,"output":20,"cacheRead":400,"cacheWrite":0,"totalTokens":520},"stopReason":"stop"}}`,
+	}
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || got.ContextTokens != 520 || got.TotalTokens != 520 || got.Model != "gpt-5.6-sol" {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestExtractLatestUsageFallsBackToUsageComponents(t *testing.T) {
+	lines := []string{
+		`{"type":"message","message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-5","usage":{"input":100,"output":20,"cacheRead":400,"cacheWrite":10},"stopReason":"stop"}}`,
+	}
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || got.ContextTokens != 530 || got.TotalTokens != 530 {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestExtractLatestUsageSkipsFailedAssistant(t *testing.T) {
+	lines := []string{
+		`{"type":"message","message":{"role":"assistant","provider":"anthropic","model":"good","usage":{"totalTokens":100},"stopReason":"stop"}}`,
+		`{"type":"message","message":{"role":"assistant","provider":"anthropic","model":"failed","usage":{"totalTokens":999},"stopReason":"error"}}`,
+	}
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || got.ContextTokens != 100 || got.Model != "good" {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestExtractLatestUsageUnknownImmediatelyAfterCompaction(t *testing.T) {
+	lines := []string{
+		`{"type":"message","id":"a1","parentId":null,"message":{"role":"assistant","usage":{"totalTokens":90000},"stopReason":"stop"}}`,
+		`{"type":"compaction","id":"cmp1","parentId":"a1","tokensBefore":90000,"summary":"summary"}`,
+	}
+	if got := ExtractLatestUsageFromLines(lines); got != nil {
+		t.Fatalf("got %#v", got)
+	}
+
+	lines = append(lines, `{"type":"message","id":"a2","parentId":"cmp1","message":{"role":"assistant","usage":{"totalTokens":22000},"stopReason":"stop"}}`)
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || got.ContextTokens != 22000 {
+		t.Fatalf("post-compaction got %#v", got)
+	}
+}
+
+func TestExtractLatestUsageFollowsActiveBranch(t *testing.T) {
+	lines := []string{
+		`{"type":"message","id":"root","parentId":null,"message":{"role":"assistant","model":"root-model","usage":{"totalTokens":100},"stopReason":"stop"}}`,
+		`{"type":"message","id":"old","parentId":"root","message":{"role":"assistant","model":"abandoned-model","usage":{"totalTokens":999},"stopReason":"stop"}}`,
+		`{"type":"message","id":"new-user","parentId":"root","message":{"role":"user","content":"new branch"}}`,
+	}
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || got.ContextTokens != 100 || got.Model != "root-model" {
+		t.Fatalf("got %#v", got)
+	}
+}

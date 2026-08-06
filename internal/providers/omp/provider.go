@@ -43,5 +43,5 @@ func resolvePiUsage(input provider.UsageResolveInput) *core.ContextUsage {
 	if path == "" {
 		return nil
 	}
-	return ResolveUsageForPath(path)
+	return ResolvePiUsageForPath(path)
 }
