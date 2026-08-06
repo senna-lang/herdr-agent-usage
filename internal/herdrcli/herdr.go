@@ -339,6 +339,31 @@ func GetSidebarWidthColumns(paneID string) *int {
 	return &v
 }
 
+// GetAgentDisplayName returns what Herdr's sidebar `agent` token renders for
+// the pane: the agent's custom name when set (herdr agent rename), else the
+// agent kind ("claude"). Empty when the pane has no agent entry.
+func GetAgentDisplayName(paneID string) string {
+	stdout, ok := spawnHerdr("agent", "get", paneID)
+	if !ok || stdout == "" {
+		return ""
+	}
+	var parsed struct {
+		Result *struct {
+			Agent *struct {
+				Agent *string `json:"agent"`
+				Name  *string `json:"name"`
+			} `json:"agent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &parsed); err != nil || parsed.Result == nil || parsed.Result.Agent == nil {
+		return ""
+	}
+	if name := deref(parsed.Result.Agent.Name); name != "" {
+		return name
+	}
+	return deref(parsed.Result.Agent.Agent)
+}
+
 // SetMetadataToken reports one named presentation token for use in configurable
 // Herdr 0.7.4+ sidebar rows (for example $limit).
 func SetMetadataToken(paneID, source, name, value string) bool {

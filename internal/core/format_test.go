@@ -146,3 +146,106 @@ func TestFormatUsageStatus_Exactly1000OneDecimal(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestFormatUsageStatus_FractionFull(t *testing.T) {
+	got := FormatUsageStatus(usage(33_000, intPtr(200_000)), FormatUsageOptions{Fraction: true})
+	if got != "⛁ 33k/200k" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFormatUsageStatus_FractionDegradesToCountAlone(t *testing.T) {
+	max := 5
+	got := FormatUsageStatus(usage(33_000, intPtr(200_000)), FormatUsageOptions{MaxColumns: &max, Fraction: true})
+	if got != "33k" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFormatUsageStatus_FractionKeepsWarningIcon(t *testing.T) {
+	got := FormatUsageStatus(usage(160_000, intPtr(200_000)), FormatUsageOptions{Fraction: true})
+	if got != "⚠️ 160k/200k" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFormatUsageStatus_FractionMillionWindow(t *testing.T) {
+	got := FormatUsageStatus(usage(33_000, intPtr(1_000_000)), FormatUsageOptions{Fraction: true})
+	if got != "⛁ 33k/1.0m" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFormatUsageStatus_FractionNoWindowAbsolute(t *testing.T) {
+	got := FormatUsageStatus(usage(5_000, nil), FormatUsageOptions{Fraction: true})
+	if got != "⛁ 5.0k" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFormatUsageStatus_GaugeStyle(t *testing.T) {
+	window := 200_000
+	cases := map[int]string{
+		12_000:  "▁ 12k/200k",
+		55_000:  "▂ 55k/200k",
+		102_000: "▄ 102k/200k",
+		130_000: "▆ 130k/200k",
+		180_000: "█ 180k/200k",
+	}
+	for tokens, want := range cases {
+		usage := ContextUsage{ContextTokens: tokens, WindowTokens: &window}
+		got := FormatUsageStatus(usage, FormatUsageOptions{Fraction: true, IconStyle: "gauge"})
+		if got != want {
+			t.Fatalf("tokens=%d got %q want %q", tokens, got, want)
+		}
+	}
+}
+
+func TestFormatUsageStatus_GaugeUnknownWindowHasNoIcon(t *testing.T) {
+	got := FormatUsageStatus(ContextUsage{ContextTokens: 97_000}, FormatUsageOptions{Fraction: true, IconStyle: "gauge"})
+	if got != "97k" {
+		t.Fatalf("got %q want %q", got, "97k")
+	}
+}
+
+func TestFormatUsageStatus_NoneStyle(t *testing.T) {
+	window := 200_000
+	usage := ContextUsage{ContextTokens: 102_000, WindowTokens: &window}
+	got := FormatUsageStatus(usage, FormatUsageOptions{Fraction: true, IconStyle: "none"})
+	if got != "102k/200k" {
+		t.Fatalf("got %q want %q", got, "102k/200k")
+	}
+}
+
+func TestPadStatusRight(t *testing.T) {
+	// "claude"(6) + " · "(3) + "▄ 95k/200k"(10) = 19; row 30 → 11 pad cells
+	got := PadStatusRight("▄ 95k/200k", 6, 30)
+	if got != "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀▄ 95k/200k" {
+		t.Fatalf("got %q", got)
+	}
+	if DisplayWidth(got) != 30-6-3 {
+		t.Fatalf("padded width=%d, want %d", DisplayWidth(got), 30-6-3)
+	}
+}
+
+func TestPadStatusRight_NoRoomLeavesUnchanged(t *testing.T) {
+	if got := PadStatusRight("▄ 95k/200k", 20, 30); got != "▄ 95k/200k" {
+		t.Fatalf("got %q", got)
+	}
+	if got := PadStatusRight("▄ 95k/200k", 17, 30); got != "▄ 95k/200k" {
+		t.Fatalf("exact fit: got %q", got)
+	}
+}
+
+func TestContextLevelFor(t *testing.T) {
+	if got := ContextLevelFor(nil); got != "" {
+		t.Fatalf("nil percent: got %q", got)
+	}
+	cases := map[int]string{0: "", 59: "", 60: "warm", 84: "warm", 85: "hot", 100: "hot"}
+	for percent, want := range cases {
+		p := percent
+		if got := ContextLevelFor(&p); got != want {
+			t.Fatalf("percent=%d got %q want %q", percent, got, want)
+		}
+	}
+}

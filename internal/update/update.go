@@ -15,6 +15,7 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/provider"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers"
 	claudeprovider "github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/setup"
 )
 
 // findClaudeProfile looks up one resolved profile by provider id.
@@ -217,7 +218,9 @@ func RunUpdate(force bool) {
 		// guess into the wrong account's limits/tokens.
 		writeMetadataToken(pane.Tokens, paneID, "limit", "", force)
 		writeMetadataToken(pane.Tokens, paneID, "provider", formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot), force)
-		writeMetadataToken(pane.Tokens, paneID, "context", "", force)
+		for _, name := range contextTokenNames {
+			writeMetadataToken(pane.Tokens, paneID, name, "", force)
+		}
 		return
 	}
 
@@ -290,14 +293,86 @@ func RunUpdate(force bool) {
 	}
 
 	if usage == nil {
-		writeMetadataToken(pane.Tokens, paneID, "context", contextPrefix, force)
+		for _, name := range contextTokenNames {
+			value := ""
+			if name == "context" {
+				value = contextPrefix
+			}
+			writeMetadataToken(pane.Tokens, paneID, name, value, force)
+		}
 		return
 	}
 
+	pluginCfg := setup.LoadPluginConfig(setup.ResolvePluginConfigDir(map[string]string{
+		"HERDR_PLUGIN_CONFIG_DIR": os.Getenv("HERDR_PLUGIN_CONFIG_DIR"),
+		"XDG_CONFIG_HOME":         os.Getenv("XDG_CONFIG_HOME"),
+	}))
+	maxCols := contextMaxColumns(pluginCfg.ContextMaxColumns, paneID, pane.RowLabel)
+	maxCols = reserveColumnsFor(maxCols, contextPrefix)
+	statusText := core.FormatUsageStatus(*usage, core.FormatUsageOptions{
+		MaxColumns: maxCols,
+		Fraction:   pluginCfg.ContextDisplay == "fraction",
+		IconStyle:  pluginCfg.ContextIconStyle,
+	})
+	statusText = combineLimitAndContext(contextPrefix, statusText)
+	if pluginCfg.ContextAlign == "right" && statusText != "" {
+		statusText = alignStatusRight(statusText, paneID, *pane.Agent)
+	}
+	target := contextTokenTarget(pluginCfg.ContextLevelTokens, core.UsagePercent(*usage))
+	for _, name := range contextTokenNames {
+		value := ""
+		if name == target {
+			value = statusText
+		}
+		writeMetadataToken(pane.Tokens, paneID, name, value, force)
+	}
+}
+
+// contextTokenNames are every token the meter may occupy; each write fills the
+// target and clears the rest (deduplicated, so steady state costs nothing).
+var contextTokenNames = []string{"context", "context_warm", "context_hot"}
+
+// contextTokenTarget picks the metadata token that carries the meter. With
+// level tokens enabled, warm/hot fills move to $context_warm / $context_hot so
+// herdr sidebar rows can style them differently.
+func contextTokenTarget(levelTokens bool, percent *int) string {
+	if !levelTokens {
+		return "context"
+	}
+	if level := core.ContextLevelFor(percent); level != "" {
+		return "context_" + level
+	}
+	return "context"
+}
+
+// sidebarRowOverheadColumns is what Herdr 0.7.5 reserves around an
+// agents-sidebar row (left indent + right margin): a row's usable content
+// width is the sidebar width minus this. Measured empirically at sidebar
+// width 36 → 30 usable columns.
+const sidebarRowOverheadColumns = 6
+
+// alignStatusRight pads the meter so its right edge lands on the sidebar's
+// right edge, assuming the row renders as `<agent name> · <meter>`.
+func alignStatusRight(status, paneID, agentName string) string {
+	label := herdrcli.GetAgentDisplayName(paneID)
+	if label == "" {
+		label = agentName
+	}
 	liveWidth := herdrcli.GetSidebarWidthColumns(paneID)
 	sidebarW := core.ResolveSidebarWidth(liveWidth, core.ResolveConfigSidebarWidth())
-	maxCols := core.EstimateStatusMaxColumns(&sidebarW, pane.RowLabel)
-	maxCols = reserveColumnsFor(maxCols, contextPrefix)
-	statusText := core.FormatUsageStatus(*usage, core.FormatUsageOptions{MaxColumns: maxCols})
-	writeMetadataToken(pane.Tokens, paneID, "context", combineLimitAndContext(contextPrefix, statusText), force)
+	return core.PadStatusRight(status, core.DisplayWidth(label), sidebarW-sidebarRowOverheadColumns)
+}
+
+// contextMaxColumns picks the width budget for the context token: the
+// configured fixed budget when set, else the estimate from sidebar width and
+// pane label. The estimate assumes Herdr's default sidebar layout (label and
+// status share a line); custom rows that place $context elsewhere should set
+// display.context_max_columns.
+func contextMaxColumns(configured int, paneID string, rowLabel *string) *int {
+	if configured > 0 {
+		return &configured
+	}
+	liveWidth := herdrcli.GetSidebarWidthColumns(paneID)
+	sidebarW := core.ResolveSidebarWidth(liveWidth, core.ResolveConfigSidebarWidth())
+	return core.EstimateStatusMaxColumns(&sidebarW, rowLabel)
 }

@@ -295,3 +295,29 @@ func TestReserveColumnsFor(t *testing.T) {
 		t.Fatal("empty prefix must not shrink the budget")
 	}
 }
+
+func TestContextMaxColumns_ConfiguredOverridesEstimate(t *testing.T) {
+	got := contextMaxColumns(20, "w1:p1", stringPtr("claude: some very long pane label"))
+	if got == nil || *got != 20 {
+		t.Fatalf("got %v, want 20", got)
+	}
+}
+
+func TestContextTokenTarget(t *testing.T) {
+	pct := func(n int) *int { return &n }
+	if got := contextTokenTarget(false, pct(90)); got != "context" {
+		t.Fatalf("disabled: got %q", got)
+	}
+	if got := contextTokenTarget(true, nil); got != "context" {
+		t.Fatalf("nil percent: got %q", got)
+	}
+	if got := contextTokenTarget(true, pct(59)); got != "context" {
+		t.Fatalf("59%%: got %q", got)
+	}
+	if got := contextTokenTarget(true, pct(60)); got != "context_warm" {
+		t.Fatalf("60%%: got %q", got)
+	}
+	if got := contextTokenTarget(true, pct(85)); got != "context_hot" {
+		t.Fatalf("85%%: got %q", got)
+	}
+}

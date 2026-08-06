@@ -83,8 +83,8 @@ func TestSeedPluginConfigIfMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !contains(string(text), "[notify]") {
-		t.Fatal("missing [notify]")
+	if !contains(string(text), "[notify]") || !contains(string(text), "[display]") {
+		t.Fatal("missing config section")
 	}
 	if !LoadPluginConfig(dir).NotifyEnabled {
 		t.Fatal("expected enabled")
@@ -101,4 +101,41 @@ func contains(s, sub string) bool {
 			}
 			return false
 		}())
+}
+
+func TestParsePluginConfigTOML_Display(t *testing.T) {
+	cfg := ParsePluginConfigTOML(`
+[display]
+context_display = "fraction"
+context_max_columns = 20
+context_icon_style = "gauge"
+context_level_tokens = true
+context_align = "right"
+`)
+	if cfg.ContextDisplay != "fraction" || cfg.ContextMaxColumns != 20 ||
+		cfg.ContextIconStyle != "gauge" || !cfg.ContextLevelTokens || cfg.ContextAlign != "right" {
+		t.Fatalf("display config = %+v", cfg)
+	}
+}
+
+func TestParsePluginConfigTOML_DisplayDefaults(t *testing.T) {
+	cfg := ParsePluginConfigTOML("")
+	if cfg.ContextDisplay != "percent" || cfg.ContextMaxColumns != 0 ||
+		cfg.ContextIconStyle != "database" || cfg.ContextLevelTokens || cfg.ContextAlign != "left" {
+		t.Fatalf("display defaults = %+v", cfg)
+	}
+}
+
+func TestParsePluginConfigTOML_DisplayInvalidKeepsDefaults(t *testing.T) {
+	cfg := ParsePluginConfigTOML(`
+[display]
+context_display = "bogus"
+context_max_columns = 9999
+context_icon_style = "sparkles"
+context_align = "center"
+`)
+	if cfg.ContextDisplay != "percent" || cfg.ContextMaxColumns != 0 ||
+		cfg.ContextIconStyle != "database" || cfg.ContextAlign != "left" {
+		t.Fatalf("display validation = %+v", cfg)
+	}
 }

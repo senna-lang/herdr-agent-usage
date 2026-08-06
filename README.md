@@ -180,6 +180,13 @@ Created on first `usagebar.setup` (or when missing):
 [notify]
 enabled = true
 remaining_thresholds = [50, 20, 10, 5]
+
+[display]
+context_display = "percent"
+context_max_columns = 0
+context_icon_style = "database"
+context_level_tokens = false
+context_align = "left"
 ```
 
 `enabled = false` suppresses all Agent Usage toasts, including remaining-limit
@@ -187,6 +194,25 @@ warnings and update-available notices; statusLine summaries and cached limits
 continue to refresh. `remaining_thresholds` accepts remaining percentages from
 1 through 100 (for example `[30, 10]`); each threshold can notify once per
 window, from least to most severe.
+
+`[display]` controls the sidebar context meter:
+
+- `context_display` — `"percent"` renders `⛁ 65% (130k)`; `"fraction"` renders
+  `⛁ 130k/200k`.
+- `context_max_columns` — fixed width budget for the `$context` token; `0`
+  (default) estimates it from the sidebar width and pane label, which assumes
+  Herdr's default layout. Set it explicitly when custom sidebar rows put
+  `$context` next to a token other than the pane label.
+- `context_icon_style` — the meter's leading glyph: `"database"` (⛁, switching
+  to ⚠️ from 80%), `"gauge"` (▁▂▄▆█ by fill level), or `"none"`.
+- `context_level_tokens` — when `true`, a ≥60% meter moves to `$context_warm`
+  and a ≥85% meter to `$context_hot` (instead of `$context`), so sidebar rows
+  can color fill levels differently. Rows must then reference all three
+  tokens, e.g. `["$context", "$context_warm", "$context_hot"]` with per-token
+  colors; only one carries a value at a time.
+- `context_align` — `"right"` left-pads the meter with blank glyphs so its
+  right edge sits flush with the sidebar. Assumes a row of the form
+  `[agent, "$context"]` (the agent display name directly before the meter).
 
 ### Multiple Claude accounts
 

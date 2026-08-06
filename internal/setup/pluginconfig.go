@@ -29,12 +29,35 @@ type PluginConfig struct {
 	// ClaudeProfiles are the configured [[claude.profiles]] entries (unresolved).
 	// Empty means the single implicit "claude" profile is synthesized downstream.
 	ClaudeProfiles []claude.ProfileSpec
+	// ContextDisplay selects the sidebar context meter style:
+	// "percent" (⛁ 65% (130k)) or "fraction" (⛁ 130k/200k).
+	ContextDisplay string
+	// ContextMaxColumns fixes the width budget for the context token.
+	// 0 estimates from sidebar width and pane label, which assumes Herdr's
+	// default sidebar layout; set it explicitly when custom sidebar rows put
+	// $context next to a token other than the pane label.
+	ContextMaxColumns int
+	// ContextIconStyle selects the meter's leading glyph: "database"
+	// (⛁, ⚠️ from 80%), "gauge" (▁▂▄▆█ by fill level), or "none".
+	ContextIconStyle string
+	// ContextLevelTokens routes the meter to $context_warm (≥60%) or
+	// $context_hot (≥85%) instead of $context, so herdr sidebar rows can
+	// style fill levels with different colors. Rows must then reference all
+	// three tokens, which is why this is opt-in.
+	ContextLevelTokens bool
+	// ContextAlign "right" left-pads the meter with blank glyphs so its right
+	// edge sits flush with the sidebar. Assumes a sidebar row of the form
+	// [agent, $context...] (the agent display name directly before the meter).
+	ContextAlign string
 }
 
 // DefaultPluginConfig is the seed default.
 var DefaultPluginConfig = PluginConfig{
 	RemainingThresholds: append([]int(nil), DefaultRemainingThresholds...),
 	NotifyEnabled:       true,
+	ContextDisplay:      "percent",
+	ContextIconStyle:    "database",
+	ContextAlign:        "left",
 }
 
 // pluginConfigWire mirrors the on-disk TOML shape for decoding.
@@ -43,6 +66,13 @@ type pluginConfigWire struct {
 		Enabled             *bool `toml:"enabled"`
 		RemainingThresholds []int `toml:"remaining_thresholds"`
 	} `toml:"notify"`
+	Display struct {
+		ContextDisplay     string `toml:"context_display"`
+		ContextMaxColumns  int    `toml:"context_max_columns"`
+		ContextIconStyle   string `toml:"context_icon_style"`
+		ContextLevelTokens bool   `toml:"context_level_tokens"`
+		ContextAlign       string `toml:"context_align"`
+	} `toml:"display"`
 	Claude struct {
 		Profiles []profileWire `toml:"profiles"`
 	} `toml:"claude"`
@@ -87,6 +117,18 @@ func DefaultPluginConfigTOML(config PluginConfig) string {
 	if config.NotifyEnabled {
 		enabled = "true"
 	}
+	contextDisplay := config.ContextDisplay
+	if contextDisplay == "" {
+		contextDisplay = DefaultPluginConfig.ContextDisplay
+	}
+	contextIconStyle := config.ContextIconStyle
+	if contextIconStyle == "" {
+		contextIconStyle = DefaultPluginConfig.ContextIconStyle
+	}
+	contextAlign := config.ContextAlign
+	if contextAlign == "" {
+		contextAlign = DefaultPluginConfig.ContextAlign
+	}
 	return strings.Join([]string{
 		"# Agent Usage (usagebar) plugin config",
 		"# Path: herdr plugin config-dir usagebar",
@@ -95,6 +137,21 @@ func DefaultPluginConfigTOML(config PluginConfig) string {
 		"enabled = " + enabled,
 		"# remaining % thresholds that may fire a toast (once per window/bucket)",
 		"remaining_thresholds = [" + thresholds + "]",
+		"",
+		"[display]",
+		"# context meter style: \"percent\" (⛁ 65% (130k)) or \"fraction\" (⛁ 130k/200k)",
+		"context_display = \"" + contextDisplay + "\"",
+		"# fixed width budget for the context token; 0 estimates from sidebar",
+		"# width and pane label (assumes Herdr's default sidebar layout)",
+		"context_max_columns = " + strconv.Itoa(config.ContextMaxColumns),
+		"# leading glyph: \"database\" (⛁, ⚠️ from 80%), \"gauge\" (▁▂▄▆█ by fill), \"none\"",
+		"context_icon_style = \"" + contextIconStyle + "\"",
+		"# route the meter to $context_warm (≥60%) / $context_hot (≥85%) so sidebar",
+		"# rows can color fill levels; rows must reference all three tokens",
+		"context_level_tokens = " + strconv.FormatBool(config.ContextLevelTokens),
+		"# \"right\" pads the meter flush with the sidebar's right edge (assumes",
+		"# a sidebar row of [agent, $context...])",
+		"context_align = \"" + contextAlign + "\"",
 		"",
 		"# Multi-account Claude: uncomment and add one block per account.",
 		"# Absence of any profile keeps the single default account (fully backward",
@@ -140,6 +197,9 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 	cfg := PluginConfig{
 		NotifyEnabled:       DefaultPluginConfig.NotifyEnabled,
 		RemainingThresholds: append([]int(nil), DefaultPluginConfig.RemainingThresholds...),
+		ContextDisplay:      DefaultPluginConfig.ContextDisplay,
+		ContextIconStyle:    DefaultPluginConfig.ContextIconStyle,
+		ContextAlign:        DefaultPluginConfig.ContextAlign,
 	}
 	var wire pluginConfigWire
 	if _, err := toml.Decode(raw, &wire); err != nil {
@@ -150,6 +210,19 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 	}
 	if thr, ok := validThresholds(wire.Notify.RemainingThresholds); ok {
 		cfg.RemainingThresholds = thr
+	}
+	if wire.Display.ContextDisplay == "percent" || wire.Display.ContextDisplay == "fraction" {
+		cfg.ContextDisplay = wire.Display.ContextDisplay
+	}
+	if wire.Display.ContextMaxColumns >= 0 && wire.Display.ContextMaxColumns <= 200 {
+		cfg.ContextMaxColumns = wire.Display.ContextMaxColumns
+	}
+	if wire.Display.ContextIconStyle == "database" || wire.Display.ContextIconStyle == "gauge" || wire.Display.ContextIconStyle == "none" {
+		cfg.ContextIconStyle = wire.Display.ContextIconStyle
+	}
+	cfg.ContextLevelTokens = wire.Display.ContextLevelTokens
+	if wire.Display.ContextAlign == "left" || wire.Display.ContextAlign == "right" {
+		cfg.ContextAlign = wire.Display.ContextAlign
 	}
 	for _, p := range wire.Claude.Profiles {
 		cfg.ClaudeProfiles = append(cfg.ClaudeProfiles, claude.ProfileSpec{
