@@ -18,7 +18,6 @@ func TestContextWindowFor_1MDefaults(t *testing.T) {
 	models := []string{
 		"claude-sonnet-5",
 		"claude-opus-5",
-		"claude-fable-5",
 		"claude-opus-4-8",
 		"claude-opus-4-7",
 		"claude-opus-4-6",
@@ -31,6 +30,13 @@ func TestContextWindowFor_1MDefaults(t *testing.T) {
 		if got == nil || *got != 1_000_000 {
 			t.Fatalf("%s => %#v, want 1M", m, got)
 		}
+	}
+}
+
+func TestContextWindowFor_Fable5Base200k(t *testing.T) {
+	got := ContextWindowFor("claude-fable-5")
+	if got == nil || *got != 200_000 {
+		t.Fatalf("got %#v, want 200k", got)
 	}
 }
 

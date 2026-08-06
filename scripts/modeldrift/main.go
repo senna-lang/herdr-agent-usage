@@ -54,8 +54,15 @@ var ignoredModels = map[string]bool{
 // use (the context-1m beta), not LiteLLM's non-beta API default. Confirmed via
 // /context, which shows current 1M-capable models (e.g. Sonnet 5) at a ~1M
 // window on the paid plan; Sonnet 4.5 follows the same paid-plan behavior.
+//
+// claude-fable-5 — the inverse case: repo uses 200k, LiteLLM says 1M. Paid-plan
+// Fable 5 sessions run a 200k window unless the 1M beta is active, and the
+// usage cache marks 1M sessions with an explicit [1m] model suffix that
+// ContextWindowFor honors ahead of the table. Confirmed via /context against
+// the meter on a paid plan.
 var intentionalOverrides = []string{
 	"claude-sonnet-4-5",
+	"claude-fable-5",
 }
 
 type modelEntry struct {
