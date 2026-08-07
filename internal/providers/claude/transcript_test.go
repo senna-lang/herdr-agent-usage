@@ -146,3 +146,59 @@ func TestResolveProfileForSession_EmptySessionID(t *testing.T) {
 		t.Fatal("empty session id must not match")
 	}
 }
+
+func compactBoundaryLine(postTokens int) string {
+	b, _ := json.Marshal(map[string]any{
+		"type": "system", "subtype": "compact_boundary",
+		"compactMetadata": map[string]any{
+			"trigger": "manual", "preTokens": 116631, "postTokens": postTokens,
+		},
+	})
+	return string(b)
+}
+
+func TestExtractLatestUsageFromLines_CompactBoundarySupersedesOlderUsage(t *testing.T) {
+	lines := []string{
+		assistantLine(false, "claude-sonnet-5", map[string]int{"input_tokens": 5, "cache_read_input_tokens": 116000, "output_tokens": 9}),
+		compactBoundaryLine(13820),
+	}
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || got.InputTokens != 13820 || got.CacheReadInputTokens != 0 || !got.Compacted {
+		t.Fatalf("got %+v, want compacted postTokens 13820", got)
+	}
+	if got.Model != "claude-sonnet-5" {
+		t.Fatalf("model=%q, want carried over for window lookup", got.Model)
+	}
+}
+
+func TestExtractLatestUsageFromLines_UsageAfterCompactWins(t *testing.T) {
+	lines := []string{
+		assistantLine(false, "", map[string]int{"input_tokens": 5, "cache_read_input_tokens": 116000, "output_tokens": 9}),
+		compactBoundaryLine(13820),
+		assistantLine(false, "", map[string]int{"input_tokens": 3, "cache_read_input_tokens": 15000, "output_tokens": 7}),
+	}
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || got.CacheReadInputTokens != 15000 || got.Compacted {
+		t.Fatalf("got %+v, want the post-compact assistant row", got)
+	}
+}
+
+func TestExtractLatestUsageFromLines_OnlyNewestBoundaryCounts(t *testing.T) {
+	lines := []string{
+		assistantLine(false, "", map[string]int{"input_tokens": 5, "cache_read_input_tokens": 116000, "output_tokens": 9}),
+		compactBoundaryLine(50000),
+		assistantLine(false, "", map[string]int{"input_tokens": 3, "cache_read_input_tokens": 60000, "output_tokens": 7}),
+		compactBoundaryLine(13820),
+	}
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || got.InputTokens != 13820 {
+		t.Fatalf("got %+v, want newest boundary's postTokens", got)
+	}
+}
+
+func TestExtractLatestUsageFromLines_BoundaryWithoutOlderUsage(t *testing.T) {
+	got := ExtractLatestUsageFromLines([]string{compactBoundaryLine(13820)})
+	if got == nil || got.InputTokens != 13820 || got.Model != "" || !got.Compacted {
+		t.Fatalf("got %+v, want model-less compacted postTokens", got)
+	}
+}

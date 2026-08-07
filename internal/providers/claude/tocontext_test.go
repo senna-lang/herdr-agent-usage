@@ -43,3 +43,13 @@ func TestToContextUsage_FableAndOpus1M(t *testing.T) {
 		t.Fatalf("opus %+v", opus)
 	}
 }
+
+func TestToContextUsage_CompactedPassthrough(t *testing.T) {
+	u := usage("claude-sonnet-5", 0)
+	u.InputTokens = 13_820
+	u.Compacted = true
+	got := ToContextUsage(u)
+	if !got.Compacted || got.ContextTokens != 13_820 {
+		t.Fatalf("got %+v, want compacted passthrough", got)
+	}
+}

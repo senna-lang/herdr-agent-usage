@@ -10,4 +10,7 @@ type TranscriptUsage struct {
 	CacheReadInputTokens     int
 	CacheCreationInputTokens int
 	OutputTokens             int
+	// Compacted means InputTokens holds a compact_boundary's postTokens
+	// estimate rather than an API-reported usage row.
+	Compacted bool
 }
