@@ -76,6 +76,8 @@ End state:
 ```bash
 herdr integration install codex
 herdr integration install opencode
+herdr integration install omp
+herdr integration install pi
 ```
 
 ### 2. Install the plugin
@@ -161,8 +163,8 @@ rows = [
   `agent`, and add `$context` as the next row. Do not remove unrelated
   tokens or rows.
 - If `[ui.sidebar.agents.rows_by_agent]` contains overrides for Claude,
-  Codex, OpenCode, or Grok, merge `$limit` and `$context` into each relevant
-  override too; an override replaces the default `rows`.
+  Codex, OpenCode, Grok, OMP, or Pi, merge `$limit` and `$context` into each
+  relevant override too; an override replaces the default `rows`.
 
 After changing the config:
 
