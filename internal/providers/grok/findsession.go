@@ -16,7 +16,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/pathutil"
@@ -61,7 +60,10 @@ func readActiveSessions() []activeSessionEntry {
 	return parsed
 }
 
-// FindActiveSessionID returns the most recent session_id whose cwd matches.
+// FindActiveSessionID returns a session_id for cwd only when the match is
+// unambiguous. Multiple concurrent Grok panes often share the same cwd
+// (especially $HOME); picking the "most recently opened" would pin every
+// unbound pane to one sibling's context meter.
 func FindActiveSessionID(cwd *string) string {
 	if cwd == nil || *cwd == "" {
 		return ""
@@ -82,56 +84,113 @@ func FindActiveSessionID(cwd *string) string {
 	if len(pick) == 0 {
 		pick = weak
 	}
-	if len(pick) == 0 {
+	if len(pick) != 1 {
+		// 0 → nothing; 2+ → ambiguous (do not guess).
 		return ""
 	}
-	sort.Slice(pick, func(i, j int) bool {
-		return pick[i].OpenedAt > pick[j].OpenedAt
-	})
 	return pick[0].SessionID
 }
 
-func newestSessionInGroup(groupDir string) (sessionID string, mtimeMs int64) {
+// isActiveSessionID reports whether sessionID appears in active_sessions.json.
+// Herdr only binds agent_session at session_start; after resume/switch the
+// bound id goes stale while active_sessions stays current.
+func isActiveSessionID(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	for _, entry := range readActiveSessions() {
+		if entry.SessionID == sessionID {
+			return true
+		}
+	}
+	return false
+}
+
+// sessionDirForID resolves a session directory, preferring the pane cwd group.
+func sessionDirForID(sessionID string, cwd *string) string {
+	if sessionID == "" {
+		return ""
+	}
+	if cwd != nil && *cwd != "" {
+		direct := filepath.Join(sessionsRoot(), encodeCwd(*cwd), sessionID)
+		if st, err := os.Stat(direct); err == nil && st.IsDir() {
+			return direct
+		}
+	}
+	return FindSessionDirBySessionID(sessionID)
+}
+
+// sessionsInGroup returns every session id under groupDir that has usable
+// context files (signals.json and/or updates.jsonl), plus the newest id/mtime
+// for callers that still need a single-session pick.
+func sessionsInGroup(groupDir string) (ids []string, newestID string, newestMT int64) {
 	names, err := os.ReadDir(groupDir)
 	if err != nil {
-		return "", 0
+		return nil, "", 0
 	}
 	for _, name := range names {
 		if !name.IsDir() {
 			continue
 		}
-		signalsPath := filepath.Join(groupDir, name.Name(), "signals.json")
-		st, err := os.Stat(signalsPath)
-		if err != nil || !st.Mode().IsRegular() {
+		dir := filepath.Join(groupDir, name.Name())
+		if !sessionDirHasUsageFiles(dir) {
 			continue
 		}
-		mt := st.ModTime().UnixMilli()
-		if sessionID == "" || mt > mtimeMs {
-			sessionID = name.Name()
-			mtimeMs = mt
+		id := name.Name()
+		ids = append(ids, id)
+		// Prefer the newest usage file mtime within the session.
+		mt := int64(0)
+		for _, fname := range []string{"signals.json", "updates.jsonl"} {
+			if st, err := os.Stat(filepath.Join(dir, fname)); err == nil {
+				if t := st.ModTime().UnixMilli(); t > mt {
+					mt = t
+				}
+			}
+		}
+		if newestID == "" || mt > newestMT {
+			newestID = id
+			newestMT = mt
 		}
 	}
+	return ids, newestID, newestMT
+}
+
+func newestSessionInGroup(groupDir string) (sessionID string, mtimeMs int64) {
+	_, sessionID, mtimeMs = sessionsInGroup(groupDir)
 	return sessionID, mtimeMs
 }
 
-// FindLatestSessionIDUnderCwd returns the session_id under the matching cwd
-// group with the newest signals.json mtime.
+// uniqueSessionInGroup returns the sole session under groupDir, or "" when
+// zero/multiple sessions exist. Multi-session groups are common under $HOME;
+// "newest by mtime" there steals another pane's meter (e.g. a busy coding
+// agent at 146k while a fresh brew-scan pane is only 23k).
+func uniqueSessionInGroup(groupDir string) string {
+	ids, _, _ := sessionsInGroup(groupDir)
+	if len(ids) != 1 {
+		return ""
+	}
+	return ids[0]
+}
+
+// FindLatestSessionIDUnderCwd returns a session only when the cwd group has
+// exactly one session with signals.json. Previously it returned the newest
+// by mtime, which mis-attributed context across panes sharing a cwd.
 func FindLatestSessionIDUnderCwd(cwd *string) string {
 	if cwd == nil || *cwd == "" {
 		return ""
 	}
 	// Fast path: encoded pane cwd directory.
-	if id, _ := newestSessionInGroup(filepath.Join(sessionsRoot(), encodeCwd(*cwd))); id != "" {
+	if id := uniqueSessionInGroup(filepath.Join(sessionsRoot(), encodeCwd(*cwd))); id != "" {
 		return id
 	}
 	// Scan all groups: decode folder names and match with pathutil.
+	// Only accept a unique session within an exact (then weak) match group.
 	root := sessionsRoot()
 	groups, err := os.ReadDir(root)
 	if err != nil {
 		return ""
 	}
-	var bestExactID, bestWeakID string
-	var bestExactMT, bestWeakMT int64
+	var exactIDs, weakIDs []string
 	for _, group := range groups {
 		if !group.IsDir() {
 			continue
@@ -140,26 +199,26 @@ func FindLatestSessionIDUnderCwd(cwd *string) string {
 		if err != nil || decoded == "" {
 			continue
 		}
-		id, mt := newestSessionInGroup(filepath.Join(root, group.Name()))
+		id := uniqueSessionInGroup(filepath.Join(root, group.Name()))
 		if id == "" {
+			// Group has 0 or 2+ sessions — never invent a pick from mtime.
 			continue
 		}
 		if pathutil.Equal(decoded, *cwd) {
-			if bestExactID == "" || mt > bestExactMT {
-				bestExactID, bestExactMT = id, mt
-			}
+			exactIDs = append(exactIDs, id)
 			continue
 		}
 		if pathutil.SameProject(decoded, *cwd) {
-			if bestWeakID == "" || mt > bestWeakMT {
-				bestWeakID, bestWeakMT = id, mt
-			}
+			weakIDs = append(weakIDs, id)
 		}
 	}
-	if bestExactID != "" {
-		return bestExactID
+	if len(exactIDs) == 1 {
+		return exactIDs[0]
 	}
-	return bestWeakID
+	if len(exactIDs) == 0 && len(weakIDs) == 1 {
+		return weakIDs[0]
+	}
+	return ""
 }
 
 // resolveGroupDirForCwd returns the sessions/<encoded-cwd> directory for pane cwd.
@@ -203,8 +262,9 @@ func resolveGroupDirForCwd(cwd string) string {
 	return weakDir
 }
 
-// FindSignalsPathBySessionID searches every cwd group for a session_id match.
-func FindSignalsPathBySessionID(sessionID string) string {
+// FindSessionDirBySessionID searches every cwd group for a session directory.
+// The dir may lack signals.json (some live sessions only stream updates.jsonl).
+func FindSessionDirBySessionID(sessionID string) string {
 	if sessionID == "" {
 		return ""
 	}
@@ -214,54 +274,100 @@ func FindSignalsPathBySessionID(sessionID string) string {
 		return ""
 	}
 	for _, group := range groups {
-		candidate := filepath.Join(root, group.Name(), sessionID, "signals.json")
-		if st, err := os.Stat(candidate); err == nil && st.Mode().IsRegular() {
+		if !group.IsDir() {
+			continue
+		}
+		candidate := filepath.Join(root, group.Name(), sessionID)
+		if st, err := os.Stat(candidate); err == nil && st.IsDir() {
 			return candidate
 		}
 	}
 	return ""
 }
 
-// ResolveSignalsPath resolves the signals.json path from session id and/or cwd.
-func ResolveSignalsPath(sessionID, cwd *string) string {
-	if sessionID != nil && *sessionID != "" {
-		if cwd != nil && *cwd != "" {
-			direct := filepath.Join(sessionsRoot(), encodeCwd(*cwd), *sessionID, "signals.json")
-			if st, err := os.Stat(direct); err == nil && st.Mode().IsRegular() {
-				return direct
-			}
-			// Cwd may have been renamed; still try the session id under any group.
-		}
-		if path := FindSignalsPathBySessionID(*sessionID); path != "" {
-			return path
+// FindSignalsPathBySessionID searches every cwd group for a session_id match.
+func FindSignalsPathBySessionID(sessionID string) string {
+	dir := FindSessionDirBySessionID(sessionID)
+	if dir == "" {
+		return ""
+	}
+	candidate := filepath.Join(dir, "signals.json")
+	if st, err := os.Stat(candidate); err == nil && st.Mode().IsRegular() {
+		return candidate
+	}
+	return ""
+}
+
+// sessionDirHasUsageFiles reports whether the dir can yield a context meter
+// (signals and/or updates). Empty dirs must not win unique-session fallbacks.
+func sessionDirHasUsageFiles(dir string) bool {
+	for _, name := range []string{"signals.json", "updates.jsonl"} {
+		if st, err := os.Stat(filepath.Join(dir, name)); err == nil && st.Mode().IsRegular() && st.Size() > 0 {
+			return true
 		}
 	}
+	return false
+}
 
-	activeID := FindActiveSessionID(cwd)
-	if activeID != "" {
-		if path := FindSignalsPathBySessionID(activeID); path != "" {
-			return path
+// ResolveSessionDir resolves the on-disk session directory for a pane.
+//
+// Priority:
+//  1. Explicit session id (Herdr agent_session):
+//     - If still listed in active_sessions.json → use bound (multi-pane same
+//     cwd must not steal each other's meter).
+//     - If stale (absent from active_sessions) and FindActiveSessionID(cwd)
+//     yields a unique active id different from bound → recover to that dir.
+//     - Otherwise stick with bound (prefer stale/empty over guessing sibling).
+//  2. Without a bound id: only when the cwd group has exactly one session with
+//     usage files. We deliberately do NOT trust active_sessions alone here —
+//     Grok often records a single $HOME entry while many panes share that cwd,
+//     and using it pins every unbound pane to the wrong meter.
+func ResolveSessionDir(sessionID, cwd *string) string {
+	if sessionID != nil && *sessionID != "" {
+		// Stale bind recovery: Grok herdr hook only reports session id at
+		// session_start; after resume/switch, active_sessions is authoritative
+		// when the cwd match is unique.
+		if !isActiveSessionID(*sessionID) {
+			if active := FindActiveSessionID(cwd); active != "" && active != *sessionID {
+				if dir := sessionDirForID(active, cwd); dir != "" {
+					return dir
+				}
+			}
 		}
+		return sessionDirForID(*sessionID, cwd)
 	}
 
 	if cwd == nil || *cwd == "" {
 		return ""
 	}
-	latestID := FindLatestSessionIDUnderCwd(cwd)
-	if latestID == "" {
+	uniqueID := FindLatestSessionIDUnderCwd(cwd)
+	if uniqueID == "" {
 		return ""
 	}
-	// Prefer group dir resolved via path matching (handles rename / encode drift).
 	if group := resolveGroupDirForCwd(*cwd); group != "" {
-		path := filepath.Join(group, latestID, "signals.json")
-		if st, err := os.Stat(path); err == nil && st.Mode().IsRegular() {
-			return path
+		dir := filepath.Join(group, uniqueID)
+		if st, err := os.Stat(dir); err == nil && st.IsDir() && sessionDirHasUsageFiles(dir) {
+			return dir
 		}
 	}
-	path := filepath.Join(sessionsRoot(), encodeCwd(*cwd), latestID, "signals.json")
+	dir := filepath.Join(sessionsRoot(), encodeCwd(*cwd), uniqueID)
+	if st, err := os.Stat(dir); err == nil && st.IsDir() && sessionDirHasUsageFiles(dir) {
+		return dir
+	}
+	return FindSessionDirBySessionID(uniqueID)
+}
+
+// ResolveSignalsPath resolves the signals.json path from session id and/or cwd.
+// Kept for tests/callers that only care about signals; live resolution uses
+// ResolveSessionDir + UsageFromSessionDir so updates.jsonl can fill gaps.
+func ResolveSignalsPath(sessionID, cwd *string) string {
+	dir := ResolveSessionDir(sessionID, cwd)
+	if dir == "" {
+		return ""
+	}
+	path := filepath.Join(dir, "signals.json")
 	if st, err := os.Stat(path); err == nil && st.Mode().IsRegular() {
 		return path
 	}
-	// Last resort: id alone anywhere under sessions.
-	return FindSignalsPathBySessionID(latestID)
+	return ""
 }

@@ -52,17 +52,25 @@ func ToastConfigSnippet() string {
 // ("space") name in that case, then appends a pane rename when present
 // ("space・pane").
 //
-// $provider replaces the built-in `agent` token: it renders the subscription
-// provider ("opencode-go", "grok", "claude") when one owns the pane's
-// limit, and the backend name ("deepseek") on a pay-as-you-go pane.
+// $limit is the shortest account window ("7d 77%") or pay-as-you-go burn.
+// Absolute context size is a separate exclusive tier token so Herdr can color
+// it by fg: $ctx (<100k), $ctx_y (≥100k light yellow), $ctx_yy (≥150k deep
+// yellow), $ctx_r (≥180k red). $provider is still written for layouts that
+// want it on a separate row, but the default snippet omits it to save width.
 func SidebarRowsSnippet() string {
 	return strings.Join([]string{
 		"[ui.sidebar.agents]",
 		"row_gap = 0",
 		"rows = [",
 		`  ["state_icon", "$title"],`,
-		`  ["$provider", "$limit"],`,
-		`  ["$context"],`,
+		`  [`,
+		`    { token = "$limit", dim = true },`,
+		`    { token = "$window", dim = true },`,
+		`    { token = "$ctx", dim = true },`,
+		`    { token = "$ctx_y", fg = "#ebcb8b", dim = false },`,
+		`    { token = "$ctx_yy", fg = "#d08770", dim = false },`,
+		`    { token = "$ctx_r", fg = "#bf616a", dim = false },`,
+		`  ],`,
 		"]",
 		"",
 	}, "\n")

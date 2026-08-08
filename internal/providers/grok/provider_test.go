@@ -41,9 +41,9 @@ func TestProvider_FromSessionID(t *testing.T) {
 	}
 }
 
-func TestProvider_ViaActiveSessions(t *testing.T) {
+func TestProvider_ViaUniqueOnDiskSession(t *testing.T) {
 	home := withTempGrokHome(t)
-	sid := "active-only"
+	sid := "only-on-disk"
 	dir := filepath.Join(home, "sessions", encodeCwd(provCwd), sid)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -52,13 +52,8 @@ func TestProvider_ViaActiveSessions(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "signals.json"), b, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	active, _ := json.Marshal([]map[string]any{
-		{"session_id": sid, "cwd": provCwd, "opened_at": "2026-07-15T00:00:00Z"},
-	})
-	if err := os.WriteFile(filepath.Join(home, "active_sessions.json"), active, 0o644); err != nil {
-		t.Fatal(err)
-	}
 	cwd := provCwd
+	// No agent_session: unique on-disk session under cwd is enough.
 	got := Provider.ResolveUsage(provider.UsageResolveInput{Cwd: &cwd})
 	if got == nil || got.ContextTokens != 12_000 || got.WindowTokens == nil || *got.WindowTokens != 200_000 {
 		t.Fatalf("got %+v", got)

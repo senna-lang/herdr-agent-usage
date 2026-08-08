@@ -72,6 +72,82 @@ func formatTokenCount(tokens int) string {
 	return fmt.Sprintf("%.0fk", thousands)
 }
 
+// FormatTokenCount formats a token count for compact sidebar display ("94k", "5.0k").
+func FormatTokenCount(tokens int) string {
+	return formatTokenCount(tokens)
+}
+
+// Absolute context-size thresholds for sidebar coloring (Herdr styles each
+// tier token with a fixed fg in config; only one tier is non-empty at a time).
+const (
+	ContextSoftTokens     = 100_000 // light yellow
+	ContextWarnTokens     = 150_000 // deep yellow
+	ContextCriticalTokens = 180_000 // red
+)
+
+// Context tier metadata token names written to the sidebar.
+const (
+	ContextTokenOK       = "ctx"    // < 100k (default muted style)
+	ContextTokenSoft     = "ctx_y"  // ≥ 100k
+	ContextTokenWarn     = "ctx_yy" // ≥ 150k
+	ContextTokenCritical = "ctx_r"  // ≥ 180k
+)
+
+// AllContextTierTokenNames is the exclusive set of context-count tokens.
+var AllContextTierTokenNames = []string{
+	ContextTokenOK,
+	ContextTokenSoft,
+	ContextTokenWarn,
+	ContextTokenCritical,
+}
+
+// ContextTierTokenName picks which exclusive sidebar token should carry the
+// compact context count for the given absolute token total. Empty when there
+// is nothing to show.
+func ContextTierTokenName(contextTokens int) string {
+	if contextTokens <= 0 {
+		return ""
+	}
+	switch {
+	case contextTokens >= ContextCriticalTokens:
+		return ContextTokenCritical
+	case contextTokens >= ContextWarnTokens:
+		return ContextTokenWarn
+	case contextTokens >= ContextSoftTokens:
+		return ContextTokenSoft
+	default:
+		return ContextTokenOK
+	}
+}
+
+// FormatCompactContextTokens is the shortest useful context meter: disk icon
+// plus absolute token count (no window %). Herdr joins adjacent sidebar
+// tokens with a space, so no leading padding is needed ("7d 77% ⛁ 94k").
+func FormatCompactContextTokens(usage ContextUsage) string {
+	if usage.ContextTokens <= 0 {
+		return ""
+	}
+	return "⛁ " + formatTokenCount(usage.ContextTokens)
+}
+
+// ContextTierTokenValues returns the exclusive tier map for compact context
+// display. Exactly one key is non-empty when usage is present; all empty when
+// there are no context tokens. Callers write every key so stale tiers clear.
+func ContextTierTokenValues(usage ContextUsage) map[string]string {
+	out := map[string]string{
+		ContextTokenOK:       "",
+		ContextTokenSoft:     "",
+		ContextTokenWarn:     "",
+		ContextTokenCritical: "",
+	}
+	name := ContextTierTokenName(usage.ContextTokens)
+	if name == "" {
+		return out
+	}
+	out[name] = FormatCompactContextTokens(usage)
+	return out
+}
+
 // UsageStatusCandidates returns candidates in priority order (longest -> shortest).
 // The first element is the full representation.
 func UsageStatusCandidates(usage ContextUsage) []string {

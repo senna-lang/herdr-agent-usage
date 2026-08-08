@@ -27,10 +27,6 @@ func findClaudeProfile(profiles []claude.ClaudeProfile, id string) (claude.Claud
 	return claude.ClaudeProfile{}, false
 }
 
-func isSettledStatus(status string) bool {
-	return status != "working"
-}
-
 // paneCwdForUpdate chooses the directory used to resolve agent-local session
 // files. OMP/Pi may put a language-server process in the foreground, whose
 // cwd is inside a virtual environment rather than the agent's project. Their
@@ -76,6 +72,76 @@ func combineLimitAndContext(limitText, statusText string) string {
 		return limitText
 	}
 	return limitText + " · " + statusText
+}
+
+// combineLimitAndCompactContext joins a limit window with compact context
+// tokens for a single-row sidebar meter: "7d 77%  ⛁ 94k". Two spaces separate
+// the account window from context so the groups read apart without an icon.
+// Kept for tests and any caller that still needs a plain combined string;
+// live sidebar writes use exclusive $ctx_* tier tokens instead (Herdr strips
+// ANSI, so color comes from per-token fg in config).
+func combineLimitAndCompactContext(limitText, compactTokens string) string {
+	if limitText == "" {
+		return compactTokens
+	}
+	if compactTokens == "" {
+		return limitText
+	}
+	return limitText + "  " + compactTokens
+}
+
+// writeContextTierTokens writes the exclusive $ctx / $ctx_y / $ctx_yy / $ctx_r
+// map so only the matching absolute-size tier is non-empty.
+//
+// usage == nil clears every tier. Prefer blank over a sibling pane's count:
+// Grok panes often share $HOME as cwd, and a failed/ambiguous resolve used to
+// leave a stale 146k from another session while the UI showed 23k.
+func writeContextTierTokens(current map[string]string, paneID string, usage *core.ContextUsage, force bool) {
+	values := map[string]string{
+		core.ContextTokenOK:       "",
+		core.ContextTokenSoft:     "",
+		core.ContextTokenWarn:     "",
+		core.ContextTokenCritical: "",
+	}
+	if usage != nil {
+		values = core.ContextTierTokenValues(*usage)
+	}
+	for _, name := range core.AllContextTierTokenNames {
+		writeMetadataToken(current, paneID, name, values[name], force)
+	}
+}
+
+// writeLimitToken writes $limit, but refuses to clear it on a transient
+// subscription collect miss. Empty limitText only clears when we know the
+// pane truly has no window (pay-as-you-go with no burn, or collected limits
+// with no windows).
+func writeLimitToken(
+	current map[string]string,
+	paneID, limitText string,
+	billingMode limits.BillingMode,
+	collected bool,
+	force bool,
+) {
+	if limitText != "" {
+		writeMetadataToken(current, paneID, "limit", limitText, force)
+		return
+	}
+	if billingMode == limits.BillingPayAsYouGo {
+		// No session burn → clear is correct.
+		writeMetadataToken(current, paneID, "limit", "", force)
+		return
+	}
+	if collected {
+		// Provider responded with no usable windows.
+		writeMetadataToken(current, paneID, "limit", "", force)
+		return
+	}
+	// Subscription collect returned nothing — keep the previous $limit so a
+	// flaky fetch cannot leave the row as "only red context".
+	if force && current["limit"] == "" {
+		// force + already empty: nothing to do
+		return
+	}
 }
 
 // formatSidebarProvider renders the sidebar's agent line: the backend name on
@@ -165,7 +231,11 @@ func writeMetadataTokenWith(writer metadataTokenWriter, current map[string]strin
 }
 
 // RunUpdate resolves usage for HERDR_PANE_ID and updates its sidebar tokens.
-// force=true (plugin action) updates even while working.
+//
+// Always refreshes (including while status is "working"): Grok compaction and
+// mid-turn context drops update signals.json before the agent settles, and
+// skipping those events left the sidebar stuck on the pre-compress count.
+// force=true still forces token writes even when values are unchanged.
 func RunUpdate(force bool) {
 	paneID := os.Getenv("HERDR_PANE_ID")
 	if paneID == "" {
@@ -179,10 +249,6 @@ func RunUpdate(force bool) {
 
 	p := providers.FindProvider(*pane.Agent)
 	if p == nil {
-		return
-	}
-
-	if pane.AgentStatus != nil && !isSettledStatus(*pane.AgentStatus) && !force {
 		return
 	}
 
@@ -216,7 +282,9 @@ func RunUpdate(force bool) {
 		// Cannot tell which account this pane belongs to: clear rather than
 		// guess into the wrong account's limits/tokens.
 		writeMetadataToken(pane.Tokens, paneID, "limit", "", force)
+		writeMetadataToken(pane.Tokens, paneID, "window", "", force)
 		writeMetadataToken(pane.Tokens, paneID, "provider", formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot), force)
+		writeContextTierTokens(pane.Tokens, paneID, nil, force)
 		writeMetadataToken(pane.Tokens, paneID, "context", "", force)
 		return
 	}
@@ -226,8 +294,10 @@ func RunUpdate(force bool) {
 	displayProviderID := limits.SubscriptionDisplayProviderID(providerID, snapshot)
 	var providerLimits *limits.ProviderLimits
 	var totalTokens, totalCostUSD float64
+	collectedLimits := false
 	if billingMode == limits.BillingPayAsYouGo {
 		totalTokens, totalCostUSD = limits.PaneTotalUsage(providerID, snapshot, nowMs)
+		collectedLimits = true // pay-as-you-go path is authoritative even when burn is 0
 	} else {
 		collectOptions := limits.DefaultCollectOptions()
 		// Sidebar refresh deliberately collects only this pane's provider and leaves
@@ -236,6 +306,7 @@ func RunUpdate(force bool) {
 		collected := limits.CollectAllProviderLimits(cwd, nowMs, collectOptions)
 		if len(collected) > 0 {
 			providerLimits = &collected[0]
+			collectedLimits = true
 		}
 	}
 	fallbackProviderText := formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot)
@@ -247,8 +318,8 @@ func RunUpdate(force bool) {
 	// With 2+ configured Claude accounts, the $limit row's job shifts from
 	// "show the limit" to "show which account this pane is" (joined with
 	// $provider as "claude · you@example.com") since that's otherwise
-	// invisible in the sidebar. The limit percentage moves down into
-	// $context instead, as this pane's own account is already unambiguous.
+	// invisible in the sidebar. The limit percentage moves into $window,
+	// as this pane's own account is already unambiguous.
 	multiProfile := *pane.Agent == "claude" && len(claudeProfiles) > 1
 	accountText := ""
 	limitToken := limitText
@@ -260,10 +331,10 @@ func RunUpdate(force bool) {
 			limitToken = accountText
 		}
 	}
-	writeMetadataToken(pane.Tokens, paneID, "limit", limitToken, force)
 
 	// Stands in for Herdr's `agent` token so a pay-as-you-go pane names the
 	// backend it is actually billing ("deepseek") instead of the harness.
+	// Optional in sidebar rows — narrow agent panels usually omit $provider.
 	writeMetadataToken(pane.Tokens, paneID, "provider", providerText, force)
 
 	// Context tokens: claude is read from its resolved profile's own transcript
@@ -284,20 +355,25 @@ func RunUpdate(force bool) {
 		})
 	}
 
-	contextPrefix := ""
+	// Split account/limit window from the absolute context count so Herdr can
+	// color only the count via per-token fg ($ctx / $ctx_y / $ctx_yy / $ctx_r).
+	// Metadata values cannot carry ANSI (Herdr strips escapes).
+	// Multi-profile Claude: $limit = account, $window = "5h 88%", $ctx_* = count.
+	// Single-profile: $limit = window, $window cleared, $ctx_* = count.
+	// Always clear legacy $context so old two-row layouts do not show stale text.
 	if accountText != "" {
-		contextPrefix = limitText
+		// Account identity is always known once multiProfile resolved; write it.
+		writeMetadataToken(pane.Tokens, paneID, "limit", limitToken, force)
+		if limitText != "" {
+			writeMetadataToken(pane.Tokens, paneID, "window", limitText, force)
+		} else if collectedLimits {
+			writeMetadataToken(pane.Tokens, paneID, "window", "", force)
+		}
+		// else: keep previous $window on collect miss
+	} else {
+		writeLimitToken(pane.Tokens, paneID, limitToken, billingMode, collectedLimits, force)
+		writeMetadataToken(pane.Tokens, paneID, "window", "", force)
 	}
-
-	if usage == nil {
-		writeMetadataToken(pane.Tokens, paneID, "context", contextPrefix, force)
-		return
-	}
-
-	liveWidth := herdrcli.GetSidebarWidthColumns(paneID)
-	sidebarW := core.ResolveSidebarWidth(liveWidth, core.ResolveConfigSidebarWidth())
-	maxCols := core.EstimateStatusMaxColumns(&sidebarW, pane.RowLabel)
-	maxCols = reserveColumnsFor(maxCols, contextPrefix)
-	statusText := core.FormatUsageStatus(*usage, core.FormatUsageOptions{MaxColumns: maxCols})
-	writeMetadataToken(pane.Tokens, paneID, "context", combineLimitAndContext(contextPrefix, statusText), force)
+	writeContextTierTokens(pane.Tokens, paneID, usage, force)
+	writeMetadataToken(pane.Tokens, paneID, "context", "", force)
 }
