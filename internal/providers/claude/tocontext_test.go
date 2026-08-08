@@ -33,10 +33,14 @@ func TestToContextUsage_HaikuDateSuffix(t *testing.T) {
 	}
 }
 
-func TestToContextUsage_FableAndOpus1M(t *testing.T) {
+func TestToContextUsage_FableAndOpus(t *testing.T) {
 	fable := ToContextUsage(usage("claude-fable-5", 130_000))
-	if fable.ContextTokens != 130_000 || fable.WindowTokens == nil || *fable.WindowTokens != 1_000_000 {
+	if fable.ContextTokens != 130_000 || fable.WindowTokens == nil || *fable.WindowTokens != 200_000 {
 		t.Fatalf("fable %+v", fable)
+	}
+	fable1m := ToContextUsage(usage("claude-fable-5[1m]", 130_000))
+	if fable1m.ContextTokens != 130_000 || fable1m.WindowTokens == nil || *fable1m.WindowTokens != 1_000_000 {
+		t.Fatalf("fable[1m] %+v", fable1m)
 	}
 	opus := ToContextUsage(usage("claude-opus-4-8", 108_000))
 	if opus.ContextTokens != 108_000 || opus.WindowTokens == nil || *opus.WindowTokens != 1_000_000 {

@@ -22,7 +22,6 @@ var contextWindowTokens = map[string]int{
 	// --- 1M (Claude Code paid default / OpenCode anthropic catalog) ---
 	"claude-sonnet-5":   1_000_000,
 	"claude-opus-5":     1_000_000,
-	"claude-fable-5":    1_000_000,
 	"claude-opus-4-8":   1_000_000,
 	"claude-opus-4-7":   1_000_000,
 	"claude-opus-4-6":   1_000_000,
@@ -32,6 +31,11 @@ var contextWindowTokens = map[string]int{
 	"claude-sonnet-4": 1_000_000,
 
 	// --- 200k ---
+	// Fable 5 sessions run a 200k window unless the 1M beta is active, in
+	// which case the usage cache reports the model with an explicit [1m]
+	// suffix — honored in ContextWindowFor before this table (verified
+	// against Claude Code's /context on a paid plan).
+	"claude-fable-5":   200_000,
 	"claude-haiku-4-5": 200_000,
 	"claude-3-5-haiku": 200_000,
 	"claude-opus-4-5":  200_000,
@@ -62,6 +66,11 @@ func NormalizeClaudeModelID(model string) string {
 // ContextWindowFor returns nil for unknown models, so the caller falls back to
 // the absolute token count alone.
 func ContextWindowFor(model string) *int {
+	// An explicit [1m] variant marker wins over the base-model table.
+	if oneMSuffix.MatchString(strings.TrimSpace(model)) {
+		v := 1_000_000
+		return &v
+	}
 	normalized := NormalizeClaudeModelID(model)
 	for _, key := range contextWindowKeysLongestFirst {
 		if strings.Contains(normalized, key) {
