@@ -120,7 +120,7 @@ herdr plugin action invoke usagebar.setup
 | OpenCode | Yes | Yes | The `opencode-go` subscription keeps no usage numbers on disk, so its windows come from opencode.ai, authenticated by `OPENCODE_GO_COOKIE` or a browser session imported via the Keychain ([details](#opencode-go-official-usage)); without either it degrades to a local SQLite estimate. Other backends (e.g. DeepSeek) show token/cost spend instead of plan windows |
 | Grok | Yes | Yes | Context from `signals.json`; SuperGrok credits when auth is present. Custom models (`~/.grok/config.toml` `[model.*]` with `base_url`) are pay-as-you-go and labelled from the endpoint host (openai, ollama, …) |
 | OMP (Oh My Pi) | Yes | Yes | Session jsonl plus its credential metadata. Subscription routes: OpenCode Go, Grok OAuth, Anthropic OAuth → Claude, and OpenAI Codex OAuth → Codex. API-key backends show backend-scoped session burn |
-| Pi coding agent | Yes | Yes | Session jsonl plus `~/.pi/agent/auth.json`; uses the same recognized OAuth/subscription routes and pay-as-you-go rules as OMP |
+| Pi coding agent | Yes | Yes | Session jsonl plus `~/.pi/agent/auth.json`; context windows come from Pi's `models-store.json` / `models.json`, and session trees plus compaction boundaries are respected. Uses the same recognized OAuth/subscription routes and pay-as-you-go rules as OMP |
 
 Percentages in the limits pane are **remaining** (`% left`). Higher is safer.
 
@@ -391,7 +391,7 @@ Everything is computed from files that the agents already keep on your machine:
 | OpenCode | `~/.local/share/opencode/opencode.db` (session usage), `~/.local/share/opencode/auth.json` (credential kind only), and — for OpenCode Go's official windows — the `opencode.ai` cookie in a local Chromium profile plus that browser's Keychain "Safe Storage" password (read-only, never persisted; see [OpenCode Go official usage](#opencode-go-official-usage)) |
 | Grok | `~/.grok/sessions/**/signals.json`, `~/.grok/auth.json` (credentials for the credits fetch), `~/.grok/config.toml` (custom-model base URLs) |
 | OMP | `~/.omp/agent/sessions/**/*.jsonl`, `~/.omp/agent/models.db` (context window lookup), `~/.omp/agent/agent.db` (credential kind, and the `usage_history` windows OMP records for the accounts it drives) |
-| Pi coding agent | `~/.pi/agent/sessions/**/*.jsonl`, `~/.pi/agent/models.db` when present, `~/.pi/agent/auth.json` (credential kind only) |
+| Pi coding agent | `~/.pi/agent/sessions/**/*.jsonl`, `~/.pi/agent/models-store.json` and `~/.pi/agent/models.json` (or the matching `PI_CODING_AGENT_DIR`), `~/.pi/agent/auth.json` (credential kind only) |
 
 Pay-as-you-go detection is not tied to any one harness: it reads the same
 per-harness files above (the backend a session used is already recorded there —

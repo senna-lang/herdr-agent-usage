@@ -54,8 +54,9 @@ func SessionPathFromSnapshotValue(value string) string {
 	return ""
 }
 
-// ResolveUsageForPath returns ContextUsage for an OMP session jsonl path.
-func ResolveUsageForPath(path string) *core.ContextUsage {
+type contextWindowResolver func(provider, model string) *int
+
+func resolveUsageForPath(path string, resolveWindow contextWindowResolver) *core.ContextUsage {
 	path = expandHome(path)
 	if path == "" {
 		return nil
@@ -69,10 +70,23 @@ func ResolveUsageForPath(path string) *core.ContextUsage {
 		return nil
 	}
 	out := core.ContextUsage{ContextTokens: usage.ContextTokens}
-	if window := ContextWindowFor(usage.Provider, usage.Model); window != nil {
+	if window := resolveWindow(usage.Provider, usage.Model); window != nil {
 		out.WindowTokens = window
 	}
 	return &out
+}
+
+// ResolveUsageForPath returns ContextUsage for an OMP session jsonl path.
+func ResolveUsageForPath(path string) *core.ContextUsage {
+	return resolveUsageForPath(path, ContextWindowFor)
+}
+
+// ResolvePiUsageForPath returns ContextUsage for a stock Pi session. Pi uses
+// JSON model catalogs rather than OMP's models.db for context-window lookup.
+func ResolvePiUsageForPath(path string) *core.ContextUsage {
+	return resolveUsageForPath(path, func(provider, model string) *int {
+		return PiContextWindowFor(path, provider, model)
+	})
 }
 
 // BackendIDForPath returns the latest assistant provider id for the session.
