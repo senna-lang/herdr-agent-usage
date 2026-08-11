@@ -145,7 +145,13 @@ var herdrMetadataTokenWriter = metadataTokenWriter{
 	clear: herdrcli.ClearMetadataToken,
 }
 
-func writeMetadataToken(current map[string]string, paneID, name, value string, force bool) {
+// writeMetadataToken applies the pane's metadata write policy before deciding
+// whether the current value needs a Herdr update. Live updates retain a
+// last-known-good value when collection temporarily yields an empty value.
+func writeMetadataToken(current map[string]string, paneID, name, value string, force, retainExistingOnEmpty bool) {
+	if retainExistingOnEmpty && value == "" {
+		return
+	}
 	writeMetadataTokenWith(herdrMetadataTokenWriter, current, paneID, name, value, force)
 }
 
@@ -178,13 +184,19 @@ func RunUpdate(force bool) {
 		return
 	}
 
+	// A working pane can briefly have no fresh limit or context value while its
+	// collector or transcript is between complete records. Keep its last-known-
+	// good metadata until a positive update arrives; settled and forced updates
+	// may still clear stale values.
+	retainExistingOnEmpty := !force && pane.AgentStatus != nil && *pane.AgentStatus == "working"
+
 	// Row 1 stands in for Herdr's built-in `tab`/`pane` tokens, which render
 	// blank whenever a tab keeps its auto-assigned numeric label and the
 	// pane was never renamed. Fall back through the workspace ("space")
 	// name so the row is never empty.
 	naming := herdrcli.GetPaneNaming(pane)
 	title := core.ResolveSidebarTitle(naming.PaneLabel, naming.TabLabel, naming.TabNumber, naming.WorkspaceLabel)
-	writeMetadataToken(pane.Tokens, paneID, "title", title, force)
+	writeMetadataToken(pane.Tokens, paneID, "title", title, force, retainExistingOnEmpty)
 
 	cwd := paneCwdForUpdate(pane)
 	nowMs := time.Now().UnixMilli()
@@ -207,9 +219,9 @@ func RunUpdate(force bool) {
 	if !resolved {
 		// Cannot tell which account this pane belongs to: clear rather than
 		// guess into the wrong account's limits/tokens.
-		writeMetadataToken(pane.Tokens, paneID, "limit", "", force)
-		writeMetadataToken(pane.Tokens, paneID, "provider", formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot), force)
-		writeMetadataToken(pane.Tokens, paneID, "context", "", force)
+		writeMetadataToken(pane.Tokens, paneID, "limit", "", force, retainExistingOnEmpty)
+		writeMetadataToken(pane.Tokens, paneID, "provider", formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot), force, retainExistingOnEmpty)
+		writeMetadataToken(pane.Tokens, paneID, "context", "", force, retainExistingOnEmpty)
 		return
 	}
 
@@ -252,11 +264,11 @@ func RunUpdate(force bool) {
 			limitToken = accountText
 		}
 	}
-	writeMetadataToken(pane.Tokens, paneID, "limit", limitToken, force)
+	writeMetadataToken(pane.Tokens, paneID, "limit", limitToken, force, retainExistingOnEmpty)
 
 	// Stands in for Herdr's `agent` token so a pay-as-you-go pane names the
 	// backend it is actually billing ("deepseek") instead of the harness.
-	writeMetadataToken(pane.Tokens, paneID, "provider", providerText, force)
+	writeMetadataToken(pane.Tokens, paneID, "provider", providerText, force, retainExistingOnEmpty)
 
 	// Context tokens: claude is read from its resolved profile's own transcript
 	// root (bypassing the registry's default-root lookup) so a non-default
@@ -282,7 +294,7 @@ func RunUpdate(force bool) {
 	}
 
 	if usage == nil {
-		writeMetadataToken(pane.Tokens, paneID, "context", contextPrefix, force)
+		writeMetadataToken(pane.Tokens, paneID, "context", contextPrefix, force, retainExistingOnEmpty)
 		return
 	}
 
@@ -291,5 +303,5 @@ func RunUpdate(force bool) {
 	maxCols := core.EstimateStatusMaxColumns(&sidebarW)
 	maxCols = reserveColumnsFor(maxCols, contextPrefix)
 	statusText := core.FormatUsageStatus(*usage, core.FormatUsageOptions{MaxColumns: maxCols})
-	writeMetadataToken(pane.Tokens, paneID, "context", combineLimitAndContext(contextPrefix, statusText), force)
+	writeMetadataToken(pane.Tokens, paneID, "context", combineLimitAndContext(contextPrefix, statusText), force, retainExistingOnEmpty)
 }
