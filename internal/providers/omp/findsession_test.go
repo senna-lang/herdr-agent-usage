@@ -15,6 +15,26 @@ func TestEncodePiSessionDir(t *testing.T) {
 	}
 }
 
+func TestFindOMPSessionForCwdByFilename_RehomesStalePath(t *testing.T) {
+	root := t.TempDir()
+	cwd := "/Users/senna/Documents/Repos/life"
+	filename := "2026-08-10T01-06-25-252Z_019fe934-e364-7000-a8e5-6c59127e8a7a.jsonl"
+	wantDir := filepath.Join(root, EncodeOMPSessionDir(cwd))
+	if err := os.MkdirAll(wantDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(wantDir, filename)
+	if err := os.WriteFile(want, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMP_SESSIONS_ROOT", root)
+
+	got := FindOMPSessionForCwdByFilename(cwd, filepath.Join(root, "home-life-legacy", filename))
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
 func TestFindLatestSessionInDir(t *testing.T) {
 	dir := t.TempDir()
 	older := filepath.Join(dir, "2026-01-01T00-00-00Z_old.jsonl")

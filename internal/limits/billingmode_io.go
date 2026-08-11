@@ -563,12 +563,21 @@ func paneSubscriptionRoute(providerID string, pane OpenPaneSnapshot) (Subscripti
 	}
 }
 
-// ompSessionPath resolves the OMP jsonl path from SessionID, else newest cwd session.
+// ompSessionPath resolves an OMP transcript path without borrowing another
+// pane's latest session. An opaque Herdr session ID is not a filesystem key.
 func ompSessionPath(pane OpenPaneSnapshot) string {
 	if pane.SessionID != nil {
-		if path := omp.SessionPathFromSnapshotValue(*pane.SessionID); path != "" {
+		path := omp.SessionPathFromSnapshotValue(*pane.SessionID)
+		if path == "" {
+			return ""
+		}
+		if _, err := os.Stat(path); err == nil {
 			return path
 		}
+		if pane.Cwd != nil {
+			return omp.FindOMPSessionForCwdByFilename(*pane.Cwd, path)
+		}
+		return ""
 	}
 	if pane.Cwd != nil {
 		return omp.FindLatestOMPSessionForCwd(*pane.Cwd)

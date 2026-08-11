@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
+	"github.com/senna-lang/herdr-agent-usage/internal/provider"
 )
 
 // OMP and Pi share this adapter. The sidebar percentage must use the latest
@@ -53,5 +54,51 @@ func TestSidebarContextContract_UsesLatestModelWindow(t *testing.T) {
 	status := core.FormatUsageStatus(*usage, core.FormatUsageOptions{})
 	if !strings.Contains(status, "25%") || !strings.Contains(status, "250k") {
 		t.Fatalf("status %q does not reflect 250k / 1M", status)
+	}
+}
+
+func TestOMPProvider_RehomesStaleSessionPath(t *testing.T) {
+	root := t.TempDir()
+	cwd := "/Users/senna/Documents/Repos/life"
+	filename := "2026-08-10T01-06-25-252Z_019fe934-e364-7000-a8e5-6c59127e8a7a.jsonl"
+	dir := filepath.Join(root, EncodeOMPSessionDir(cwd))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, filename), []byte(`{"type":"message","message":{"role":"assistant","provider":"openai","model":"gpt-5","contextSnapshot":{"promptTokens":59000}}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMP_SESSIONS_ROOT", root)
+
+	usage := Provider.ResolveUsage(provider.UsageResolveInput{
+		Session: &provider.AgentSession{
+			Kind:  "path",
+			Value: filepath.Join(root, "home-life-legacy", filename),
+		},
+		Cwd: &cwd,
+	})
+	if usage == nil || usage.ContextTokens != 59000 {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
+func TestOMPProvider_DoesNotUseLatestSessionForIDOnlyInput(t *testing.T) {
+	root := t.TempDir()
+	cwd := "/Users/senna/Documents/Repos/life"
+	dir := filepath.Join(root, EncodeOMPSessionDir(cwd))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "2026-08-11T01-00-00Z_other-pane.jsonl"), []byte(`{"type":"message","message":{"role":"assistant","provider":"openai","model":"gpt-5","contextSnapshot":{"promptTokens":59000}}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMP_SESSIONS_ROOT", root)
+
+	usage := Provider.ResolveUsage(provider.UsageResolveInput{
+		Session: &provider.AgentSession{Kind: "id", Value: "missing-session-id"},
+		Cwd:     &cwd,
+	})
+	if usage != nil {
+		t.Fatalf("usage = %+v; ID-only session must not inherit another pane's transcript", usage)
 	}
 }
