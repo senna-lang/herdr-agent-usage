@@ -1,30 +1,27 @@
 /**
  * Estimates the cell count available for context usage in a sidebar row.
  *
- * Herdr does not expose the runtime sidebar width via API, so we estimate
- * conservatively from the configured sidebar_width and the agent name.
+ * Herdr does not expose the runtime sidebar width via API, so callers resolve
+ * the configured sidebar_width before passing it here.
  */
 package core
 
-// SidebarRowOverheadColumns approximates non-status overhead per row:
-// leading indent, status dot, and padding around the name.
-const SidebarRowOverheadColumns = 12
+// SidebarRowOverheadColumns approximates the non-status chrome herdr renders
+// around the dedicated $context row: a 1-column vertical separator plus a
+// 3-column row indent (herdrdev/herdr, src/ui/sidebar.rs, resolved_token_spans
+// call sites). Herdr does not expose this value via its API, so it is not a
+// guaranteed contract — a future herdr layout change could drift it out of
+// sync with this constant.
+const SidebarRowOverheadColumns = 4
 
 // EstimateStatusMaxColumns returns the budget for the context display token.
+// The token occupies its own row, so most of the sidebar width is available;
+// SidebarRowOverheadColumns accounts for herdr's row separator and indent.
 // sidebarWidth null/<=0 yields nil (full display).
-func EstimateStatusMaxColumns(sidebarWidth *int, agentLabel *string) *int {
+func EstimateStatusMaxColumns(sidebarWidth *int) *int {
 	if sidebarWidth == nil || *sidebarWidth <= 0 {
 		return nil
 	}
-	name := ""
-	if agentLabel != nil {
-		name = *agentLabel
-	}
-	nameWidth := DisplayWidth(name)
-	budget := *sidebarWidth - SidebarRowOverheadColumns - nameWidth
-	// Floor so the shortest "N%" representation never gets clipped.
-	if budget < 3 {
-		budget = 3
-	}
+	budget := max(*sidebarWidth-SidebarRowOverheadColumns, 3)
 	return &budget
 }

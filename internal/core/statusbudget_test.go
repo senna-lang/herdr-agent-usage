@@ -6,42 +6,33 @@ package core
 import "testing"
 
 func TestEstimateStatusMaxColumns(t *testing.T) {
-	if EstimateStatusMaxColumns(nil, strP("claude")) != nil {
+	if EstimateStatusMaxColumns(nil) != nil {
 		t.Fatal("expected nil when width unknown")
-	}
-	w32 := 32
-	label := "claude"
-	budget := EstimateStatusMaxColumns(&w32, &label)
-	if budget == nil || *budget != 32-SidebarRowOverheadColumns-6 {
-		t.Fatalf("got %#v", budget)
-	}
-	if *budget < 13 {
-		t.Fatal("should leave room for full form")
 	}
 
 	w26 := 26
-	budget = EstimateStatusMaxColumns(&w26, &label)
-	if budget == nil || *budget != 8 {
-		t.Fatalf("got %#v want 8", budget)
-	}
-
-	w21 := 21
-	budget = EstimateStatusMaxColumns(&w21, &label)
-	if budget == nil || *budget != 3 {
-		t.Fatalf("got %#v want 3", budget)
-	}
-
-	w18 := 18
-	op := "opencode"
-	budget = EstimateStatusMaxColumns(&w18, &op)
-	if budget == nil || *budget != 3 {
-		t.Fatalf("floor got %#v", budget)
-	}
-
-	budget = EstimateStatusMaxColumns(&w26, nil)
+	budget := EstimateStatusMaxColumns(&w26)
 	if budget == nil || *budget != 26-SidebarRowOverheadColumns {
-		t.Fatalf("nil label got %#v", budget)
+		t.Fatalf("got %#v want %d", budget, 26-SidebarRowOverheadColumns)
+	}
+	got := FormatUsageStatus(usage(310_000, intPtr(1_000_000)), FormatUsageOptions{MaxColumns: budget})
+	if got != "⛁ 31% (310k)" {
+		t.Fatalf("got %q want full context status", got)
+	}
+
+	// At herdr's default sidebar_min_width (18), the row's real usable width
+	// is narrower than the raw sidebar width once herdr's own separator and
+	// row indent are accounted for. A wide usage string ("100% (1234k)") that
+	// would fit an 18-wide budget must not be picked if it can't actually fit
+	// the real row, or herdr hard-truncates it with an ellipsis instead of
+	// falling back to a shorter complete candidate.
+	w18 := 18
+	budget = EstimateStatusMaxColumns(&w18)
+	if budget == nil || *budget != 18-SidebarRowOverheadColumns {
+		t.Fatalf("got %#v want %d", budget, 18-SidebarRowOverheadColumns)
+	}
+	got = FormatUsageStatus(usage(1_234_000, intPtr(1_234_000)), FormatUsageOptions{MaxColumns: budget})
+	if got != "100% (1234k)" {
+		t.Fatalf("got %q want narrow-width fallback without icon", got)
 	}
 }
-
-func strP(s string) *string { return &s }

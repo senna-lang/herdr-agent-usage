@@ -288,7 +288,7 @@ func RunUpdate(force bool) {
 
 	liveWidth := herdrcli.GetSidebarWidthColumns(paneID)
 	sidebarW := core.ResolveSidebarWidth(liveWidth, core.ResolveConfigSidebarWidth())
-	maxCols := core.EstimateStatusMaxColumns(&sidebarW, pane.RowLabel)
+	maxCols := core.EstimateStatusMaxColumns(&sidebarW)
 	maxCols = reserveColumnsFor(maxCols, contextPrefix)
 	statusText := core.FormatUsageStatus(*usage, core.FormatUsageOptions{MaxColumns: maxCols})
 	writeMetadataToken(pane.Tokens, paneID, "context", combineLimitAndContext(contextPrefix, statusText), force)
