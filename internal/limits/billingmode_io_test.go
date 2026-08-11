@@ -367,3 +367,21 @@ func TestIO_MultipleClaudeProfiles_IndependentBilling(t *testing.T) {
 		t.Fatalf("profile B (subscription) should be kept: %#v", set)
 	}
 }
+
+func TestOMPPath_DoesNotUseLatestSessionForIDOnlyPane(t *testing.T) {
+	root := t.TempDir()
+	cwd := ioTestCwd
+	dir := filepath.Join(root, "-tmp-herdr-usage-smoke-cwd")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "2026-08-11T01-00-00Z_other-pane.jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMP_SESSIONS_ROOT", root)
+
+	got := ompSessionPath(OpenPaneSnapshot{SessionID: sp("opaque-session-id"), Cwd: sp(cwd)})
+	if got != "" {
+		t.Fatalf("got %q; ID-only session must not inherit another pane's transcript", got)
+	}
+}

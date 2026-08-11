@@ -5,6 +5,8 @@ package update
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/claude"
@@ -39,6 +41,39 @@ func TestPaneCwdForUpdate_OtherAgentsPreferForegroundCwd(t *testing.T) {
 	})
 	if got == nil || *got != foregroundCwd {
 		t.Fatalf("got %v want %q", got, foregroundCwd)
+	}
+}
+
+func TestRunUpdate_RefreshesWorkingPane(t *testing.T) {
+	root := t.TempDir()
+	logPath := filepath.Join(root, "metadata.log")
+	binPath := filepath.Join(root, "fake-herdr")
+	script := `#!/bin/sh
+if [ "$1" = pane ] && [ "$2" = get ]; then
+  printf '%s\n' '{"result":{"pane":{"agent":"omp","agent_status":"working","label":"review-pane","cwd":"/tmp","tokens":{}}}}'
+  exit 0
+fi
+if [ "$1" = pane ] && [ "$2" = report-metadata ]; then
+  printf '%s\n' "$*" >> "$REVIEW_METADATA_LOG"
+fi
+`
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HERDR_PANE_ID", "test-pane")
+	t.Setenv("HERDR_BIN_PATH", binPath)
+	t.Setenv("REVIEW_METADATA_LOG", logPath)
+	t.Setenv("OMP_SESSIONS_ROOT", filepath.Join(root, "sessions"))
+	t.Setenv("HOME", root)
+
+	RunUpdate(false)
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("working pane produced no metadata refresh: %v", err)
+	}
+	if !strings.Contains(string(data), "--token title=review-pane") {
+		t.Fatalf("metadata calls = %q", data)
 	}
 }
 
