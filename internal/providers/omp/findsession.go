@@ -106,6 +106,31 @@ func FindLatestPiSessionForCwd(cwd string) string {
 	return FindLatestSessionInDir(filepath.Join(root, enc))
 }
 
+// FindOMPSessionForCwdByFilename finds a session in the pane's current OMP
+// session directory when Herdr's stored absolute path was created before the
+// session directory moved or changed encoding. It only accepts the exact
+// transcript filename, so it cannot attribute another pane's newest session.
+func FindOMPSessionForCwdByFilename(cwd, sessionPath string) string {
+	root := ompSessionsRoot()
+	filename := filepath.Base(strings.TrimSpace(sessionPath))
+	if root == "" || filename == "." || filename == string(filepath.Separator) || !strings.HasSuffix(filename, ".jsonl") {
+		return ""
+	}
+
+	encodings := [2]string{EncodeOMPSessionDir(cwd), EncodePiSessionDir(cwd)}
+	for _, encoding := range encodings {
+		if encoding == "" {
+			continue
+		}
+		candidate := filepath.Join(root, encoding, filename)
+		info, err := os.Stat(candidate)
+		if err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
+}
+
 // FindLatestOMPSessionForCwd looks under ~/.omp/agent/sessions/<encoded>/.
 func FindLatestOMPSessionForCwd(cwd string) string {
 	root := ompSessionsRoot()

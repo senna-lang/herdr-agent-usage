@@ -26,13 +26,26 @@ var PiProvider = provider.FuncProvider{
 
 func resolveOMPUsage(input provider.UsageResolveInput) *core.ContextUsage {
 	path := SessionPathFromInput(input)
-	if path == "" && input.Cwd != nil {
-		path = FindLatestOMPSessionForCwd(*input.Cwd)
+	if path != "" {
+		if usage := ResolveUsageForPath(path); usage != nil {
+			return usage
+		}
+		if input.Cwd == nil {
+			return nil
+		}
+
+		// Resumptions can preserve a historical absolute path after OMP moves the
+		// transcript into the current cwd's directory. Recover only the exact
+		// filename; selecting that cwd's newest transcript could cross panes.
+		return ResolveUsageForPath(FindOMPSessionForCwdByFilename(*input.Cwd, path))
 	}
-	if path == "" {
+
+	// An ID-only session cannot be associated with an OMP jsonl file. Do not
+	// substitute the cwd's newest file: concurrent panes routinely share a cwd.
+	if input.Session != nil || input.Cwd == nil {
 		return nil
 	}
-	return ResolveUsageForPath(path)
+	return ResolveUsageForPath(FindLatestOMPSessionForCwd(*input.Cwd))
 }
 
 func resolvePiUsage(input provider.UsageResolveInput) *core.ContextUsage {

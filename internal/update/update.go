@@ -27,10 +27,6 @@ func findClaudeProfile(profiles []claude.ClaudeProfile, id string) (claude.Claud
 	return claude.ClaudeProfile{}, false
 }
 
-func isSettledStatus(status string) bool {
-	return status != "working"
-}
-
 // paneCwdForUpdate chooses the directory used to resolve agent-local session
 // files. OMP/Pi may put a language-server process in the foreground, whose
 // cwd is inside a virtual environment rather than the agent's project. Their
@@ -179,10 +175,6 @@ func RunUpdate(force bool) {
 
 	p := providers.FindProvider(*pane.Agent)
 	if p == nil {
-		return
-	}
-
-	if pane.AgentStatus != nil && !isSettledStatus(*pane.AgentStatus) && !force {
 		return
 	}
 
