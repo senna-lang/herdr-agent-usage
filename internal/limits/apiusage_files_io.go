@@ -18,7 +18,6 @@ import (
 	"strings"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
-	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
 )
@@ -180,20 +179,22 @@ func scanGrokRowsByBackend(startMs int64) map[string][]apiUsageRow {
 // place Codex records which backend a session actually used.
 func scanCodexRows(startMs int64) map[string][]apiUsageRow {
 	out := make(map[string][]apiUsageRow)
-	for _, path := range ListNewestRolloutPaths(10_000) {
-		lines := readIfTouchedInWindow(path, startMs)
-		if lines == nil {
-			continue
+	for _, home := range configuredCodexHomes() {
+		for _, path := range ListNewestRolloutPathsIn(home, 10_000) {
+			lines := readIfTouchedInWindow(path, startMs)
+			if lines == nil {
+				continue
+			}
+			backendID := CodexProviderFromLines(lines)
+			if backendID == "" {
+				continue
+			}
+			rows := CodexUsageRowsFromLines(lines, CodexModelFromLines(lines))
+			if len(rows) == 0 {
+				continue
+			}
+			out[backendID] = append(out[backendID], rows...)
 		}
-		backendID := CodexProviderFromLines(lines)
-		if backendID == "" {
-			continue
-		}
-		rows := CodexUsageRowsFromLines(lines, CodexModelFromLines(lines))
-		if len(rows) == 0 {
-			continue
-		}
-		out[backendID] = append(out[backendID], rows...)
 	}
 	return out
 }
@@ -302,7 +303,7 @@ func paneSessionLines(harnessID string, pane OpenPaneSnapshot) []string {
 		}
 		path = claude.ResolveTranscriptPathForSession(*sid)
 	case "codex":
-		path = codex.ResolveSessionFile(sid, cwd)
+		path = resolveCodexSessionAcrossHomes(sid, cwd)
 	case "grok":
 		signals := grok.ResolveSignalsPath(sid, cwd)
 		if signals == "" {

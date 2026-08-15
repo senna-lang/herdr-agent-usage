@@ -17,14 +17,21 @@ type ClaudeProfileCollector struct {
 	Collector LimitsCollector
 }
 
+// CodexProfileCollector is one configured Codex profile's collector. Same
+// shape as ClaudeProfileCollector: each account collects and displays under
+// its own provider id instead of sharing the single literal "codex" id.
+type CodexProfileCollector = ClaudeProfileCollector
+
 // CollectOptions configures CollectAllProviderLimits.
 type CollectOptions struct {
 	// Claude is one entry per configured Claude profile, in config order. Empty
 	// synthesizes a single "claude" stub spec, matching how the other
 	// providers behave when left unconfigured (mainly relevant to tests that
 	// build CollectOptions directly rather than via DefaultCollectOptions).
-	Claude   []ClaudeProfileCollector
-	Codex    LimitsCollector
+	Claude []ClaudeProfileCollector
+	// Codex is one entry per configured Codex profile, in config order. Empty
+	// synthesizes a single "codex" stub spec.
+	Codex    []CodexProfileCollector
 	OpenCode LimitsCollector
 	Grok     LimitsCollector
 	// Attach activity after collection (injectable for tests).
@@ -35,7 +42,7 @@ type CollectOptions struct {
 }
 
 // DefaultCollectOptions wires production local collectors (no network), one
-// Claude collector per configured profile (see ResolvedClaudeProfiles).
+// Claude/Codex collector per configured profile.
 func DefaultCollectOptions() CollectOptions {
 	profiles := ResolvedClaudeProfiles()
 	multiProfile := len(profiles) > 1
@@ -59,9 +66,22 @@ func DefaultCollectOptions() CollectOptions {
 			},
 		}
 	}
+	codexProfiles := ResolvedCodexProfiles()
+	multiCodex := len(codexProfiles) > 1
+	codexCollectors := make([]CodexProfileCollector, len(codexProfiles))
+	for i, p := range codexProfiles {
+		codexCollectors[i] = CodexProfileCollector{
+			ID:    p.ID,
+			Label: p.Label,
+			Collector: func(_ *string, nowMs int64) ProviderLimits {
+				pl := CollectCodexLimitsIn(p.Home, p.ID, p.Label, nowMs)
+				return applyCodexProfileGrouping(pl, p, multiCodex)
+			},
+		}
+	}
 	return CollectOptions{
 		Claude: claudeCollectors,
-		Codex:  CollectCodexLimits,
+		Codex:  codexCollectors,
 		OpenCode: func(_ *string, nowMs int64) ProviderLimits {
 			return CollectOpenCodeLimits(nowMs, "")
 		},
@@ -71,17 +91,18 @@ func DefaultCollectOptions() CollectOptions {
 	}
 }
 
-// nonClaudeQuotaSpecs pairs each non-Claude quota-owning provider id/label with
-// the CollectOptions field carrying its collector. This list's id set is
-// checked against providers.IDsWithCapability(CapOwnsSubscriptionQuota) by
-// TestNonClaudeQuotaSpecs_MatchCapabilityRegistrations, so a newly registered
-// quota-owning provider that isn't wired here fails that test instead of
-// silently never appearing in the panel.
-var nonClaudeQuotaSpecs = []struct {
+// singleCollectorQuotaSpecs pairs each still-single quota-owning provider
+// id/label with the CollectOptions field carrying its collector. Claude and
+// Codex are omitted because they expand to one collector per configured
+// profile. This list's id set is checked against
+// providers.IDsWithCapability(CapOwnsSubscriptionQuota) minus those profile
+// families by TestSingleCollectorQuotaSpecs_MatchCapabilityRegistrations, so a
+// newly registered quota-owning provider that isn't wired here fails that
+// test instead of silently never appearing in the panel.
+var singleCollectorQuotaSpecs = []struct {
 	id, label string
 	field     func(CollectOptions) LimitsCollector
 }{
-	{"codex", "Codex", func(o CollectOptions) LimitsCollector { return o.Codex }},
 	{"opencode", "OpenCode", func(o CollectOptions) LimitsCollector { return o.OpenCode }},
 	{"grok", "Grok", func(o CollectOptions) LimitsCollector { return o.Grok }},
 }
@@ -109,16 +130,26 @@ func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []P
 	if len(claudeSpecs) == 0 {
 		claudeSpecs = []ClaudeProfileCollector{{ID: "claude", Label: "Claude"}}
 	}
+	codexSpecs := opts.Codex
+	if len(codexSpecs) == 0 {
+		codexSpecs = []CodexProfileCollector{{ID: "codex", Label: "Codex"}}
+	}
 
-	base := make([]ProviderLimits, 0, len(claudeSpecs)+len(nonClaudeQuotaSpecs))
+	base := make([]ProviderLimits, 0, len(claudeSpecs)+len(codexSpecs)+len(singleCollectorQuotaSpecs))
 	for _, s := range claudeSpecs {
 		if opts.Only != nil && !opts.Only[s.ID] {
 			continue
 		}
 		base = append(base, collect(s.Collector, s.ID, s.Label))
 	}
+	for _, s := range codexSpecs {
+		if opts.Only != nil && !opts.Only[s.ID] {
+			continue
+		}
+		base = append(base, collect(s.Collector, s.ID, s.Label))
+	}
 
-	for _, s := range nonClaudeQuotaSpecs {
+	for _, s := range singleCollectorQuotaSpecs {
 		if opts.Only != nil && !opts.Only[s.id] {
 			continue
 		}

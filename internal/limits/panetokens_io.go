@@ -19,32 +19,33 @@ import (
 )
 
 // DefaultPaneActivityDeps returns production token collectors, wired to
-// resolve Claude panes by profile (session-transcript match) when more than
-// one Claude profile is configured.
+// resolve Claude and Codex panes by profile session matching when multiple
+// profiles are configured for either agent.
 func DefaultPaneActivityDeps() PaneActivityDeps {
 	// Resolve the profile snapshot once and share it across all three deps, so
 	// the whole AttachPaneActivity pass agrees on one profile set instead of
 	// the resolver and the token/total dispatch each re-resolving (which could
 	// also skew if config changed mid-pass).
 	profiles := ResolvedClaudeProfiles()
+	codexProfiles := ResolvedCodexProfiles()
 	return PaneActivityDeps{
 		TokensForPane: func(providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
-			return tokensForPaneWith(profiles, providerID, pane, startMs, endMs)
+			return tokensForPaneWith(profiles, codexProfiles, providerID, pane, startMs, endMs)
 		},
 		TotalTokensForProvider: func(providerID string, startMs, endMs int64) float64 {
-			return totalTokensForProviderWith(profiles, providerID, startMs, endMs)
+			return totalTokensForProviderWith(profiles, codexProfiles, providerID, startMs, endMs)
 		},
-		ResolvePaneProvider: BuildPaneActivityProviderResolver(profiles),
+		ResolvePaneProvider: BuildPaneActivityProviderResolver(profiles, codexProfiles),
 	}
 }
 
 // BuildPaneActivityProviderResolver extends the normal harness resolver only
 // for the Limits pane's subscription activity: OMP/Pi subscription gateways
-// belong under their collector account.  Keep this separate from
-// BuildClaudePaneProviderResolver, which sidebar updates use to retain the
+// belong under their collector account. Keep this separate from
+// BuildHarnessPaneProviderResolver, which sidebar updates use to retain the
 // actual harness id before resolving its billing route.
-func BuildPaneActivityProviderResolver(profiles []claude.ClaudeProfile) PaneProviderResolver {
-	base := BuildClaudePaneProviderResolver(profiles)
+func BuildPaneActivityProviderResolver(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile) PaneProviderResolver {
+	base := BuildHarnessPaneProviderResolver(profiles, codexProfiles)
 	return func(pane OpenPaneSnapshot) (string, bool) {
 		if pane.Agent == "omp" || pane.Agent == "pi" || pane.Agent == "opencode" {
 			if route, ok := paneSubscriptionRoute(pane.Agent, pane); ok {
@@ -64,14 +65,35 @@ func BuildPaneActivityProviderResolver(profiles []claude.ClaudeProfile) PaneProv
 // profile's id directly rather than session matching — same cost as today,
 // but correct even when the lone profile has a custom id.
 func BuildClaudePaneProviderResolver(profiles []claude.ClaudeProfile) PaneProviderResolver {
+	return BuildHarnessPaneProviderResolver(profiles, nil)
+}
+
+// BuildHarnessPaneProviderResolver attributes Claude and Codex panes to the
+// matching configured profile, and other agents via the static map.
+func BuildHarnessPaneProviderResolver(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile) PaneProviderResolver {
+	claudeResolve := buildClaudeOnlyResolver(profiles)
+	codexResolve := BuildCodexPaneProviderResolver(codexProfiles)
+	return func(pane OpenPaneSnapshot) (string, bool) {
+		switch pane.Agent {
+		case "claude":
+			return claudeResolve(pane)
+		case "codex":
+			return codexResolve(pane)
+		default:
+			id, ok := agentToProvider[pane.Agent]
+			return id, ok
+		}
+	}
+}
+
+func buildClaudeOnlyResolver(profiles []claude.ClaudeProfile) PaneProviderResolver {
 	if len(profiles) == 1 {
 		soleID := profiles[0].ID
 		return func(pane OpenPaneSnapshot) (string, bool) {
 			if pane.Agent == "claude" {
 				return soleID, true
 			}
-			id, ok := agentToProvider[pane.Agent]
-			return id, ok
+			return "", false
 		}
 	}
 	roots := make(map[string]string, len(profiles))
@@ -80,10 +102,41 @@ func BuildClaudePaneProviderResolver(profiles []claude.ClaudeProfile) PaneProvid
 	}
 	return func(pane OpenPaneSnapshot) (string, bool) {
 		if pane.Agent != "claude" {
-			id, ok := agentToProvider[pane.Agent]
-			return id, ok
+			return "", false
 		}
 		return claude.ResolveProfileForSession(sessionIDStr(pane), roots)
+	}
+}
+
+// BuildCodexPaneProviderResolver attributes Codex panes to the configured
+// profile matching their rollout. A single profile short-circuits to that id.
+func BuildCodexPaneProviderResolver(profiles []codex.CodexProfile) PaneProviderResolver {
+	if len(profiles) == 0 {
+		return func(pane OpenPaneSnapshot) (string, bool) {
+			if pane.Agent == "codex" {
+				return "codex", true
+			}
+			return "", false
+		}
+	}
+	if len(profiles) == 1 {
+		soleID := profiles[0].ID
+		return func(pane OpenPaneSnapshot) (string, bool) {
+			if pane.Agent == "codex" {
+				return soleID, true
+			}
+			return "", false
+		}
+	}
+	homes := make(map[string]string, len(profiles))
+	for _, p := range profiles {
+		homes[p.ID] = p.Home
+	}
+	return func(pane OpenPaneSnapshot) (string, bool) {
+		if pane.Agent != "codex" {
+			return "", false
+		}
+		return codex.ResolveProfileForSession(sessionIDStr(pane), homes)
 	}
 }
 
@@ -95,13 +148,13 @@ func BuildClaudePaneProviderResolver(profiles []claude.ClaudeProfile) PaneProvid
 // "claude"), so Claude is dispatched by profile lookup rather than a switch
 // case: each profile's tokens are read from only its own transcript root.
 func TokensForPaneDefault(providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
-	return tokensForPaneWith(ResolvedClaudeProfiles(), providerID, pane, startMs, endMs)
+	return tokensForPaneWith(ResolvedClaudeProfiles(), ResolvedCodexProfiles(), providerID, pane, startMs, endMs)
 }
 
 // tokensForPaneWith is TokensForPaneDefault dispatched against an explicit
 // profile snapshot (see DefaultPaneActivityDeps): Claude ids resolve their
 // transcript root from profiles, other agents via the static switch.
-func tokensForPaneWith(profiles []claude.ClaudeProfile, providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+func tokensForPaneWith(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile, providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
 	if pane.Agent == "opencode" {
 		backendID := opencodePaneBackendID(pane)
 		if route, ok := paneSubscriptionRoute("opencode", pane); ok && route.CollectorProviderID == providerID {
@@ -125,9 +178,10 @@ func tokensForPaneWith(profiles []claude.ClaudeProfile, providerID string, pane 
 	if profile, ok := profileByIDIn(profiles, providerID); ok {
 		return claudeTokensForPaneIn(profile.ProjectsRoot, pane, startMs, endMs)
 	}
+	if profile, ok := codexProfileByIDIn(codexProfiles, providerID); ok {
+		return codexTokensForPaneIn(profile.Home, pane, startMs, endMs)
+	}
 	switch providerID {
-	case "codex":
-		return codexTokensForPane(pane, startMs, endMs)
 	case "opencode":
 		return opencodeTokensForPane(pane, "opencode-go", startMs, endMs)
 	case "omp":
@@ -183,19 +237,20 @@ func TokensForPaneAnyBackend(providerID string, pane OpenPaneSnapshot, startMs, 
 // disk. Claude profile ids are dispatched by lookup (see TokensForPaneDefault)
 // so each profile's total is scanned from only its own transcript root.
 func TotalTokensForProviderDefault(providerID string, startMs, endMs int64) float64 {
-	return totalTokensForProviderWith(ResolvedClaudeProfiles(), providerID, startMs, endMs)
+	return totalTokensForProviderWith(ResolvedClaudeProfiles(), ResolvedCodexProfiles(), providerID, startMs, endMs)
 }
 
 // totalTokensForProviderWith is TotalTokensForProviderDefault dispatched against
 // an explicit profile snapshot (see DefaultPaneActivityDeps).
-func totalTokensForProviderWith(profiles []claude.ClaudeProfile, providerID string, startMs, endMs int64) float64 {
+func totalTokensForProviderWith(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile, providerID string, startMs, endMs int64) float64 {
 	routed := routedSubscriptionTotal(providerID, startMs, endMs)
 	if profile, ok := profileByIDIn(profiles, providerID); ok {
 		return claudeTotalIn(profile.ProjectsRoot, startMs, endMs) + routed
 	}
+	if profile, ok := codexProfileByIDIn(codexProfiles, providerID); ok {
+		return codexTotalIn(profile.Home, startMs, endMs) + routed
+	}
 	switch providerID {
-	case "codex":
-		return codexTotal(startMs, endMs) + routed
 	case "opencode":
 		return openCodeTotal(startMs, endMs) + routed
 	case "grok":
@@ -327,7 +382,7 @@ func claudeTokensForPaneIn(root string, pane OpenPaneSnapshot, startMs, endMs in
 	return SumClaudeTokensInWindow(strings.Split(string(raw), "\n"), startMs, endMs)
 }
 
-func codexTokensForPane(pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+func codexTokensForPaneIn(home string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
 	var sid, cwd *string
 	if pane.SessionID != nil {
 		sid = pane.SessionID
@@ -335,7 +390,7 @@ func codexTokensForPane(pane OpenPaneSnapshot, startMs, endMs int64) float64 {
 	if pane.Cwd != nil {
 		cwd = pane.Cwd
 	}
-	path := codex.ResolveSessionFile(sid, cwd)
+	path := codex.ResolveSessionFileIn(home, sid, cwd)
 	if path == "" {
 		return 0
 	}
@@ -488,9 +543,9 @@ func claudeTotalIn(root string, startMs, endMs int64) float64 {
 	return sum
 }
 
-func codexTotal(startMs, endMs int64) float64 {
+func codexTotalIn(home string, startMs, endMs int64) float64 {
 	var sum float64
-	for _, path := range ListNewestRolloutPaths(10_000) {
+	for _, path := range ListNewestRolloutPathsIn(home, 10_000) {
 		lines := readIfTouchedInWindow(path, startMs)
 		if lines == nil {
 			continue

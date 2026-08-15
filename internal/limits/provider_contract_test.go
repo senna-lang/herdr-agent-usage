@@ -55,36 +55,42 @@ func TestAgentToProvider_MatchesRegistrations(t *testing.T) {
 	assertSameIDSet(t, "agentToProvider keys", got, want)
 }
 
-// TestNonClaudeQuotaOwnerIDs_MatchCapabilityRegistrations guards
-// billingmode.go's derived list: every non-Claude quota-owning provider must
-// be present, and no other provider must be.
-func TestNonClaudeQuotaOwnerIDs_MatchCapabilityRegistrations(t *testing.T) {
-	claudeID := claudeprovider.Provider.AgentID()
+// TestSingleCollectorQuotaOwnerIDs_MatchCapabilityRegistrations guards
+// billingmode.go's derived list: every still-single quota-owning provider must
+// be present, and no profile family must be.
+func TestSingleCollectorQuotaOwnerIDs_MatchCapabilityRegistrations(t *testing.T) {
+	skip := map[string]bool{
+		claudeprovider.Provider.AgentID(): true,
+		"codex":                           true,
+	}
 	var want []string
 	for _, id := range providers.IDsWithCapability(providers.CapOwnsSubscriptionQuota) {
-		if id != claudeID {
+		if !skip[id] {
 			want = append(want, id)
 		}
 	}
-	assertSameIDSet(t, "nonClaudeProviderIDs", nonClaudeProviderIDs, want)
+	assertSameIDSet(t, "singleCollectorProviderIDs", singleCollectorProviderIDs, want)
 }
 
-// TestNonClaudeQuotaSpecs_MatchCapabilityRegistrations guards collect.go's
-// CollectAllProviderLimits wiring: every non-Claude quota-owning provider
-// must have a collect spec, and no other provider must have one.
-func TestNonClaudeQuotaSpecs_MatchCapabilityRegistrations(t *testing.T) {
-	claudeID := claudeprovider.Provider.AgentID()
+// TestSingleCollectorQuotaSpecs_MatchCapabilityRegistrations guards collect.go's
+// CollectAllProviderLimits wiring: every quota-owning provider that is still
+// a single collector (not a profile family) must have a collect spec.
+func TestSingleCollectorQuotaSpecs_MatchCapabilityRegistrations(t *testing.T) {
+	profileFamilies := map[string]bool{
+		claudeprovider.Provider.AgentID(): true,
+		"codex":                           true,
+	}
 	var want []string
 	for _, id := range providers.IDsWithCapability(providers.CapOwnsSubscriptionQuota) {
-		if id != claudeID {
+		if !profileFamilies[id] {
 			want = append(want, id)
 		}
 	}
 	var got []string
-	for _, s := range nonClaudeQuotaSpecs {
+	for _, s := range singleCollectorQuotaSpecs {
 		got = append(got, s.id)
 	}
-	assertSameIDSet(t, "nonClaudeQuotaSpecs ids", got, want)
+	assertSameIDSet(t, "singleCollectorQuotaSpecs ids", got, want)
 }
 
 // TestLimitIDSlotTables_MatchCapabilityRegistrations guards windowpool.go's

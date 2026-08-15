@@ -36,27 +36,37 @@ func DefaultBillingDeps() BillingDeps {
 	for i, p := range profiles {
 		ids[i] = p.ID
 	}
+	codexProfiles := ResolvedCodexProfiles()
+	codexIDs := make([]string, len(codexProfiles))
+	for i, p := range codexProfiles {
+		codexIDs[i] = p.ID
+	}
 	return BillingDeps{
 		PaneMode: func(providerID string, pane OpenPaneSnapshot) BillingMode {
-			return paneBillingModeWith(profiles, providerID, pane)
+			return paneBillingModeWith(profiles, codexProfiles, providerID, pane)
 		},
 		AccountMode: func(providerID string) BillingMode {
 			return accountBillingModeWith(profiles, providerID)
 		},
 		ClaudeProfileIDs: ids,
+		CodexProfileIDs:  codexIDs,
 		ResolvePane: func(pane OpenPaneSnapshot) (string, string, bool) {
-			return resolveBilledPane(profiles, pane)
+			return resolveBilledPane(profiles, codexProfiles, pane)
 		},
 	}
 }
 
-func resolveBilledPane(profiles []claude.ClaudeProfile, pane OpenPaneSnapshot) (providerID, harnessID string, ok bool) {
+func resolveBilledPane(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile, pane OpenPaneSnapshot) (providerID, harnessID string, ok bool) {
 	harnessID, ok = agentToProvider[strings.ToLower(pane.Agent)]
 	if !ok {
 		return "", "", false
 	}
 	if harnessID == "claude" {
 		providerID, ok = BuildClaudePaneProviderResolver(profiles)(pane)
+		return providerID, harnessID, ok
+	}
+	if harnessID == "codex" {
+		providerID, ok = BuildCodexPaneProviderResolver(codexProfiles)(pane)
 		return providerID, harnessID, ok
 	}
 	if route, routed := paneSubscriptionRoute(harnessID, pane); routed {
@@ -70,9 +80,12 @@ func resolveBilledPane(profiles []claude.ClaudeProfile, pane OpenPaneSnapshot) (
 // "claude") resolve via that profile's own ConfigDir rather than the ambient
 // CLAUDE_CONFIG_DIR — the read side (panel/sidebar) never sees that env var, so
 // per-profile billing detection must thread the resolved profile's paths.
-func paneBillingModeWith(profiles []claude.ClaudeProfile, providerID string, pane OpenPaneSnapshot) BillingMode {
+func paneBillingModeWith(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile, providerID string, pane OpenPaneSnapshot) BillingMode {
 	if profile, ok := profileByIDIn(profiles, providerID); ok {
 		return claudePaneBillingModeIn(profile.ConfigDir, pane)
+	}
+	if profile, ok := codexProfileByIDIn(codexProfiles, providerID); ok {
+		return codexPaneBillingModeIn(profile.Home, pane)
 	}
 	switch providerID {
 	case "opencode":
@@ -98,8 +111,6 @@ func paneBillingModeWith(profiles []claude.ClaudeProfile, providerID string, pan
 		// Other OMP / stock Pi sessions have no positive subscription route
 		// evidence, so retain the backend-scoped PAYG behavior.
 		return BillingPayAsYouGo
-	case "codex":
-		return codexPaneBillingMode(pane)
 	case "grok":
 		return grokPaneBillingMode(pane)
 	default:
@@ -403,7 +414,7 @@ func codexPaneRolloutLines(pane OpenPaneSnapshot) []string {
 	if pane.Cwd != nil {
 		cwd = pane.Cwd
 	}
-	path := codex.ResolveSessionFile(sid, cwd)
+	path := resolveCodexSessionAcrossHomes(sid, cwd)
 	if path == "" {
 		return nil
 	}
@@ -448,8 +459,7 @@ func opencodePaneBackendID(pane OpenPaneSnapshot) string {
 	return providerID
 }
 
-// codexPaneBillingMode tail-scans the pane's own rollout for rate_limits.
-func codexPaneBillingMode(pane OpenPaneSnapshot) BillingMode {
+func codexPaneBillingModeIn(home string, pane OpenPaneSnapshot) BillingMode {
 	var sid, cwd *string
 	if pane.SessionID != nil {
 		sid = pane.SessionID
@@ -457,7 +467,7 @@ func codexPaneBillingMode(pane OpenPaneSnapshot) BillingMode {
 	if pane.Cwd != nil {
 		cwd = pane.Cwd
 	}
-	path := codex.ResolveSessionFile(sid, cwd)
+	path := codex.ResolveSessionFileIn(home, sid, cwd)
 	if path == "" {
 		return BillingUnknown
 	}

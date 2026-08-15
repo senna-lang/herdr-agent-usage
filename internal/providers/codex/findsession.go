@@ -30,8 +30,8 @@ func codexHome() string {
 	return filepath.Join(home, ".codex")
 }
 
-func sessionsRoot() string {
-	return filepath.Join(codexHome(), "sessions")
+func sessionsRootIn(home string) string {
+	return filepath.Join(home, "sessions")
 }
 
 type rolloutCandidate struct {
@@ -39,8 +39,8 @@ type rolloutCandidate struct {
 	mtimeMs int64
 }
 
-func listRolloutCandidates() []rolloutCandidate {
-	root := sessionsRoot()
+func listRolloutCandidatesIn(home string) []rolloutCandidate {
+	root := sessionsRootIn(home)
 	var matches []rolloutCandidate
 	years, err := os.ReadDir(root)
 	if err != nil {
@@ -94,12 +94,17 @@ func listRolloutCandidates() []rolloutCandidate {
 // FindSessionFile finds a rollout whose filename ends with sessionId.jsonl.
 // When multiple match, prefers the most recently modified file.
 func FindSessionFile(sessionID string) string {
+	return FindSessionFileIn(codexHome(), sessionID)
+}
+
+// FindSessionFileIn is FindSessionFile scoped to one Codex home.
+func FindSessionFileIn(home, sessionID string) string {
 	if sessionID == "" {
 		return ""
 	}
 	suffix := sessionID + ".jsonl"
 	var matches []rolloutCandidate
-	for _, c := range listRolloutCandidates() {
+	for _, c := range listRolloutCandidatesIn(home) {
 		if strings.HasSuffix(c.path, suffix) {
 			matches = append(matches, c)
 		}
@@ -150,11 +155,16 @@ func readSessionMetaCwd(path string) string {
 // FindSessionFileByMetaID finds a rollout whose session_meta session_id or id
 // equals sessionID (thread/root id drift when the filename suffix differs).
 func FindSessionFileByMetaID(sessionID string) string {
+	return FindSessionFileByMetaIDIn(codexHome(), sessionID)
+}
+
+// FindSessionFileByMetaIDIn is FindSessionFileByMetaID scoped to one Codex home.
+func FindSessionFileByMetaIDIn(home, sessionID string) string {
 	if sessionID == "" {
 		return ""
 	}
 	var matches []rolloutCandidate
-	for _, c := range listRolloutCandidates() {
+	for _, c := range listRolloutCandidatesIn(home) {
 		meta := readSessionMeta(c.path)
 		if meta.sessionID == sessionID || meta.id == sessionID {
 			matches = append(matches, c)
@@ -178,12 +188,17 @@ func pickNewest(matches []rolloutCandidate) string {
 // FindLatestSessionFileForCwd returns the rollout with the latest mtime among
 // those whose session_meta.cwd matches the pane cwd (normalized; basename fallback).
 func FindLatestSessionFileForCwd(cwd string) string {
+	return FindLatestSessionFileForCwdIn(codexHome(), cwd)
+}
+
+// FindLatestSessionFileForCwdIn is FindLatestSessionFileForCwd scoped to one home.
+func FindLatestSessionFileForCwdIn(home, cwd string) string {
 	if cwd == "" {
 		return ""
 	}
 	var exact []rolloutCandidate
 	var weak []rolloutCandidate
-	for _, candidate := range listRolloutCandidates() {
+	for _, candidate := range listRolloutCandidatesIn(home) {
 		metaCwd := readSessionMetaCwd(candidate.path)
 		if metaCwd == "" {
 			continue
@@ -204,16 +219,38 @@ func FindLatestSessionFileForCwd(cwd string) string {
 
 // ResolveSessionFile prefers sessionId lookup, then meta id, then latest cwd rollout.
 func ResolveSessionFile(sessionID, cwd *string) string {
+	return ResolveSessionFileIn(codexHome(), sessionID, cwd)
+}
+
+// ResolveSessionFileIn is ResolveSessionFile scoped to one Codex home.
+func ResolveSessionFileIn(home string, sessionID, cwd *string) string {
 	if sessionID != nil && *sessionID != "" {
-		if byID := FindSessionFile(*sessionID); byID != "" {
+		if byID := FindSessionFileIn(home, *sessionID); byID != "" {
 			return byID
 		}
-		if byMeta := FindSessionFileByMetaID(*sessionID); byMeta != "" {
+		if byMeta := FindSessionFileByMetaIDIn(home, *sessionID); byMeta != "" {
 			return byMeta
 		}
 	}
 	if cwd != nil && *cwd != "" {
-		return FindLatestSessionFileForCwd(*cwd)
+		return FindLatestSessionFileForCwdIn(home, *cwd)
 	}
 	return ""
+}
+
+// ResolveProfileForSession returns the profile id whose home contains sessionID.
+// No match (or an empty session id) refuses rather than guessing.
+func ResolveProfileForSession(sessionID string, homes map[string]string) (providerID string, ok bool) {
+	if sessionID == "" {
+		return "", false
+	}
+	for id, home := range homes {
+		if home == "" {
+			continue
+		}
+		if FindSessionFileIn(home, sessionID) != "" || FindSessionFileByMetaIDIn(home, sessionID) != "" {
+			return id, true
+		}
+	}
+	return "", false
 }

@@ -64,10 +64,38 @@ config_dir = "/home/u/.claude-m"
 	}
 }
 
+func TestParsePluginConfigTOML_CodexProfiles(t *testing.T) {
+	cfg := ParsePluginConfigTOML(`
+[[codex.profiles]]
+id = "codex"
+label = "personal"
+codex_home = "/home/u/.codex"
+
+[[codex.profiles]]
+id = "dev"
+label = "product"
+codex_home = "/home/u/.codex-dev"
+`)
+	if len(cfg.CodexProfiles) != 2 {
+		t.Fatalf("want 2 profiles, got %d", len(cfg.CodexProfiles))
+	}
+	p0 := cfg.CodexProfiles[0]
+	if p0.ID != "codex" || p0.Label != "personal" || p0.CodexHome != "/home/u/.codex" {
+		t.Fatalf("p0 = %+v", p0)
+	}
+	p1 := cfg.CodexProfiles[1]
+	if p1.ID != "dev" || p1.Label != "product" || p1.CodexHome != "/home/u/.codex-dev" {
+		t.Fatalf("p1 = %+v", p1)
+	}
+}
+
 func TestParsePluginConfigTOML_NoProfilesByDefault(t *testing.T) {
 	cfg := ParsePluginConfigTOML(DefaultPluginConfigTOML(DefaultPluginConfig))
 	if len(cfg.ClaudeProfiles) != 0 {
-		t.Fatalf("seed must not define active profiles, got %+v", cfg.ClaudeProfiles)
+		t.Fatalf("seed must not define active Claude profiles, got %+v", cfg.ClaudeProfiles)
+	}
+	if len(cfg.CodexProfiles) != 0 {
+		t.Fatalf("seed must not define active Codex profiles, got %+v", cfg.CodexProfiles)
 	}
 }
 

@@ -9,7 +9,12 @@ const tailScanBytes = 512 * 1024
 
 // ResolveUsageForCodex resolves usage from sessionId and/or cwd.
 func ResolveUsageForCodex(sessionID, cwd *string) *TokenUsage {
-	path := ResolveSessionFile(sessionID, cwd)
+	return ResolveUsageForCodexIn(codexHome(), sessionID, cwd)
+}
+
+// ResolveUsageForCodexIn is ResolveUsageForCodex scoped to one Codex home.
+func ResolveUsageForCodexIn(home string, sessionID, cwd *string) *TokenUsage {
+	path := ResolveSessionFileIn(home, sessionID, cwd)
 	if path == "" {
 		return nil
 	}

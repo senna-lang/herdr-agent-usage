@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/setup"
 )
 
@@ -62,5 +63,67 @@ func applyProfileGrouping(pl ProviderLimits, p claude.ClaudeProfile, multiProfil
 	} else {
 		pl.AccountLabel = pl.Label
 	}
+	return pl
+}
+
+// ResolvedCodexProfiles resolves the configured Codex profiles (synthesizing
+// the single implicit default when none are configured) from process env.
+func ResolvedCodexProfiles() []codex.CodexProfile {
+	return setup.ResolveCodexProfiles(processEnvMap())
+}
+
+func configuredCodexHomes() []string {
+	profiles := ResolvedCodexProfiles()
+	homes := make([]string, 0, len(profiles))
+	seen := map[string]bool{}
+	for _, p := range profiles {
+		if p.Home == "" || seen[p.Home] {
+			continue
+		}
+		seen[p.Home] = true
+		homes = append(homes, p.Home)
+	}
+	return homes
+}
+
+func resolveCodexSessionAcrossHomes(sessionID, cwd *string) string {
+	homes := configuredCodexHomes()
+	if sessionID != nil && *sessionID != "" {
+		for _, home := range homes {
+			if path := codex.FindSessionFileIn(home, *sessionID); path != "" {
+				return path
+			}
+			if path := codex.FindSessionFileByMetaIDIn(home, *sessionID); path != "" {
+				return path
+			}
+		}
+		return ""
+	}
+	// Cwd fallback is only safe for a single home: two accounts can share a
+	// project directory, so guessing across homes would misattribute the pane.
+	if len(homes) == 1 && cwd != nil && *cwd != "" {
+		return codex.FindLatestSessionFileForCwdIn(homes[0], *cwd)
+	}
+	return ""
+}
+
+func codexProfileByIDIn(profiles []codex.CodexProfile, id string) (codex.CodexProfile, bool) {
+	for _, p := range profiles {
+		if p.ID == id {
+			return p, true
+		}
+	}
+	return codex.CodexProfile{}, false
+}
+
+// applyCodexProfileGrouping nests pl under the shared "Codex" heading when
+// multiProfile is true. AccountLabel carries the configured label (or id);
+// auth.json has no email we are willing to decode here.
+func applyCodexProfileGrouping(pl ProviderLimits, p codex.CodexProfile, multiProfile bool) ProviderLimits {
+	if !multiProfile {
+		return pl
+	}
+	pl.GroupLabel = "Codex"
+	pl.AccountLabel = p.Label
 	return pl
 }

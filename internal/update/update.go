@@ -14,6 +14,7 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/provider"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 )
 
 // findClaudeProfile looks up one resolved profile by provider id.
@@ -24,6 +25,15 @@ func findClaudeProfile(profiles []claude.ClaudeProfile, id string) (claude.Claud
 		}
 	}
 	return claude.ClaudeProfile{}, false
+}
+
+func findCodexProfile(profiles []codex.CodexProfile, id string) (codex.CodexProfile, bool) {
+	for _, p := range profiles {
+		if p.ID == id {
+			return p, true
+		}
+	}
+	return codex.CodexProfile{}, false
 }
 
 // paneCwdForUpdate chooses the directory used to resolve agent-local session
@@ -188,7 +198,6 @@ func RunUpdate(force bool) {
 	// good metadata until a positive update arrives; settled and forced updates
 	// may still clear stale values.
 	retainExistingOnEmpty := !force && pane.AgentStatus != nil && *pane.AgentStatus == "working"
-
 	// Row 1 stands in for Herdr's built-in `tab`/`pane` tokens, which render
 	// blank whenever a tab keeps its auto-assigned numeric label and the
 	// pane was never renamed. Fall back through the workspace ("space")
@@ -209,12 +218,13 @@ func RunUpdate(force bool) {
 	}
 	snapshot := limits.OpenPaneSnapshot{PaneID: paneID, Agent: *pane.Agent, SessionID: sid, Cwd: cwd}
 
-	// Resolve which specific provider this pane belongs to. For claude this is
-	// profile-aware (session-transcript match across configured accounts);
-	// other agents resolve 1:1 with p.AgentID() as before. ok=false only
-	// happens for an ambiguous multi-profile claude pane.
+	// Resolve which specific provider this pane belongs to. Claude and Codex
+	// are profile-aware (session match across configured accounts); other
+	// agents resolve 1:1 with p.AgentID() as before. ok=false only happens
+	// for an ambiguous multi-profile pane.
 	claudeProfiles := limits.ResolvedClaudeProfiles()
-	providerID, resolved := limits.BuildClaudePaneProviderResolver(claudeProfiles)(snapshot)
+	codexProfiles := limits.ResolvedCodexProfiles()
+	providerID, resolved := limits.BuildHarnessPaneProviderResolver(claudeProfiles, codexProfiles)(snapshot)
 	if !resolved {
 		// Cannot tell which account this pane belongs to: clear rather than
 		// guess into the wrong account's limits/tokens.
@@ -247,17 +257,24 @@ func RunUpdate(force bool) {
 		providerLimits, totalTokens, totalCostUSD, nowMs,
 	)
 
-	// With 2+ configured Claude accounts, the $limit row's job shifts from
-	// "show the limit" to "show which account this pane is" (joined with
-	// $provider as "claude · you@example.com") since that's otherwise
-	// invisible in the sidebar. The limit percentage moves down into
-	// $context instead, as this pane's own account is already unambiguous.
-	multiProfile := *pane.Agent == "claude" && len(claudeProfiles) > 1
+	// With 2+ configured accounts of the same family, the $limit row's job
+	// shifts from "show the limit" to "show which account this pane is"
+	// since that's otherwise invisible in the sidebar. The limit percentage
+	// moves down into $context instead.
+	multiProfile := (*pane.Agent == "claude" && len(claudeProfiles) > 1) ||
+		(*pane.Agent == "codex" && len(codexProfiles) > 1)
 	accountText := ""
 	limitToken := limitText
 	if multiProfile {
-		if profile, ok := findClaudeProfile(claudeProfiles, providerID); ok {
-			accountText = resolveSidebarAccountLabel(profile)
+		switch *pane.Agent {
+		case "claude":
+			if profile, ok := findClaudeProfile(claudeProfiles, providerID); ok {
+				accountText = resolveSidebarAccountLabel(profile)
+			}
+		case "codex":
+			if profile, ok := findCodexProfile(codexProfiles, providerID); ok {
+				accountText = profile.Label
+			}
 		}
 		if accountText != "" {
 			limitToken = accountText
@@ -273,14 +290,25 @@ func RunUpdate(force bool) {
 	// root (bypassing the registry's default-root lookup) so a non-default
 	// account's context display doesn't fall back to ~/.claude/projects.
 	var usage *core.ContextUsage
-	if *pane.Agent == "claude" {
+	switch *pane.Agent {
+	case "claude":
 		if profile, ok := findClaudeProfile(claudeProfiles, providerID); ok && sid != nil {
 			if transcript := claude.ResolveUsageForSessionIn(profile.ProjectsRoot, *sid); transcript != nil {
 				u := claude.ToContextUsage(*transcript)
 				usage = &u
 			}
 		}
-	} else {
+	case "codex":
+		if profile, ok := findCodexProfile(codexProfiles, providerID); ok {
+			if extracted := codex.ResolveUsageForCodexIn(profile.Home, sid, cwd); extracted != nil {
+				u := core.ContextUsage{ContextTokens: extracted.ContextTokens}
+				if extracted.WindowTokens != nil {
+					u.WindowTokens = extracted.WindowTokens
+				}
+				usage = &u
+			}
+		}
+	default:
 		usage = p.ResolveUsage(provider.UsageResolveInput{
 			Session: pane.AgentSession,
 			Cwd:     cwd,

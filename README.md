@@ -219,6 +219,34 @@ config_dir = "~/.claude-work"  # started via CLAUDE_CONFIG_DIR=~/.claude-work cl
   account. `usagebar setup` lists the resolved profiles and warns when an entry
   was ignored or the default account is uncovered.
 
+### Multiple Codex accounts
+
+Add one `[[codex.profiles]]` block per `CODEX_HOME` to the plugin config. Each
+profile is collected from that home's rollouts and `auth.json`, so accounts
+never share readings. With no profile configured the plugin tracks a single
+account at `~/.codex` (unchanged behavior).
+
+```toml
+[[codex.profiles]]
+id = "codex"                   # provider id; must be unique
+label = "personal"             # optional, shown in the pane
+codex_home = "~/.codex"        # the default account
+
+[[codex.profiles]]
+id = "dev"
+label = "product"
+codex_home = "~/.codex-dev"    # started via CODEX_HOME=~/.codex-dev codex
+```
+
+- **Declare the default account too.** Bare `codex` sets no `CODEX_HOME` — the
+  convention is to set it only for *additional* accounts — so once any profile
+  exists, the account at `~/.codex` needs an entry of its own to be recorded.
+- `codex_home` may use `~`; it is expanded and each pane is matched to its
+  profile by the session file under that home. An unresolved multi-profile
+  pane is left unassigned rather than counted against the wrong account.
+- `usagebar setup` lists the resolved profiles and warns when an entry was
+  ignored or the default account is uncovered.
+
 ### Herdr toast delivery
 
 Required for notifications to appear on screen:

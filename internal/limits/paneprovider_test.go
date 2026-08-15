@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 )
 
 func writeTranscript(t *testing.T, root, projectDir, sessionID, body string) {
@@ -87,6 +88,66 @@ func TestBuildClaudePaneProviderResolver_MultiProfileNonClaudeUnaffected(t *test
 	id, ok := resolve(OpenPaneSnapshot{Agent: "grok"})
 	if !ok || id != "grok" {
 		t.Fatalf("ok=%v id=%q", ok, id)
+	}
+}
+
+func TestBuildCodexPaneProviderResolver_SingleProfileShortCircuits(t *testing.T) {
+	profiles := []codex.CodexProfile{{ID: "codex", Home: t.TempDir()}}
+	resolve := BuildCodexPaneProviderResolver(profiles)
+	id, ok := resolve(OpenPaneSnapshot{Agent: "codex"})
+	if !ok || id != "codex" {
+		t.Fatalf("ok=%v id=%q", ok, id)
+	}
+}
+
+func TestBuildCodexPaneProviderResolver_SingleCustomIDProfile(t *testing.T) {
+	profiles := []codex.CodexProfile{{ID: "dev", Home: t.TempDir()}}
+	resolve := BuildCodexPaneProviderResolver(profiles)
+	id, ok := resolve(OpenPaneSnapshot{Agent: "codex"})
+	if !ok || id != "dev" {
+		t.Fatalf("ok=%v id=%q, want dev", ok, id)
+	}
+}
+
+func TestBuildCodexPaneProviderResolver_MultiProfileMatchesBySession(t *testing.T) {
+	homeA := t.TempDir()
+	homeB := t.TempDir()
+	writeCodexRollout(t, homeB, "sess-b")
+
+	profiles := []codex.CodexProfile{
+		{ID: "codex", Home: homeA},
+		{ID: "dev", Home: homeB},
+	}
+	resolve := BuildCodexPaneProviderResolver(profiles)
+	sid := "sess-b"
+	id, ok := resolve(OpenPaneSnapshot{Agent: "codex", SessionID: &sid})
+	if !ok || id != "dev" {
+		t.Fatalf("ok=%v id=%q", ok, id)
+	}
+}
+
+func TestBuildCodexPaneProviderResolver_MultiProfileUnknownSessionRefuses(t *testing.T) {
+	profiles := []codex.CodexProfile{
+		{ID: "codex", Home: t.TempDir()},
+		{ID: "dev", Home: t.TempDir()},
+	}
+	resolve := BuildCodexPaneProviderResolver(profiles)
+	sid := "unknown-session"
+	_, ok := resolve(OpenPaneSnapshot{Agent: "codex", SessionID: &sid})
+	if ok {
+		t.Fatal("unresolved codex session must not attribute to any profile")
+	}
+}
+
+func writeCodexRollout(t *testing.T, home, sessionID string) {
+	t.Helper()
+	dir := filepath.Join(home, "sessions", "2026", "07", "12")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "rollout-2026-07-12T11-12-23-"+sessionID+".jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"session_meta"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

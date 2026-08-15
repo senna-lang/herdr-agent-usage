@@ -115,10 +115,33 @@ config_dir = "` + t.TempDir() + `"
 	}
 }
 
+func TestActiveProviderSet_CodexPaneActivatesAllConfiguredProfiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", dir)
+	toml := `
+[[codex.profiles]]
+id = "codex"
+codex_home = "` + t.TempDir() + `"
+
+[[codex.profiles]]
+id = "dev"
+codex_home = "` + t.TempDir() + `"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	panes := []OpenPaneSnapshot{{PaneID: "w1:p1", Agent: "codex"}}
+	got := ActiveProviderSet(panes)
+	if len(got) != 2 || !got["codex"] || !got["dev"] {
+		t.Fatalf("got %v, want {codex, dev}", got)
+	}
+}
+
 func TestActiveAndBillingFilters_RoutedOMPClaudeSurvivesIntersection(t *testing.T) {
 	profiles := []claude.ClaudeProfile{{ID: "claude"}}
 	panes := []OpenPaneSnapshot{{PaneID: "omp-claude", Agent: "omp"}}
-	active := activeProviderSetWith(profiles, panes, func(OpenPaneSnapshot) (string, bool) {
+	active := activeProviderSetWith(profiles, nil, panes, func(OpenPaneSnapshot) (string, bool) {
 		return "claude", true
 	})
 	billing := BillingProviderFilter(panes, true, BillingDeps{

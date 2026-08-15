@@ -3,8 +3,8 @@
  * Lives in a separate space from the main Herdr config.toml.
  *
  * Parsing uses a real TOML decoder (BurntSushi) so array-of-tables
- * ([[claude.profiles]]) is handled correctly; the seed body is still authored as
- * a string for readable inline comments.
+ * ([[claude.profiles]], [[codex.profiles]]) is handled correctly; the seed body
+ * is still authored as a string for readable inline comments.
  */
 package setup
 
@@ -16,6 +16,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 )
 
 // DefaultRemainingThresholds are the toast remaining-% buckets.
@@ -29,6 +30,9 @@ type PluginConfig struct {
 	// ClaudeProfiles are the configured [[claude.profiles]] entries (unresolved).
 	// Empty means the single implicit "claude" profile is synthesized downstream.
 	ClaudeProfiles []claude.ProfileSpec
+	// CodexProfiles are the configured [[codex.profiles]] entries (unresolved).
+	// Empty means the single implicit "codex" profile is synthesized downstream.
+	CodexProfiles []codex.ProfileSpec
 }
 
 // DefaultPluginConfig is the seed default.
@@ -46,6 +50,9 @@ type pluginConfigWire struct {
 	Claude struct {
 		Profiles []profileWire `toml:"profiles"`
 	} `toml:"claude"`
+	Codex struct {
+		Profiles []codexProfileWire `toml:"profiles"`
+	} `toml:"codex"`
 }
 
 type profileWire struct {
@@ -53,6 +60,12 @@ type profileWire struct {
 	Label          string `toml:"label"`
 	ConfigDir      string `toml:"config_dir"`
 	ClaudeJSONPath string `toml:"claude_json_path"`
+}
+
+type codexProfileWire struct {
+	ID        string `toml:"id"`
+	Label     string `toml:"label"`
+	CodexHome string `toml:"codex_home"`
 }
 
 // ResolvePluginConfigDir resolves the config directory.
@@ -115,6 +128,22 @@ func DefaultPluginConfigTOML(config PluginConfig) string {
 		"# label = \"Claude (secondary)\"",
 		"# config_dir = \"~/.claude-secondary\"",
 		"",
+		"# Multi-account Codex: uncomment and add one block per CODEX_HOME.",
+		"# Absence of any profile keeps the single default account at ~/.codex.",
+		"# Once any profile exists, declare the default account too: bare `codex`",
+		"# sets no CODEX_HOME, so ~/.codex is only recorded if a profile claims",
+		"# that dir. `usagebar setup` warns when it is uncovered.",
+		"#",
+		"# [[codex.profiles]]",
+		"# id = \"codex\"",
+		"# label = \"personal\"",
+		"# codex_home = \"~/.codex\"",
+		"#",
+		"# [[codex.profiles]]",
+		"# id = \"dev\"",
+		"# label = \"product\"",
+		"# codex_home = \"~/.codex-dev\"",
+		"",
 	}, "\n")
 }
 
@@ -159,6 +188,13 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 			JSONPath:  p.ClaudeJSONPath,
 		})
 	}
+	for _, p := range wire.Codex.Profiles {
+		cfg.CodexProfiles = append(cfg.CodexProfiles, codex.ProfileSpec{
+			ID:        p.ID,
+			Label:     p.Label,
+			CodexHome: p.CodexHome,
+		})
+	}
 	return cfg
 }
 
@@ -191,6 +227,24 @@ func ResolveActiveClaudeProfile(env map[string]string) (claude.ClaudeProfile, []
 	profiles := ResolveClaudeProfiles(env)
 	home, _ := os.UserHomeDir()
 	profile, ok := claude.ResolveActiveProfile(profiles, env["CLAUDE_CONFIG_DIR"], home)
+	return profile, profiles, ok
+}
+
+// ResolveCodexProfiles loads the plugin config and resolves its
+// [[codex.profiles]] into concrete profiles (synthesizing the single implicit
+// default when none are configured).
+func ResolveCodexProfiles(env map[string]string) []codex.CodexProfile {
+	cfg := LoadPluginConfig(ResolvePluginConfigDir(env))
+	home, _ := os.UserHomeDir()
+	return codex.ResolveProfiles(cfg.CodexProfiles, env, home)
+}
+
+// ResolveActiveCodexProfile picks the profile matching this process's
+// CODEX_HOME. Empty CODEX_HOME means the default ~/.codex account.
+func ResolveActiveCodexProfile(env map[string]string) (codex.CodexProfile, []codex.CodexProfile, bool) {
+	profiles := ResolveCodexProfiles(env)
+	home, _ := os.UserHomeDir()
+	profile, ok := codex.ResolveActiveProfile(profiles, env["CODEX_HOME"], home)
 	return profile, profiles, ok
 }
 

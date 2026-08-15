@@ -1,5 +1,5 @@
 /**
- * Renders the [[claude.profiles]] block of `usagebar setup`.
+ * Renders the [[claude.profiles]] and [[codex.profiles]] blocks of `usagebar setup`.
  *
  * Profile misconfiguration is silent at runtime: the status line still shows
  * correct numbers while nothing is cached for the account, so setup is the only
@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 )
 
 // claudeProfileReportLines renders the configured profiles and the warnings for
@@ -59,6 +60,49 @@ func claudeProfileReportLines(specs []claude.ProfileSpec, profiles []claude.Clau
 	if !coversDefault {
 		lines = append(lines, "  ! no profile has config_dir = "+defaultDir+
 			"; usage of the account started by bare `claude` (no CLAUDE_CONFIG_DIR) is not recorded")
+	}
+	return append(lines, "")
+}
+
+// codexProfileReportLines renders the configured Codex profiles and the warnings
+// for config that silently loses usage data. Same shape as the Claude report:
+// ValidProfileSpecCount distinguishes "no real config" from "config, but wrong".
+func codexProfileReportLines(specs []codex.ProfileSpec, profiles []codex.CodexProfile, home string) []string {
+	validCount := codex.ValidProfileSpecCount(specs, home)
+
+	if len(specs) == 0 {
+		return []string{
+			"· codex profiles: none configured; single default account: " + profiles[0].Home,
+			"",
+		}
+	}
+	if validCount == 0 {
+		return []string{
+			"· codex profiles: none configured; single default account: " + profiles[0].Home,
+			"  ! all " + itoa(len(specs)) + " [[codex.profiles]] entries were ignored:" +
+				" each needs an id and a unique, absolute codex_home",
+			"",
+		}
+	}
+
+	defaultDir := filepath.Join(home, ".codex")
+	lines := []string{"· codex profiles: " + itoa(len(profiles)) + " configured"}
+	coversDefault := false
+	for _, p := range profiles {
+		row := "    " + p.ID + "  " + p.Home
+		if p.Home == defaultDir {
+			coversDefault = true
+			row += "  (default account)"
+		}
+		lines = append(lines, row)
+	}
+	if dropped := len(specs) - validCount; dropped > 0 {
+		lines = append(lines, "  ! "+itoa(dropped)+" entr"+plural(dropped, "y", "ies")+
+			" ignored: each needs an id and a unique, absolute codex_home")
+	}
+	if !coversDefault {
+		lines = append(lines, "  ! no profile has codex_home = "+defaultDir+
+			"; usage of the account started by bare `codex` (no CODEX_HOME) is not recorded")
 	}
 	return append(lines, "")
 }

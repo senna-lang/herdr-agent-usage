@@ -34,12 +34,15 @@ func TestCollectAllProviderLimits_WithCollectorsAndAttach(t *testing.T) {
 				return ProviderLimits{ProviderID: "claude", Label: "Claude", Source: "test", FetchedAtMs: now}
 			},
 		}},
-		Codex: func(c *string, now int64) ProviderLimits {
-			if c == nil || *c != "/tmp" {
-				t.Fatal("cwd not passed")
-			}
-			return ProviderLimits{ProviderID: "codex", Label: "Codex", Source: "test", FetchedAtMs: now}
-		},
+		Codex: []CodexProfileCollector{{
+			ID: "codex", Label: "Codex",
+			Collector: func(c *string, now int64) ProviderLimits {
+				if c == nil || *c != "/tmp" {
+					t.Fatal("cwd not passed")
+				}
+				return ProviderLimits{ProviderID: "codex", Label: "Codex", Source: "test", FetchedAtMs: now}
+			},
+		}},
 		Attach: func(providers []ProviderLimits, nowMs int64) []ProviderLimits {
 			if nowMs != 200 || len(providers) != 4 {
 				t.Fatalf("attach args")
@@ -79,10 +82,13 @@ func TestCollectAllProviderLimits_OnlySkipsFilteredCollectors(t *testing.T) {
 	codexCalled := false
 	got := CollectAllProviderLimits(nil, 100, CollectOptions{
 		Only: map[string]bool{"claude": true},
-		Codex: func(_ *string, now int64) ProviderLimits {
-			codexCalled = true
-			return ProviderLimits{ProviderID: "codex", Label: "Codex", Source: "test", FetchedAtMs: now}
-		},
+		Codex: []CodexProfileCollector{{
+			ID: "codex", Label: "Codex",
+			Collector: func(_ *string, now int64) ProviderLimits {
+				codexCalled = true
+				return ProviderLimits{ProviderID: "codex", Label: "Codex", Source: "test", FetchedAtMs: now}
+			},
+		}},
 		Attach: func(providers []ProviderLimits, _ int64) []ProviderLimits {
 			if len(providers) != 1 {
 				t.Fatalf("attach got %d providers, want 1 (filtered)", len(providers))
@@ -217,5 +223,93 @@ func TestDefaultCollectOptions_SingleProfileNotGrouped(t *testing.T) {
 	}
 	if got.AccountLabel != "" {
 		t.Fatalf("single-profile mode should not set AccountLabel, got %q", got.AccountLabel)
+	}
+}
+
+func TestCollectAllProviderLimits_MultipleCodexProfiles(t *testing.T) {
+	got := CollectAllProviderLimits(nil, 100, CollectOptions{
+		Codex: []CodexProfileCollector{
+			{ID: "codex", Label: "personal", Collector: func(_ *string, now int64) ProviderLimits {
+				return ProviderLimits{ProviderID: "codex", Label: "personal", Source: "test-a", FetchedAtMs: now}
+			}},
+			{ID: "dev", Label: "product", Collector: func(_ *string, now int64) ProviderLimits {
+				return ProviderLimits{ProviderID: "dev", Label: "product", Source: "test-b", FetchedAtMs: now}
+			}},
+		},
+		Only: map[string]bool{"claude": true, "codex": true, "dev": true, "opencode": true, "grok": true},
+	})
+	if len(got) != 5 {
+		t.Fatalf("len=%d want 5: %+v", len(got), got)
+	}
+	if got[1].ProviderID != "codex" || got[1].Source != "test-a" {
+		t.Fatalf("profile 1 = %+v", got[1])
+	}
+	if got[2].ProviderID != "dev" || got[2].Source != "test-b" {
+		t.Fatalf("profile 2 = %+v", got[2])
+	}
+	if got[3].ProviderID != "opencode" {
+		t.Fatalf("opencode should follow all codex profiles, got %+v", got[3])
+	}
+}
+
+func TestCollectAllProviderLimits_CodexProfileFilteredByOnly(t *testing.T) {
+	devCalled := false
+	got := CollectAllProviderLimits(nil, 100, CollectOptions{
+		Codex: []CodexProfileCollector{
+			{ID: "codex", Label: "personal", Collector: func(_ *string, now int64) ProviderLimits {
+				return ProviderLimits{ProviderID: "codex", Label: "personal", Source: "test-a", FetchedAtMs: now}
+			}},
+			{ID: "dev", Label: "product", Collector: func(_ *string, now int64) ProviderLimits {
+				devCalled = true
+				return ProviderLimits{ProviderID: "dev", Label: "product", Source: "test-b", FetchedAtMs: now}
+			}},
+		},
+		Only: map[string]bool{"codex": true},
+	})
+	if len(got) != 1 || got[0].ProviderID != "codex" {
+		t.Fatalf("got %+v", got)
+	}
+	if devCalled {
+		t.Fatal("filtered-out profile's collector must not run")
+	}
+}
+
+func TestDefaultCollectOptions_MultiProfileGroupsEveryProfileUnderCodex(t *testing.T) {
+	pluginConfigDir := t.TempDir()
+	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", pluginConfigDir)
+	t.Setenv("HOME", t.TempDir())
+	dirPersonal := t.TempDir()
+	dirDev := t.TempDir()
+	toml := "[[codex.profiles]]\n" +
+		"id = \"codex\"\n" +
+		"label = \"personal\"\n" +
+		"codex_home = \"" + dirPersonal + "\"\n\n" +
+		"[[codex.profiles]]\n" +
+		"id = \"dev\"\n" +
+		"codex_home = \"" + dirDev + "\"\n"
+	if err := os.WriteFile(filepath.Join(pluginConfigDir, "config.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := DefaultCollectOptions()
+	if len(opts.Codex) != 2 {
+		t.Fatalf("want 2 codex collectors, got %d", len(opts.Codex))
+	}
+	if opts.Codex[0].Label != "personal" {
+		t.Fatalf("explicit label must be preserved, got %q", opts.Codex[0].Label)
+	}
+	got0 := opts.Codex[0].Collector(nil, 0)
+	if got0.GroupLabel != "Codex" {
+		t.Fatalf("labeled profile should be grouped under Codex, got %q", got0.GroupLabel)
+	}
+	if got0.AccountLabel != "personal" {
+		t.Fatalf("AccountLabel should be the profile label, got %q", got0.AccountLabel)
+	}
+	if opts.Codex[1].Label != "dev" {
+		t.Fatalf("unlabeled profile label should default to id, got %q", opts.Codex[1].Label)
+	}
+	got1 := opts.Codex[1].Collector(nil, 0)
+	if got1.GroupLabel != "Codex" || got1.AccountLabel != "dev" {
+		t.Fatalf("unlabeled profile grouping = %q/%q", got1.GroupLabel, got1.AccountLabel)
 	}
 }
