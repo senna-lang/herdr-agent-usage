@@ -22,6 +22,9 @@ package limits
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/providers"
+	claudeprovider "github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 )
 
 // BillingMode classifies how a pane/account is billed.
@@ -36,11 +39,26 @@ const (
 	BillingPayAsYouGo
 )
 
-// nonClaudeProviderIDs is the fixed non-Claude portion of the display-order
-// provider universe (matches collect.go). Claude's portion is dynamic — see
-// BillingDeps.ClaudeProfileIDs — since a multi-profile setup's billing gate
-// must consider each configured account independently.
-var nonClaudeProviderIDs = []string{"codex", "opencode", "grok"}
+// nonClaudeProviderIDs is the non-Claude portion of the display-order
+// provider universe (matches collect.go): every provider declaring
+// CapOwnsSubscriptionQuota except claude, whose portion is dynamic instead —
+// see BillingDeps.ClaudeProfileIDs — since a multi-profile setup's billing
+// gate must consider each configured account independently. Derived from
+// providers.Registrations rather than duplicated, so a newly registered
+// quota-owning provider is picked up here automatically.
+var nonClaudeProviderIDs = nonClaudeQuotaOwnerIDs()
+
+func nonClaudeQuotaOwnerIDs() []string {
+	claudeID := claudeprovider.Provider.AgentID()
+	ids := providers.IDsWithCapability(providers.CapOwnsSubscriptionQuota)
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != claudeID {
+			out = append(out, id)
+		}
+	}
+	return out
+}
 
 // CombineBillingModes merges account- and session-level evidence.
 // PayAsYouGo wins (positive evidence to hide), then Subscription.

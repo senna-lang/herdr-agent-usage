@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/senna-lang/herdr-agent-usage/internal/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/setup"
 )
 

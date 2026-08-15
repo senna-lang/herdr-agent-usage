@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/senna-lang/herdr-agent-usage/internal/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 )
 
 func writeTranscript(t *testing.T, root, projectDir, sessionID, body string) {

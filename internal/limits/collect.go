@@ -71,6 +71,21 @@ func DefaultCollectOptions() CollectOptions {
 	}
 }
 
+// nonClaudeQuotaSpecs pairs each non-Claude quota-owning provider id/label with
+// the CollectOptions field carrying its collector. This list's id set is
+// checked against providers.IDsWithCapability(CapOwnsSubscriptionQuota) by
+// TestNonClaudeQuotaSpecs_MatchCapabilityRegistrations, so a newly registered
+// quota-owning provider that isn't wired here fails that test instead of
+// silently never appearing in the panel.
+var nonClaudeQuotaSpecs = []struct {
+	id, label string
+	field     func(CollectOptions) LimitsCollector
+}{
+	{"codex", "Codex", func(o CollectOptions) LimitsCollector { return o.Codex }},
+	{"opencode", "OpenCode", func(o CollectOptions) LimitsCollector { return o.OpenCode }},
+	{"grok", "Grok", func(o CollectOptions) LimitsCollector { return o.Grok }},
+}
+
 // CollectAllProviderLimits runs collectors in display order: each configured
 // Claude profile (config order) -> Codex -> OpenCode -> Grok, then attaches
 // pane activity when configured. Providers excluded by opts.Only are skipped
@@ -95,7 +110,7 @@ func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []P
 		claudeSpecs = []ClaudeProfileCollector{{ID: "claude", Label: "Claude"}}
 	}
 
-	base := make([]ProviderLimits, 0, len(claudeSpecs)+3)
+	base := make([]ProviderLimits, 0, len(claudeSpecs)+len(nonClaudeQuotaSpecs))
 	for _, s := range claudeSpecs {
 		if opts.Only != nil && !opts.Only[s.ID] {
 			continue
@@ -103,19 +118,11 @@ func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []P
 		base = append(base, collect(s.Collector, s.ID, s.Label))
 	}
 
-	otherSpecs := []struct {
-		collector LimitsCollector
-		id, label string
-	}{
-		{opts.Codex, "codex", "Codex"},
-		{opts.OpenCode, "opencode", "OpenCode"},
-		{opts.Grok, "grok", "Grok"},
-	}
-	for _, s := range otherSpecs {
+	for _, s := range nonClaudeQuotaSpecs {
 		if opts.Only != nil && !opts.Only[s.id] {
 			continue
 		}
-		base = append(base, collect(s.collector, s.id, s.label))
+		base = append(base, collect(s.field(opts), s.id, s.label))
 	}
 
 	if opts.Attach != nil {

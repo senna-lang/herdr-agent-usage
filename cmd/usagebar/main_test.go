@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/senna-lang/herdr-agent-usage/internal/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/ratelimit"
 	"github.com/senna-lang/herdr-agent-usage/internal/setup"
 )

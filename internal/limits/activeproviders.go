@@ -6,7 +6,7 @@ package limits
 
 import "strings"
 
-import "github.com/senna-lang/herdr-agent-usage/internal/claude"
+import "github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 
 // ActiveProviderFilter builds the CollectOptions.Only filter from a pane
 // query result. When the query failed (paneQueryOK=false) it returns nil —

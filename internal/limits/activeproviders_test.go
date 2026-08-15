@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/senna-lang/herdr-agent-usage/internal/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 )
 
 // isolatePluginConfig points HERDR_PLUGIN_CONFIG_DIR at an empty temp dir so

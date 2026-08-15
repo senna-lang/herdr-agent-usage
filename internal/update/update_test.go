@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/senna-lang/herdr-agent-usage/internal/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/herdrcli"
 	"github.com/senna-lang/herdr-agent-usage/internal/limits"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 )
 
 func stringPtr(s string) *string { return &s }

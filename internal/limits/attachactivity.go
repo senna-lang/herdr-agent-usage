@@ -4,6 +4,8 @@
  */
 package limits
 
+import "github.com/senna-lang/herdr-agent-usage/internal/providers"
+
 // OpenPaneSnapshot is one open agent pane used for share aggregation.
 type OpenPaneSnapshot struct {
 	PaneID    string
@@ -13,18 +15,22 @@ type OpenPaneSnapshot struct {
 	Cwd       *string
 }
 
-// agent id -> ProviderLimits.providerId. Used as-is for the single-Claude-
-// profile default; when multiple Claude profiles are configured, claude
-// resolution instead goes through an injected PaneProviderResolver that can
-// tell profiles apart (see BuildClaudePaneProviderResolver), since "claude"
-// alone cannot say which profile a pane belongs to.
-var agentToProvider = map[string]string{
-	"claude":   "claude",
-	"codex":    "codex",
-	"opencode": "opencode",
-	"omp":      "omp",
-	"pi":       "pi",
-	"grok":     "grok",
+// agentToProvider maps a herdr pane agent id to ProviderLimits.providerId.
+// Derived from providers.Registrations (identity for every registered agent)
+// rather than duplicated, so a newly registered provider is picked up here
+// automatically. Used as-is for the single-Claude-profile default; when
+// multiple Claude profiles are configured, claude resolution instead goes
+// through an injected PaneProviderResolver that can tell profiles apart (see
+// BuildClaudePaneProviderResolver), since "claude" alone cannot say which
+// profile a pane belongs to.
+var agentToProvider = buildAgentToProvider()
+
+func buildAgentToProvider() map[string]string {
+	m := make(map[string]string, len(providers.All))
+	for _, p := range providers.All {
+		m[p.AgentID()] = p.AgentID()
+	}
+	return m
 }
 
 // PaneProviderResolver maps an open pane to the provider id its activity

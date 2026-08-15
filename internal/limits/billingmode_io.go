@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/senna-lang/herdr-agent-usage/internal/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"

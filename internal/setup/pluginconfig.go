@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/senna-lang/herdr-agent-usage/internal/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 )
 
 // DefaultRemainingThresholds are the toast remaining-% buckets.

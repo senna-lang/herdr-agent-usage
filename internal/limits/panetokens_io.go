@@ -10,8 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/senna-lang/herdr-agent-usage/internal/claude"
-	claudeprovider "github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
@@ -84,7 +83,7 @@ func BuildClaudePaneProviderResolver(profiles []claude.ClaudeProfile) PaneProvid
 			id, ok := agentToProvider[pane.Agent]
 			return id, ok
 		}
-		return claudeprovider.ResolveProfileForSession(sessionIDStr(pane), roots)
+		return claude.ResolveProfileForSession(sessionIDStr(pane), roots)
 	}
 }
 
@@ -317,7 +316,7 @@ func claudeTokensForPaneIn(root string, pane OpenPaneSnapshot, startMs, endMs in
 	if sid == "" {
 		return 0
 	}
-	path := claudeprovider.ResolveTranscriptPathForSessionIn(root, sid)
+	path := claude.ResolveTranscriptPathForSessionIn(root, sid)
 	if path == "" {
 		return 0
 	}

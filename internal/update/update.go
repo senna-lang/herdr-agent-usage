@@ -8,13 +8,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/senna-lang/herdr-agent-usage/internal/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
 	"github.com/senna-lang/herdr-agent-usage/internal/herdrcli"
 	"github.com/senna-lang/herdr-agent-usage/internal/limits"
 	"github.com/senna-lang/herdr-agent-usage/internal/provider"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers"
-	claudeprovider "github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 )
 
 // findClaudeProfile looks up one resolved profile by provider id.
@@ -276,8 +275,8 @@ func RunUpdate(force bool) {
 	var usage *core.ContextUsage
 	if *pane.Agent == "claude" {
 		if profile, ok := findClaudeProfile(claudeProfiles, providerID); ok && sid != nil {
-			if transcript := claudeprovider.ResolveUsageForSessionIn(profile.ProjectsRoot, *sid); transcript != nil {
-				u := claudeprovider.ToContextUsage(*transcript)
+			if transcript := claude.ResolveUsageForSessionIn(profile.ProjectsRoot, *sid); transcript != nil {
+				u := claude.ToContextUsage(*transcript)
 				usage = &u
 			}
 		}

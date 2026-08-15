@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/senna-lang/herdr-agent-usage/internal/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 )
 
 func reportText(specs []claude.ProfileSpec, home string) string {

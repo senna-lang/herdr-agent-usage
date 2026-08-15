@@ -1,6 +1,6 @@
 /**
  * Detects drift between our hardcoded Claude context-window map
- * (internal/claude/modelwindows.go) and LiteLLM's community-maintained
+ * (internal/providers/claude/modelwindows.go) and LiteLLM's community-maintained
  * model_prices_and_context_window.json, which tracks new Anthropic models and
  * window changes day-0.
  *
@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/senna-lang/herdr-agent-usage/internal/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 )
 
 const defaultLiteLLMURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
@@ -178,7 +178,7 @@ func sortedKeys(m map[string]modelEntry) []string {
 func report(mismatches, uncovered []string) string {
 	var b strings.Builder
 	b.WriteString("## Claude model-window drift detected\n\n")
-	b.WriteString("`scripts/modeldrift` compared `internal/claude/modelwindows.go` against ")
+	b.WriteString("`scripts/modeldrift` compared `internal/providers/claude/modelwindows.go` against ")
 	b.WriteString("[LiteLLM's model map](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) and found differences.\n\n")
 
 	if len(mismatches) > 0 {

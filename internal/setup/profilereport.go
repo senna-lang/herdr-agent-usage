@@ -12,7 +12,7 @@ package setup
 import (
 	"path/filepath"
 
-	"github.com/senna-lang/herdr-agent-usage/internal/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 )
 
 // claudeProfileReportLines renders the configured profiles and the warnings for
