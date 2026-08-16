@@ -10,8 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/senna-lang/herdr-agent-usage/internal/claude"
-	claudeprovider "github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
@@ -19,35 +18,32 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// DefaultPaneActivityDeps returns production token collectors, wired to
-// resolve Claude panes by profile (session-transcript match) when more than
-// one Claude profile is configured.
+// DefaultPaneActivityDeps resolves one profile snapshot per attach pass.
 func DefaultPaneActivityDeps() PaneActivityDeps {
-	// Resolve the profile snapshot once and share it across all three deps, so
-	// the whole AttachPaneActivity pass agrees on one profile set instead of
-	// the resolver and the token/total dispatch each re-resolving (which could
-	// also skew if config changed mid-pass).
 	profiles := ResolvedClaudeProfiles()
+	codexProfiles := ResolvedCodexProfiles()
+	grokProfiles := ResolvedGrokProfiles()
+	openCodeProfiles := ResolvedOpenCodeProfiles()
 	return PaneActivityDeps{
 		TokensForPane: func(providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
-			return tokensForPaneWith(profiles, providerID, pane, startMs, endMs)
+			return tokensForPaneWith(profiles, codexProfiles, grokProfiles, openCodeProfiles, providerID, pane, startMs, endMs)
 		},
 		TotalTokensForProvider: func(providerID string, startMs, endMs int64) float64 {
-			return totalTokensForProviderWith(profiles, providerID, startMs, endMs)
+			return totalTokensForProviderWith(profiles, codexProfiles, grokProfiles, openCodeProfiles, providerID, startMs, endMs)
 		},
-		ResolvePaneProvider: BuildPaneActivityProviderResolver(profiles),
+		ResolvePaneProvider: BuildPaneActivityProviderResolver(profiles, codexProfiles, grokProfiles, openCodeProfiles),
 	}
 }
 
 // BuildPaneActivityProviderResolver extends the normal harness resolver only
 // for the Limits pane's subscription activity: OMP/Pi subscription gateways
-// belong under their collector account.  Keep this separate from
-// BuildClaudePaneProviderResolver, which sidebar updates use to retain the
+// belong under their collector account. Keep this separate from
+// BuildHarnessPaneProviderResolver, which sidebar updates use to retain the
 // actual harness id before resolving its billing route.
-func BuildPaneActivityProviderResolver(profiles []claude.ClaudeProfile) PaneProviderResolver {
-	base := BuildClaudePaneProviderResolver(profiles)
+func BuildPaneActivityProviderResolver(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile, grokProfiles []grok.GrokProfile, openCodeProfiles []opencode.OpenCodeProfile) PaneProviderResolver {
+	base := BuildHarnessPaneProviderResolver(profiles, codexProfiles, grokProfiles, openCodeProfiles)
 	return func(pane OpenPaneSnapshot) (string, bool) {
-		if pane.Agent == "omp" || pane.Agent == "pi" || pane.Agent == "opencode" {
+		if pane.Agent == "omp" || pane.Agent == "pi" {
 			if route, ok := paneSubscriptionRoute(pane.Agent, pane); ok {
 				return route.CollectorProviderID, true
 			}
@@ -65,14 +61,41 @@ func BuildPaneActivityProviderResolver(profiles []claude.ClaudeProfile) PaneProv
 // profile's id directly rather than session matching — same cost as today,
 // but correct even when the lone profile has a custom id.
 func BuildClaudePaneProviderResolver(profiles []claude.ClaudeProfile) PaneProviderResolver {
+	return BuildHarnessPaneProviderResolver(profiles, nil, nil, nil)
+}
+
+// BuildHarnessPaneProviderResolver attributes profile-capable harness panes
+// from their own session stores and keeps static routing for other agents.
+func BuildHarnessPaneProviderResolver(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile, grokProfiles []grok.GrokProfile, openCodeProfiles []opencode.OpenCodeProfile) PaneProviderResolver {
+	claudeResolve := buildClaudeOnlyResolver(profiles)
+	codexResolve := BuildCodexPaneProviderResolver(codexProfiles)
+	grokResolve := BuildGrokPaneProviderResolver(grokProfiles)
+	openCodeResolve := BuildOpenCodePaneProviderResolver(openCodeProfiles)
+	return func(pane OpenPaneSnapshot) (string, bool) {
+		switch pane.Agent {
+		case "claude":
+			return claudeResolve(pane)
+		case "codex":
+			return codexResolve(pane)
+		case "grok":
+			return grokResolve(pane)
+		case "opencode":
+			return openCodeResolve(pane)
+		default:
+			id, ok := agentToProvider[pane.Agent]
+			return id, ok
+		}
+	}
+}
+
+func buildClaudeOnlyResolver(profiles []claude.ClaudeProfile) PaneProviderResolver {
 	if len(profiles) == 1 {
 		soleID := profiles[0].ID
 		return func(pane OpenPaneSnapshot) (string, bool) {
 			if pane.Agent == "claude" {
 				return soleID, true
 			}
-			id, ok := agentToProvider[pane.Agent]
-			return id, ok
+			return "", false
 		}
 	}
 	roots := make(map[string]string, len(profiles))
@@ -81,11 +104,113 @@ func BuildClaudePaneProviderResolver(profiles []claude.ClaudeProfile) PaneProvid
 	}
 	return func(pane OpenPaneSnapshot) (string, bool) {
 		if pane.Agent != "claude" {
-			id, ok := agentToProvider[pane.Agent]
-			return id, ok
+			return "", false
 		}
-		return claudeprovider.ResolveProfileForSession(sessionIDStr(pane), roots)
+		return claude.ResolveProfileForSession(sessionIDStr(pane), roots)
 	}
+}
+
+// BuildCodexPaneProviderResolver attributes Codex panes to the configured
+// profile matching their rollout. A single profile short-circuits to that id.
+func BuildCodexPaneProviderResolver(profiles []codex.CodexProfile) PaneProviderResolver {
+	if len(profiles) == 0 {
+		return func(pane OpenPaneSnapshot) (string, bool) {
+			if pane.Agent == "codex" {
+				return "codex", true
+			}
+			return "", false
+		}
+	}
+	if len(profiles) == 1 {
+		soleID := profiles[0].ID
+		return func(pane OpenPaneSnapshot) (string, bool) {
+			if pane.Agent == "codex" {
+				return soleID, true
+			}
+			return "", false
+		}
+	}
+	homes := make(map[string]string, len(profiles))
+	for _, p := range profiles {
+		homes[p.ID] = p.Home
+	}
+	return func(pane OpenPaneSnapshot) (string, bool) {
+		if pane.Agent != "codex" {
+			return "", false
+		}
+		return codex.ResolveProfileForSession(sessionIDStr(pane), homes)
+	}
+}
+
+func BuildGrokPaneProviderResolver(profiles []grok.GrokProfile) PaneProviderResolver {
+	if len(profiles) <= 1 {
+		id := "grok"
+		if len(profiles) == 1 {
+			id = profiles[0].ID
+		}
+		return func(pane OpenPaneSnapshot) (string, bool) { return id, pane.Agent == "grok" }
+	}
+	return func(pane OpenPaneSnapshot) (string, bool) {
+		if pane.Agent != "grok" {
+			return "", false
+		}
+		match := ""
+		for _, profile := range profiles {
+			if grok.ResolveSignalsPathIn(profile.Home, pane.SessionID, pane.Cwd) == "" {
+				continue
+			}
+			if match != "" {
+				return "", false
+			}
+			match = profile.ID
+		}
+		return match, match != ""
+	}
+}
+
+func BuildOpenCodePaneProviderResolver(profiles []opencode.OpenCodeProfile) PaneProviderResolver {
+	if len(profiles) <= 1 {
+		id := "opencode"
+		if len(profiles) == 1 {
+			id = profiles[0].ID
+		}
+		return func(pane OpenPaneSnapshot) (string, bool) { return id, pane.Agent == "opencode" }
+	}
+	return func(pane OpenPaneSnapshot) (string, bool) {
+		if pane.Agent != "opencode" {
+			return "", false
+		}
+		match := ""
+		for _, profile := range profiles {
+			if !openCodeProfileHasPane(profile, pane) {
+				continue
+			}
+			if match != "" {
+				return "", false
+			}
+			match = profile.ID
+		}
+		return match, match != ""
+	}
+}
+
+func openCodeProfileHasPane(profile opencode.OpenCodeProfile, pane OpenPaneSnapshot) bool {
+	path := opencode.ResolveOpenCodeDBPathIn(profile.DataDir)
+	if path == "" {
+		return false
+	}
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+
+	if sessionID := sessionIDStr(pane); sessionID != "" {
+		var found string
+		err := db.QueryRow(`SELECT id FROM session WHERE id = ?`, sessionID).Scan(&found)
+		return err == nil
+	}
+	return resolvePaneSessionID(db, pane) != ""
 }
 
 // TokensForPaneDefault sums windowed tokens for one open pane, counting only
@@ -96,13 +221,17 @@ func BuildClaudePaneProviderResolver(profiles []claude.ClaudeProfile) PaneProvid
 // "claude"), so Claude is dispatched by profile lookup rather than a switch
 // case: each profile's tokens are read from only its own transcript root.
 func TokensForPaneDefault(providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
-	return tokensForPaneWith(ResolvedClaudeProfiles(), providerID, pane, startMs, endMs)
+	return tokensForPaneWith(
+		ResolvedClaudeProfiles(), ResolvedCodexProfiles(), ResolvedGrokProfiles(), ResolvedOpenCodeProfiles(),
+		providerID, pane, startMs, endMs,
+	)
 }
 
-// tokensForPaneWith is TokensForPaneDefault dispatched against an explicit
-// profile snapshot (see DefaultPaneActivityDeps): Claude ids resolve their
-// transcript root from profiles, other agents via the static switch.
-func tokensForPaneWith(profiles []claude.ClaudeProfile, providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+func tokensForPaneWith(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile, grokProfiles []grok.GrokProfile, openCodeProfiles []opencode.OpenCodeProfile, providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+	if profile, ok := openCodeProfileByIDIn(openCodeProfiles, providerID); ok && !profile.Implicit && pane.Agent == "opencode" {
+		rows := opencodeSessionRowsForPaneIn(profile.DataDir, pane, startMs, endMs)
+		return SumOpenCodeProviderTokensInWindow(rows, "opencode-go", startMs, endMs)
+	}
 	if pane.Agent == "opencode" {
 		backendID := opencodePaneBackendID(pane)
 		if route, ok := paneSubscriptionRoute("opencode", pane); ok && route.CollectorProviderID == providerID {
@@ -126,9 +255,31 @@ func tokensForPaneWith(profiles []claude.ClaudeProfile, providerID string, pane 
 	if profile, ok := profileByIDIn(profiles, providerID); ok {
 		return claudeTokensForPaneIn(profile.ProjectsRoot, pane, startMs, endMs)
 	}
+	if profile, ok := codexProfileByIDIn(codexProfiles, providerID); ok {
+		return codexTokensForPaneIn(profile.Home, pane, startMs, endMs)
+	}
+	if pane.Agent == "grok" {
+		for _, profile := range grokProfiles {
+			if profile.ID == providerID {
+				if profile.Implicit {
+					return grokTokensForPane(pane, startMs, endMs)
+				}
+				return grokTokensForPaneIn(profile.Home, pane, startMs, endMs)
+			}
+		}
+	}
+	if pane.Agent == "opencode" {
+		for _, profile := range openCodeProfiles {
+			if profile.ID == providerID {
+				if profile.Implicit {
+					return opencodeTokensForPane(pane, "opencode-go", startMs, endMs)
+				}
+				rows := opencodeSessionRowsForPaneIn(profile.DataDir, pane, startMs, endMs)
+				return SumOpenCodeProviderTokensInWindow(rows, "opencode-go", startMs, endMs)
+			}
+		}
+	}
 	switch providerID {
-	case "codex":
-		return codexTokensForPane(pane, startMs, endMs)
 	case "opencode":
 		return opencodeTokensForPane(pane, "opencode-go", startMs, endMs)
 	case "omp":
@@ -157,6 +308,15 @@ func tokensForPaneWith(profiles []claude.ClaudeProfile, providerID string, pane 
 // costUSD is 0 when the harness records no local cost (Codex/Claude/Grok)
 // rather than when spend was genuinely zero.
 func PaneTotalUsage(providerID string, pane OpenPaneSnapshot, nowMs int64) (tokens float64, costUSD float64) {
+	if profile, ok := openCodeProfileByIDIn(ResolvedOpenCodeProfiles(), providerID); ok {
+		if profile.Implicit {
+			backendID := payAsYouGoBackendID(providerID, pane)
+			return opencodeActivityForPane(pane, backendID, 0, nowMs)
+		}
+		backendID := opencodePaneBackendIDIn(profile.DataDir, pane)
+		rows := opencodeSessionRowsForPaneIn(profile.DataDir, pane, 0, nowMs)
+		return SumOpenCodeActivityInWindow(rows, backendID, 0, nowMs)
+	}
 	if providerID == "opencode" {
 		backendID := payAsYouGoBackendID(providerID, pane)
 		return opencodeActivityForPane(pane, backendID, 0, nowMs)
@@ -174,6 +334,13 @@ func PaneTotalUsage(providerID string, pane OpenPaneSnapshot, nowMs int64) (toke
 // backend, unlike TokensForPaneDefault which restricts OpenCode to the
 // opencode-go subscription gateway for plan-budget accounting.
 func TokensForPaneAnyBackend(providerID string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+	if profile, ok := openCodeProfileByIDIn(ResolvedOpenCodeProfiles(), providerID); ok {
+		if profile.Implicit {
+			return opencodeTokensForPane(pane, "", startMs, endMs)
+		}
+		rows := opencodeSessionRowsForPaneIn(profile.DataDir, pane, startMs, endMs)
+		return SumOpenCodeProviderTokensInWindow(rows, "", startMs, endMs)
+	}
 	if providerID == "opencode" {
 		return opencodeTokensForPane(pane, "", startMs, endMs)
 	}
@@ -184,19 +351,41 @@ func TokensForPaneAnyBackend(providerID string, pane OpenPaneSnapshot, startMs, 
 // disk. Claude profile ids are dispatched by lookup (see TokensForPaneDefault)
 // so each profile's total is scanned from only its own transcript root.
 func TotalTokensForProviderDefault(providerID string, startMs, endMs int64) float64 {
-	return totalTokensForProviderWith(ResolvedClaudeProfiles(), providerID, startMs, endMs)
+	return totalTokensForProviderWith(
+		ResolvedClaudeProfiles(),
+		ResolvedCodexProfiles(),
+		ResolvedGrokProfiles(),
+		ResolvedOpenCodeProfiles(),
+		providerID,
+		startMs,
+		endMs,
+	)
 }
 
 // totalTokensForProviderWith is TotalTokensForProviderDefault dispatched against
 // an explicit profile snapshot (see DefaultPaneActivityDeps).
-func totalTokensForProviderWith(profiles []claude.ClaudeProfile, providerID string, startMs, endMs int64) float64 {
+func totalTokensForProviderWith(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile, grokProfiles []grok.GrokProfile, openCodeProfiles []opencode.OpenCodeProfile, providerID string, startMs, endMs int64) float64 {
 	routed := routedSubscriptionTotal(providerID, startMs, endMs)
 	if profile, ok := profileByIDIn(profiles, providerID); ok {
 		return claudeTotalIn(profile.ProjectsRoot, startMs, endMs) + routed
 	}
+	if profile, ok := codexProfileByIDIn(codexProfiles, providerID); ok {
+		return codexTotalIn(profile.Home, startMs, endMs) + routed
+	}
+	if profile, ok := grokProfileByIDIn(grokProfiles, providerID); ok {
+		if profile.Implicit {
+			return grokTotal(startMs, endMs) + routed
+		}
+		return grokTotalIn(profile.Home, startMs, endMs) + routed
+	}
+	if profile, ok := openCodeProfileByIDIn(openCodeProfiles, providerID); ok {
+		if profile.Implicit {
+			return openCodeTotal(startMs, endMs) + routed
+		}
+		return openCodeTotalIn(profile.DataDir, startMs, endMs) + routed
+	}
+
 	switch providerID {
-	case "codex":
-		return codexTotal(startMs, endMs) + routed
 	case "opencode":
 		return openCodeTotal(startMs, endMs) + routed
 	case "grok":
@@ -317,7 +506,7 @@ func claudeTokensForPaneIn(root string, pane OpenPaneSnapshot, startMs, endMs in
 	if sid == "" {
 		return 0
 	}
-	path := claudeprovider.ResolveTranscriptPathForSessionIn(root, sid)
+	path := claude.ResolveTranscriptPathForSessionIn(root, sid)
 	if path == "" {
 		return 0
 	}
@@ -328,7 +517,7 @@ func claudeTokensForPaneIn(root string, pane OpenPaneSnapshot, startMs, endMs in
 	return SumClaudeTokensInWindow(strings.Split(string(raw), "\n"), startMs, endMs)
 }
 
-func codexTokensForPane(pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+func codexTokensForPaneIn(home string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
 	var sid, cwd *string
 	if pane.SessionID != nil {
 		sid = pane.SessionID
@@ -336,7 +525,7 @@ func codexTokensForPane(pane OpenPaneSnapshot, startMs, endMs int64) float64 {
 	if pane.Cwd != nil {
 		cwd = pane.Cwd
 	}
-	path := codex.ResolveSessionFile(sid, cwd)
+	path := codex.ResolveSessionFileIn(home, sid, cwd)
 	if path == "" {
 		return 0
 	}
@@ -394,6 +583,36 @@ func opencodeSessionRowsForPane(pane OpenPaneSnapshot, startMs, endMs int64) []O
 	return list
 }
 
+func opencodeSessionRowsForPaneIn(dataDir string, pane OpenPaneSnapshot, startMs, endMs int64) []OpenCodeTokenRow {
+	dbPath := opencode.ResolveOpenCodeDBPathIn(dataDir)
+	if dbPath == "" {
+		return nil
+	}
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
+	if err != nil {
+		return nil
+	}
+	defer db.Close()
+	sessionID := resolvePaneSessionID(db, pane)
+	if sessionID == "" {
+		return nil
+	}
+	rows, err := db.Query(`SELECT data, time_created FROM message WHERE session_id = ? AND time_created >= ? AND time_created <= ?`, sessionID, startMs, endMs)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var list []OpenCodeTokenRow
+	for rows.Next() {
+		var data string
+		var createdAt int64
+		if rows.Scan(&data, &createdAt) == nil {
+			list = append(list, OpenCodeTokenRow{Data: data, TimeCreated: createdAt})
+		}
+	}
+	return list
+}
+
 // opencodeTokensForPane sums the pane session's windowed tokens for one
 // backend providerID ("" = all backends).
 func opencodeTokensForPane(pane OpenPaneSnapshot, backendID string, startMs, endMs int64) float64 {
@@ -417,6 +636,19 @@ func grokTokensForPane(pane OpenPaneSnapshot, startMs, endMs int64) float64 {
 		cwd = pane.Cwd
 	}
 	signals := grok.ResolveSignalsPath(sid, cwd)
+	if signals == "" {
+		return 0
+	}
+	updatesPath := strings.Replace(signals, "signals.json", "updates.jsonl", 1)
+	raw, err := os.ReadFile(updatesPath)
+	if err != nil {
+		return 0
+	}
+	return SumGrokTokensInWindow(strings.Split(string(raw), "\n"), startMs, endMs)
+}
+
+func grokTokensForPaneIn(home string, pane OpenPaneSnapshot, startMs, endMs int64) float64 {
+	signals := grok.ResolveSignalsPathIn(home, pane.SessionID, pane.Cwd)
 	if signals == "" {
 		return 0
 	}
@@ -489,9 +721,9 @@ func claudeTotalIn(root string, startMs, endMs int64) float64 {
 	return sum
 }
 
-func codexTotal(startMs, endMs int64) float64 {
+func codexTotalIn(home string, startMs, endMs int64) float64 {
 	var sum float64
-	for _, path := range ListNewestRolloutPaths(10_000) {
+	for _, path := range ListNewestRolloutPathsIn(home, 10_000) {
 		lines := readIfTouchedInWindow(path, startMs)
 		if lines == nil {
 			continue
@@ -534,6 +766,41 @@ func openCodeTotal(startMs, endMs int64) float64 {
 	return SumOpenCodeProviderTokensInWindow(list, "opencode-go", startMs, endMs)
 }
 
+func openCodeTotalIn(dataDir string, startMs, endMs int64) float64 {
+	dbPath := opencode.ResolveOpenCodeDBPathIn(dataDir)
+	if dbPath == "" {
+		return 0
+	}
+	if _, err := os.Stat(dbPath); err != nil {
+		return 0
+	}
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
+	if err != nil {
+		return 0
+	}
+	defer db.Close()
+	rows, err := db.Query(
+		`SELECT data, time_created FROM message
+		 WHERE time_created >= ? AND time_created <= ?
+		   AND json_valid(data)
+		   AND json_extract(data, '$.role') = 'assistant'`,
+		startMs, endMs,
+	)
+	if err != nil {
+		return 0
+	}
+	defer rows.Close()
+	var list []OpenCodeTokenRow
+	for rows.Next() {
+		var data string
+		var createdAt int64
+		if rows.Scan(&data, &createdAt) == nil {
+			list = append(list, OpenCodeTokenRow{Data: data, TimeCreated: createdAt})
+		}
+	}
+	return SumOpenCodeProviderTokensInWindow(list, "opencode-go", startMs, endMs)
+}
+
 func grokTotal(startMs, endMs int64) float64 {
 	home := os.Getenv("GROK_HOME")
 	if home == "" {
@@ -546,6 +813,23 @@ func grokTotal(startMs, endMs int64) float64 {
 		groupPath := filepath.Join(root, group)
 		for _, sid := range listDirSafe(groupPath) {
 			updates := filepath.Join(groupPath, sid, "updates.jsonl")
+			lines := readIfTouchedInWindow(updates, startMs)
+			if lines == nil {
+				continue
+			}
+			sum += SumGrokTokensInWindow(lines, startMs, endMs)
+		}
+	}
+	return sum
+}
+
+func grokTotalIn(home string, startMs, endMs int64) float64 {
+	root := filepath.Join(home, "sessions")
+	var sum float64
+	for _, group := range listDirSafe(root) {
+		groupPath := filepath.Join(root, group)
+		for _, sessionID := range listDirSafe(groupPath) {
+			updates := filepath.Join(groupPath, sessionID, "updates.jsonl")
 			lines := readIfTouchedInWindow(updates, startMs)
 			if lines == nil {
 				continue

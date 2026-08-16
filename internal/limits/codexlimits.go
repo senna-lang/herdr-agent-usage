@@ -112,9 +112,15 @@ func isFiniteF(n float64) bool {
 	return !math.IsNaN(n) && !math.IsInf(n, 0)
 }
 
-// ListNewestRolloutPaths returns up to max rollout paths by mtime desc.
+// ListNewestRolloutPaths returns up to max rollout paths by mtime desc
+// under the process CODEX_HOME (or ~/.codex).
 func ListNewestRolloutPaths(max int) []string {
-	root := filepath.Join(codexHome(), "sessions")
+	return ListNewestRolloutPathsIn(codexHome(), max)
+}
+
+// ListNewestRolloutPathsIn is ListNewestRolloutPaths scoped to one Codex home.
+func ListNewestRolloutPathsIn(home string, max int) []string {
+	root := filepath.Join(home, "sessions")
 	var matches []struct {
 		path    string
 		mtimeMs int64
@@ -208,7 +214,13 @@ func codexHome() string {
 // reading wins (see windowpool.go) — which is also what makes a Codex
 // subscription driven through another harness report real numbers at all.
 func CollectCodexLimits(_ *string, nowMs int64) ProviderLimits {
-	paths := ListNewestRolloutPaths(codexMaxRolloutsToScan)
+	return CollectCodexLimitsIn(codexHome(), "codex", "Codex", nowMs)
+}
+
+// CollectCodexLimitsIn collects one Codex home's windows and stamps them with
+// the given provider id/label so multi-profile rows stay independent.
+func CollectCodexLimitsIn(home, providerID, label string, nowMs int64) ProviderLimits {
+	paths := ListNewestRolloutPathsIn(home, codexMaxRolloutsToScan)
 	// Newest-first: take the first rollout that carries a rate_limits snapshot.
 	// A just-opened session has session_meta but no token_count yet, so the
 	// newest file is not always the one with data.
@@ -223,8 +235,8 @@ func CollectCodexLimits(_ *string, nowMs int64) ProviderLimits {
 		}
 		observedMs := rolloutObservedAtMs(path)
 		out := ProviderLimits{
-			ProviderID:  "codex",
-			Label:       "Codex",
+			ProviderID:  providerID,
+			Label:       label,
 			Primary:     extracted.Primary,
 			Secondary:   extracted.Secondary,
 			PlanType:    planlabels.CodexPlanLabel(extracted.PlanType),
@@ -235,28 +247,33 @@ func CollectCodexLimits(_ *string, nowMs int64) ProviderLimits {
 			note := "stale ~" + itoa(age) + "m ago"
 			out.Note = &note
 		}
-		if borrowed := borrowCodexWindows(nowMs); borrowed != nil && borrowed.FetchedAtMs > observedMs {
+		if borrowed := borrowCodexWindowsIn(home, providerID, label, nowMs); borrowed != nil && borrowed.FetchedAtMs > observedMs {
 			return *borrowed
 		}
 		return out
 	}
-	if borrowed := borrowCodexWindows(nowMs); borrowed != nil {
+	if borrowed := borrowCodexWindowsIn(home, providerID, label, nowMs); borrowed != nil {
 		return *borrowed
 	}
 	if len(paths) == 0 {
 		note := "no rollout jsonl under ~/.codex/sessions"
-		return ProviderLimits{ProviderID: "codex", Label: "Codex", Source: "none", FetchedAtMs: nowMs, Note: &note}
+		return ProviderLimits{ProviderID: providerID, Label: label, Source: "none", FetchedAtMs: nowMs, Note: &note}
 	}
 	note := "rollout found but no rate_limits in recent token_count"
-	return ProviderLimits{ProviderID: "codex", Label: "Codex", Source: "codex rollout", FetchedAtMs: nowMs, Note: &note}
+	return ProviderLimits{ProviderID: providerID, Label: label, Source: "codex rollout", FetchedAtMs: nowMs, Note: &note}
 }
 
-// borrowCodexWindows takes another agent's observation of this Codex account.
-// Signed in locally? Then the observation must belong to that same account.
-// Signed out, there is no identity to contradict, and the pool's own
-// single-account rule is what keeps the borrow honest.
-func borrowCodexWindows(nowMs int64) *ProviderLimits {
-	return borrowWindows("codex", "Codex", codex.AccountID(), nowMs)
+func borrowCodexWindowsIn(home, providerID, label string, nowMs int64) *ProviderLimits {
+	// Observations in the pool are stored under the family id "codex", not a
+	// profile id. Stamp the profile's own id/label after the lookup so a
+	// borrowed row still groups with that profile.
+	borrowed := borrowWindows("codex", label, codex.AccountIDIn(home), nowMs)
+	if borrowed == nil {
+		return nil
+	}
+	borrowed.ProviderID = providerID
+	borrowed.Label = label
+	return borrowed
 }
 
 // rolloutObservedAtMs is when the rollout last recorded a turn, i.e. when its

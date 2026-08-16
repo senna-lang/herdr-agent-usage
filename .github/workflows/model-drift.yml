@@ -1,4 +1,4 @@
-# Weekly check that internal/claude/modelwindows.go still agrees with LiteLLM's
+# Weekly check that internal/providers/claude/modelwindows.go still agrees with LiteLLM's
 # community-maintained model map (new Anthropic models, changed context
 # windows). scripts/modeldrift exits 0 (clean) / 1 (checker failed) / 2 (drift).
 # Drift opens or updates a single `model-drift` issue; a checker failure fails

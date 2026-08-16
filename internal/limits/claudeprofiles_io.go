@@ -1,6 +1,6 @@
 /**
- * Resolves the configured Claude profiles from the plugin config, shared by
- * the read-side collectors (panel, sidebar, notify, activity attribution).
+ * Resolves configured harness profiles from plugin config for read-side
+ * collectors, billing, sidebar context, and activity attribution.
  */
 package limits
 
@@ -8,7 +8,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/senna-lang/herdr-agent-usage/internal/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 	"github.com/senna-lang/herdr-agent-usage/internal/setup"
 )
 
@@ -63,4 +66,114 @@ func applyProfileGrouping(pl ProviderLimits, p claude.ClaudeProfile, multiProfil
 		pl.AccountLabel = pl.Label
 	}
 	return pl
+}
+
+// ResolvedCodexProfiles resolves the configured Codex profiles (synthesizing
+// the single implicit default when none are configured) from process env.
+func ResolvedCodexProfiles() []codex.CodexProfile {
+	return setup.ResolveCodexProfiles(processEnvMap())
+}
+
+func configuredCodexHomes() []string {
+	profiles := ResolvedCodexProfiles()
+	homes := make([]string, 0, len(profiles))
+	seen := map[string]bool{}
+	for _, p := range profiles {
+		if p.Home == "" || seen[p.Home] {
+			continue
+		}
+		seen[p.Home] = true
+		homes = append(homes, p.Home)
+	}
+	return homes
+}
+
+func resolveCodexSessionAcrossHomes(sessionID, cwd *string) string {
+	homes := configuredCodexHomes()
+	if sessionID != nil && *sessionID != "" {
+		for _, home := range homes {
+			if path := codex.FindSessionFileIn(home, *sessionID); path != "" {
+				return path
+			}
+			if path := codex.FindSessionFileByMetaIDIn(home, *sessionID); path != "" {
+				return path
+			}
+		}
+		return ""
+	}
+	// Cwd fallback is only safe for a single home: two accounts can share a
+	// project directory, so guessing across homes would misattribute the pane.
+	if len(homes) == 1 && cwd != nil && *cwd != "" {
+		return codex.FindLatestSessionFileForCwdIn(homes[0], *cwd)
+	}
+	return ""
+}
+
+func codexProfileByIDIn(profiles []codex.CodexProfile, id string) (codex.CodexProfile, bool) {
+	for _, p := range profiles {
+		if p.ID == id {
+			return p, true
+		}
+	}
+	return codex.CodexProfile{}, false
+}
+
+// applyCodexProfileGrouping nests pl under the shared "Codex" heading when
+// multiProfile is true. AccountLabel carries the configured label (or id);
+// auth.json has no email we are willing to decode here.
+func applyCodexProfileGrouping(pl ProviderLimits, p codex.CodexProfile, multiProfile bool) ProviderLimits {
+	if !multiProfile {
+		return pl
+	}
+	pl.GroupLabel = "Codex"
+	pl.AccountLabel = p.Label
+	return pl
+}
+
+// applyGrokProfileGrouping nests configured Grok accounts beneath one family
+// heading while retaining the configured account label on each row.
+func applyGrokProfileGrouping(pl ProviderLimits, profile grok.GrokProfile, multiProfile bool) ProviderLimits {
+	if !multiProfile {
+		return pl
+	}
+	pl.GroupLabel = "Grok"
+	pl.AccountLabel = profile.Label
+	return pl
+}
+
+// applyOpenCodeProfileGrouping nests configured OpenCode accounts beneath one
+// family heading while retaining the configured account label on each row.
+func applyOpenCodeProfileGrouping(pl ProviderLimits, profile opencode.OpenCodeProfile, multiProfile bool) ProviderLimits {
+	if !multiProfile {
+		return pl
+	}
+	pl.GroupLabel = "OpenCode"
+	pl.AccountLabel = profile.Label
+	return pl
+}
+
+func ResolvedGrokProfiles() []grok.GrokProfile {
+	return setup.ResolveGrokProfiles(processEnvMap())
+}
+
+func ResolvedOpenCodeProfiles() []opencode.OpenCodeProfile {
+	return setup.ResolveOpenCodeProfiles(processEnvMap())
+}
+
+func grokProfileByIDIn(profiles []grok.GrokProfile, id string) (grok.GrokProfile, bool) {
+	for _, profile := range profiles {
+		if profile.ID == id {
+			return profile, true
+		}
+	}
+	return grok.GrokProfile{}, false
+}
+
+func openCodeProfileByIDIn(profiles []opencode.OpenCodeProfile, id string) (opencode.OpenCodeProfile, bool) {
+	for _, profile := range profiles {
+		if profile.ID == id {
+			return profile, true
+		}
+	}
+	return opencode.OpenCodeProfile{}, false
 }

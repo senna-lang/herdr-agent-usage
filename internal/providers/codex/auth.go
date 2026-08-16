@@ -19,7 +19,15 @@ import (
 // or "" when Codex has never signed in on this machine — in which case there
 // is no local identity to check a borrowed observation against.
 func AccountID() string {
-	raw, err := os.ReadFile(filepath.Join(codexHome(), "auth.json"))
+	return AccountIDIn(codexHome())
+}
+
+// AccountIDIn reads auth.json under the given Codex home.
+func AccountIDIn(home string) string {
+	if home == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "auth.json"))
 	if err != nil {
 		return ""
 	}

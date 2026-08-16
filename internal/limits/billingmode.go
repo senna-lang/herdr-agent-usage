@@ -22,6 +22,13 @@ package limits
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/limitscore"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers"
+	claudeprovider "github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 )
 
 // BillingMode classifies how a pane/account is billed.
@@ -36,11 +43,29 @@ const (
 	BillingPayAsYouGo
 )
 
-// nonClaudeProviderIDs is the fixed non-Claude portion of the display-order
-// provider universe (matches collect.go). Claude's portion is dynamic — see
-// BillingDeps.ClaudeProfileIDs — since a multi-profile setup's billing gate
-// must consider each configured account independently.
-var nonClaudeProviderIDs = []string{"codex", "opencode", "grok"}
+// singleCollectorProviderIDs is the still-single portion of the display-order
+// provider universe: every provider declaring CapOwnsSubscriptionQuota except
+// the profile families (Claude, Codex), whose ids come from BillingDeps.
+// Derived from providers.Registrations rather than duplicated, so a newly
+// registered quota-owning provider is picked up here automatically.
+var singleCollectorProviderIDs = singleCollectorQuotaOwnerIDs()
+
+func singleCollectorQuotaOwnerIDs() []string {
+	profileFamilyIDs := map[string]bool{
+		claudeprovider.Provider.AgentID(): true,
+		codex.Provider.AgentID():          true,
+		grok.Provider.AgentID():           true,
+		opencode.Provider.AgentID():       true,
+	}
+	ids := providers.IDsWithCapability(providers.CapOwnsSubscriptionQuota)
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if !profileFamilyIDs[id] {
+			out = append(out, id)
+		}
+	}
+	return out
+}
 
 // CombineBillingModes merges account- and session-level evidence.
 // PayAsYouGo wins (positive evidence to hide), then Subscription.
@@ -68,51 +93,19 @@ func OpenCodeBillingModeFromProviderID(providerID *string) BillingMode {
 }
 
 // SubscriptionRoute identifies the quota collector and sidebar label for a
-// subscription gateway used inside another harness.  The harness and the
-// subscription are deliberately separate: OMP/Pi may execute through an
-// OpenCode Go or Grok login without themselves owning either quota.
-type SubscriptionRoute struct {
-	CollectorProviderID string
-	DisplayProviderID   string
-}
+// subscription gateway used inside another harness. Defined in
+// internal/limitscore because the window pool's AccountWindowsFromOMP also
+// needs it and must stay reachable from provider adapters (see
+// internal/limitscore/route.go).
+type SubscriptionRoute = limitscore.SubscriptionRoute
 
 // OMPPiSubscriptionRoute maps the provider id recorded in an OMP/Pi session
 // to one of the subscription collectors this plugin already implements.
-//
-// Keep this positive-evidence-only: an ordinary provider id such as
-// "anthropic" may mean an API key as well as an OAuth login, and must not be
-// guessed into a subscription account.
-func OMPPiSubscriptionRoute(backendID string) (SubscriptionRoute, bool) {
-	return SubscriptionRouteForProviderAuth(backendID, "")
-}
+var OMPPiSubscriptionRoute = limitscore.OMPPiSubscriptionRoute
 
 // SubscriptionRouteForProviderAuth maps a session provider plus its recorded
-// credential kind to one of this plugin's subscription collectors.  OAuth is
-// required for ambiguous provider ids such as "anthropic"; the same id with
-// an API key remains pay-as-you-go.
-func SubscriptionRouteForProviderAuth(backendID, credentialType string) (SubscriptionRoute, bool) {
-	backendID = strings.ToLower(strings.TrimSpace(backendID))
-	credentialType = strings.ToLower(strings.TrimSpace(credentialType))
-	switch strings.ToLower(strings.TrimSpace(backendID)) {
-	case "opencode-go":
-		return SubscriptionRoute{CollectorProviderID: "opencode", DisplayProviderID: "opencode-go"}, true
-	case "xai-oauth":
-		return SubscriptionRoute{CollectorProviderID: "grok", DisplayProviderID: "grok"}, true
-	case "anthropic":
-		if strings.Contains(credentialType, "oauth") {
-			return SubscriptionRoute{CollectorProviderID: "claude", DisplayProviderID: "claude"}, true
-		}
-	case "openai", "openai-codex":
-		if strings.Contains(credentialType, "oauth") {
-			return SubscriptionRoute{CollectorProviderID: "codex", DisplayProviderID: "codex"}, true
-		}
-	case "openai-codex-oauth":
-		return SubscriptionRoute{CollectorProviderID: "codex", DisplayProviderID: "codex"}, true
-	default:
-		return SubscriptionRoute{}, false
-	}
-	return SubscriptionRoute{}, false
-}
+// credential kind to one of this plugin's subscription collectors.
+var SubscriptionRouteForProviderAuth = limitscore.SubscriptionRouteForProviderAuth
 
 // CodexBillingModeFromLines inspects a rollout tail. A token_count event
 // carrying rate_limits proves a subscription backend (unless plan_type says
@@ -220,6 +213,15 @@ type BillingDeps struct {
 	// universe so each configured account is gated independently. Empty
 	// defaults to ["claude"] (today's single-profile behavior).
 	ClaudeProfileIDs []string
+	// CodexProfileIDs are the configured Codex profile ids, same role as
+	// ClaudeProfileIDs. Empty defaults to ["codex"].
+	CodexProfileIDs []string
+	// OpenCodeProfileIDs are the configured OpenCode profile ids. Empty defaults
+	// to ["opencode"].
+	OpenCodeProfileIDs []string
+	// GrokProfileIDs are the configured Grok profile ids. Empty defaults to
+	// ["grok"].
+	GrokProfileIDs []string
 	// ResolvePane maps one harness pane to its billed provider while retaining
 	// the harness id needed to read session-specific evidence.
 	ResolvePane func(pane OpenPaneSnapshot) (providerID, harnessID string, ok bool)
@@ -246,11 +248,27 @@ func PaneBillingMode(providerID string, pane OpenPaneSnapshot, deps BillingDeps)
 func BillingProviderFilter(openPanes []OpenPaneSnapshot, paneQueryOK bool, deps BillingDeps) map[string]bool {
 	claudeIDs := deps.ClaudeProfileIDs
 	if len(claudeIDs) == 0 {
-		claudeIDs = []string{"claude"}
+		claudeIDs = []string{claudeprovider.Provider.AgentID()}
 	}
-	allIDs := make([]string, 0, len(claudeIDs)+len(nonClaudeProviderIDs))
+	codexIDs := deps.CodexProfileIDs
+	if len(codexIDs) == 0 {
+		codexIDs = []string{codex.Provider.AgentID()}
+	}
+	openCodeIDs := deps.OpenCodeProfileIDs
+	if len(openCodeIDs) == 0 {
+		openCodeIDs = []string{opencode.Provider.AgentID()}
+	}
+	grokIDs := deps.GrokProfileIDs
+	if len(grokIDs) == 0 {
+		grokIDs = []string{grok.Provider.AgentID()}
+	}
+
+	allIDs := make([]string, 0, len(claudeIDs)+len(codexIDs)+len(openCodeIDs)+len(grokIDs)+len(singleCollectorProviderIDs))
 	allIDs = append(allIDs, claudeIDs...)
-	allIDs = append(allIDs, nonClaudeProviderIDs...)
+	allIDs = append(allIDs, codexIDs...)
+	allIDs = append(allIDs, openCodeIDs...)
+	allIDs = append(allIDs, grokIDs...)
+	allIDs = append(allIDs, singleCollectorProviderIDs...)
 
 	type billedPane struct {
 		harnessID string
@@ -270,6 +288,7 @@ func BillingProviderFilter(openPanes []OpenPaneSnapshot, paneQueryOK bool, deps 
 			}
 		}
 	}
+
 	set := make(map[string]bool)
 	for _, providerID := range allIDs {
 		account := BillingUnknown

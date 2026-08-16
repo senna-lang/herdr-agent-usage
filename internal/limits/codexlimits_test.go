@@ -267,6 +267,24 @@ func TestCollectCodexLimits_NoRolloutsAndNoObservation(t *testing.T) {
 	}
 }
 
+func TestCollectCodexLimitsIn_IndependentHomes(t *testing.T) {
+	personal := t.TempDir()
+	dev := t.TempDir()
+	now := time.Now()
+	writeRollout(t, personal, "personal", "/repo", 0, now)
+	writeRollout(t, dev, "dev", "/repo", 36, now)
+
+	gotPersonal := CollectCodexLimitsIn(personal, "codex", "personal", 1000)
+	gotDev := CollectCodexLimitsIn(dev, "dev", "product", 1000)
+
+	if gotPersonal.ProviderID != "codex" || gotPersonal.Primary == nil || gotPersonal.Primary.UsedPercentage != 0 {
+		t.Fatalf("personal = %+v", gotPersonal)
+	}
+	if gotDev.ProviderID != "dev" || gotDev.Label != "product" || gotDev.Primary == nil || gotDev.Primary.UsedPercentage != 36 {
+		t.Fatalf("dev = %+v", gotDev)
+	}
+}
+
 // A rollout is only as current as the turn that wrote it. Past
 // codexStaleAfterMinutes the snapshot is labeled rather than rendered as if it
 // were live; a fresh one must carry no warning at all.

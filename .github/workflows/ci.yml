@@ -2,12 +2,10 @@
 # govulncheck. Separate from release.yml, which only builds and publishes
 # tagged binaries.
 #
-# go-version is pinned to the 1.25 minor line but left patch-floating (not
-# go-version-file: go.mod, which resolves to the exact patch in the `go`
-# directive) so CI always builds against the latest 1.25.x stdlib patch —
-# otherwise govulncheck below would permanently flag CVEs already fixed
-# upstream. This narrows the noise; it doesn't eliminate it (new CVEs land
-# before a patch exists, and once 1.25 goes EOL it stops getting backports).
+# go-version is pinned to Go 1.25.13, the current patched release. Keep this
+# explicit: actions/setup-go resolved the minor-only version to 1.25.12 after
+# 1.25.13 shipped, leaving govulncheck to flag fixed stdlib CVEs. Advance this
+# pin as supported 1.25 patches are released.
 name: CI
 
 on:
@@ -29,7 +27,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.25'
+          go-version: '1.25.13'
 
       - name: Vet
         run: go vet ./...
@@ -56,7 +54,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.25'
+          go-version: '1.25.13'
 
       - uses: golangci/golangci-lint-action@v9
         with:
@@ -69,7 +67,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.25'
+          go-version: '1.25.13'
 
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

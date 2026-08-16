@@ -7,10 +7,11 @@
  * Collector integration and the SQLite reader are covered elsewhere; nothing
  * here touches disk.
  */
-package limits
+package limitscore
 
 import (
 	"math"
+	"strconv"
 	"testing"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
@@ -57,7 +58,7 @@ func wpMinutes(w *LimitWindow) string {
 	if w.WindowMinutes == nil {
 		return "<nil>"
 	}
-	return itoa(*w.WindowMinutes)
+	return strconv.Itoa(*w.WindowMinutes)
 }
 
 func TestSlotForLimitID(t *testing.T) {

@@ -59,6 +59,22 @@ func RunSetup(options SetupOptions) SetupReport {
 		ResolveClaudeProfiles(env),
 		home,
 	)...)
+	lines = append(lines, codexProfileReportLines(
+		pluginCfg.CodexProfiles,
+		ResolveCodexProfiles(env),
+		home,
+	)...)
+	lines = append(lines, grokProfileReportLines(
+		pluginCfg.GrokProfiles,
+		ResolveGrokProfiles(env),
+		home,
+	)...)
+	lines = append(lines, openCodeProfileReportLines(
+		pluginCfg.OpenCodeProfiles,
+		ResolveOpenCodeProfiles(env),
+		env,
+		home,
+	)...)
 
 	toastWrote := false
 	if options.WriteToast {

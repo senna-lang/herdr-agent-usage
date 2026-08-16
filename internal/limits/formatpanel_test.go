@@ -302,3 +302,33 @@ func TestFormatUsagePanel_SingleClaudeProfileNotGrouped(t *testing.T) {
 		t.Fatalf("single profile should not show an account email line:\n%s", text)
 	}
 }
+
+func TestFormatUsagePanel_GroupsMultipleCodexProfilesUnderSharedHeading(t *testing.T) {
+	providers := []ProviderLimits{
+		codexProfileSample("personal", 4),
+		codexProfileSample("product", 36),
+	}
+	text := FormatLimitsPanel(providers, 1_700_000_000_000, wide)
+	if strings.Count(text, "Codex") != 1 {
+		t.Fatalf("want exactly one Codex heading, got %d:\n%s", strings.Count(text, "Codex"), text)
+	}
+	for _, want := range []string{"personal", "product"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing account line %q:\n%s", want, text)
+		}
+	}
+}
+
+func codexProfileSample(accountLabel string, usedPct float64) ProviderLimits {
+	r1 := int64(2_000_000_000)
+	wm1 := 10080
+	return ProviderLimits{
+		ProviderID:   "codex-" + accountLabel,
+		Label:        "codex-" + accountLabel,
+		AccountLabel: accountLabel,
+		GroupLabel:   "Codex",
+		Primary:      &LimitWindow{UsedPercentage: usedPct, ResetsAt: &r1, WindowMinutes: &wm1},
+		Source:       "codex rollout",
+		FetchedAtMs:  1_700_000_000_000,
+	}
+}

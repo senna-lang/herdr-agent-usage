@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
 )
 
 const ioTestCwd = "/tmp/herdr-usage-smoke-cwd"
@@ -383,5 +385,31 @@ func TestOMPPath_DoesNotUseLatestSessionForIDOnlyPane(t *testing.T) {
 	got := ompSessionPath(OpenPaneSnapshot{SessionID: sp("opaque-session-id"), Cwd: sp(cwd)})
 	if got != "" {
 		t.Fatalf("got %q; ID-only session must not inherit another pane's transcript", got)
+	}
+}
+
+func TestPaneBillingModeWith_GrokProfileUsesConfiguredHome(t *testing.T) {
+	clearClaudeDeployEnv(t)
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, "config.toml"), `
+[model.work]
+model = "codellama"
+base_url = "http://localhost:11434/v1"
+`)
+	sessionID := "work-session"
+	writeGrokSession(t, home, sessionID, "work")
+	cwd := ioTestCwd
+	pane := OpenPaneSnapshot{Agent: "grok", SessionID: &sessionID, Cwd: &cwd}
+
+	mode := paneBillingModeWith(
+		nil,
+		nil,
+		[]grok.GrokProfile{{ID: "grok-work", Home: home}},
+		nil,
+		"grok-work",
+		pane,
+	)
+	if mode != BillingPayAsYouGo {
+		t.Fatalf("mode = %v, want PayAsYouGo", mode)
 	}
 }

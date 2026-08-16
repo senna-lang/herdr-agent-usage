@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/limitscore"
 )
 
 // PaneTokenRow is one open pane's windowed token total.
@@ -20,13 +22,7 @@ type PaneTokenRow struct {
 }
 
 // PaneActivityShare is a pane's share of provider activity.
-type PaneActivityShare struct {
-	PaneID string
-	Label  string
-	Tokens float64
-	// SharePercent is 0-100. Zero when the sum is zero.
-	SharePercent float64
-}
+type PaneActivityShare = limitscore.PaneActivityShare
 
 // shortPaneSuffix returns the trailing segment of a pane id (e.g. "w6:p1" -> "p1").
 func shortPaneSuffix(paneID string) string {
