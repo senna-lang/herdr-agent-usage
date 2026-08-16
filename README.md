@@ -247,6 +247,53 @@ codex_home = "~/.codex-dev"    # started via CODEX_HOME=~/.codex-dev codex
 - `usagebar setup` lists the resolved profiles and warns when an entry was
   ignored or the default account is uncovered.
 
+### Multiple Grok accounts
+
+Add one `[[grok.profiles]]` block per `GROK_HOME` to the plugin config. Each
+profile reads only that home's `auth.json` and session artifacts. With no
+profile configured the plugin keeps the existing single-account behavior.
+
+```toml
+[[grok.profiles]]
+id = "grok"
+label = "personal"
+grok_home = "~/.grok"          # the default account
+
+[[grok.profiles]]
+id = "grok-work"
+label = "work"
+grok_home = "~/.grok-work"     # start Grok with GROK_HOME=~/.grok-work
+```
+
+- Once any profile exists, declare the default `~/.grok` account explicitly.
+- `grok_home` may use `~`. In multi-profile mode, a pane is assigned only when
+  exactly one configured home contains its session; unknown or duplicate
+  matches are left unassigned.
+
+### Multiple OpenCode accounts
+
+Add one `[[opencode.profiles]]` block per OpenCode data directory. Each
+profile reads only its `opencode.db`; accounts never share session, token, or
+context attribution. With no profile configured the plugin uses
+`$XDG_DATA_HOME/opencode`, or `~/.local/share/opencode`.
+
+```toml
+[[opencode.profiles]]
+id = "opencode"
+label = "personal"
+data_dir = "~/.local/share/opencode"  # the default account
+
+[[opencode.profiles]]
+id = "opencode-work"
+label = "work"
+data_dir = "~/.local/share/opencode-work"
+```
+
+- Once any profile exists, declare the default data directory explicitly.
+- `data_dir` may use `~`. In multi-profile mode, a pane is assigned only when
+  exactly one configured database contains its session; unknown or duplicate
+  matches are left unassigned.
+
 ### Herdr toast delivery
 
 Required for notifications to appear on screen:

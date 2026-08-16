@@ -313,3 +313,40 @@ func TestDefaultCollectOptions_MultiProfileGroupsEveryProfileUnderCodex(t *testi
 		t.Fatalf("unlabeled profile grouping = %q/%q", got1.GroupLabel, got1.AccountLabel)
 	}
 }
+
+func TestCollectAllProviderLimits_MultipleGrokAndOpenCodeProfiles(t *testing.T) {
+	got := CollectAllProviderLimits(nil, 100, CollectOptions{
+		Grok: []GrokProfileCollector{
+			{ID: "grok-personal", Label: "Personal", Collector: func(_ *string, now int64) ProviderLimits {
+				return ProviderLimits{ProviderID: "grok-personal", Label: "Personal", Source: "grok-personal", FetchedAtMs: now}
+			}},
+			{ID: "grok-work", Label: "Work", Collector: func(_ *string, now int64) ProviderLimits {
+				return ProviderLimits{ProviderID: "grok-work", Label: "Work", Source: "grok-work", FetchedAtMs: now}
+			}},
+		},
+		OpenCode: []OpenCodeProfileCollector{
+			{ID: "opencode-personal", Label: "Personal", Collector: func(_ *string, now int64) ProviderLimits {
+				return ProviderLimits{ProviderID: "opencode-personal", Label: "Personal", Source: "opencode-personal", FetchedAtMs: now}
+			}},
+			{ID: "opencode-work", Label: "Work", Collector: func(_ *string, now int64) ProviderLimits {
+				return ProviderLimits{ProviderID: "opencode-work", Label: "Work", Source: "opencode-work", FetchedAtMs: now}
+			}},
+		},
+		Only: map[string]bool{
+			"grok-personal":     true,
+			"grok-work":         true,
+			"opencode-personal": true,
+			"opencode-work":     true,
+		},
+	})
+
+	if len(got) != 4 {
+		t.Fatalf("profiles = %+v", got)
+	}
+	want := []string{"opencode-personal", "opencode-work", "grok-personal", "grok-work"}
+	for i, providerID := range want {
+		if got[i].ProviderID != providerID || got[i].Source != providerID {
+			t.Fatalf("row %d = %+v, want %q", i, got[i], providerID)
+		}
+	}
+}

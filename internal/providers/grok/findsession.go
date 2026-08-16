@@ -265,3 +265,41 @@ func ResolveSignalsPath(sessionID, cwd *string) string {
 	// Last resort: id alone anywhere under sessions.
 	return FindSignalsPathBySessionID(latestID)
 }
+
+// ResolveSignalsPathIn resolves a pane only inside one configured GROK_HOME.
+// It never falls back to another profile's session store.
+func ResolveSignalsPathIn(home string, sessionID, cwd *string) string {
+	root := filepath.Join(home, "sessions")
+	if sessionID != nil && *sessionID != "" {
+		if cwd != nil && *cwd != "" {
+			path := filepath.Join(root, encodeCwd(*cwd), *sessionID, "signals.json")
+			if st, err := os.Stat(path); err == nil && st.Mode().IsRegular() {
+				return path
+			}
+		}
+		groups, err := os.ReadDir(root)
+		if err != nil {
+			return ""
+		}
+		for _, group := range groups {
+			path := filepath.Join(root, group.Name(), *sessionID, "signals.json")
+			if st, err := os.Stat(path); err == nil && st.Mode().IsRegular() {
+				return path
+			}
+		}
+		return ""
+	}
+	if cwd == nil || *cwd == "" {
+		return ""
+	}
+	group := filepath.Join(root, encodeCwd(*cwd))
+	id, _ := newestSessionInGroup(group)
+	if id == "" {
+		return ""
+	}
+	path := filepath.Join(group, id, "signals.json")
+	if st, err := os.Stat(path); err == nil && st.Mode().IsRegular() {
+		return path
+	}
+	return ""
+}

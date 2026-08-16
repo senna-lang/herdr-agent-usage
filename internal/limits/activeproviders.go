@@ -8,6 +8,8 @@ import "strings"
 
 import "github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 import "github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
+import "github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+import "github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 
 // ActiveProviderFilter builds the CollectOptions.Only filter from a pane
 // query result. When the query failed (paneQueryOK=false) it returns nil —
@@ -30,24 +32,34 @@ func ActiveProviderFilter(openPanes []OpenPaneSnapshot, paneQueryOK bool) map[st
 func ActiveProviderSet(openPanes []OpenPaneSnapshot) map[string]bool {
 	profiles := ResolvedClaudeProfiles()
 	codexProfiles := ResolvedCodexProfiles()
-	return activeProviderSetWith(profiles, codexProfiles, openPanes, func(pane OpenPaneSnapshot) (string, bool) {
-		providerID, _, ok := resolveBilledPane(profiles, codexProfiles, pane)
+	grokProfiles := ResolvedGrokProfiles()
+	openCodeProfiles := ResolvedOpenCodeProfiles()
+	return activeProviderSetWith(profiles, codexProfiles, grokProfiles, openCodeProfiles, openPanes, func(pane OpenPaneSnapshot) (string, bool) {
+		providerID, _, ok := resolveBilledPane(profiles, codexProfiles, grokProfiles, openCodeProfiles, pane)
 		return providerID, ok
 	})
 }
 
-func activeProviderSetWith(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile, openPanes []OpenPaneSnapshot, resolve func(OpenPaneSnapshot) (string, bool)) map[string]bool {
+func activeProviderSetWith(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile, grokProfiles []grok.GrokProfile, openCodeProfiles []opencode.OpenCodeProfile, openPanes []OpenPaneSnapshot, resolve func(OpenPaneSnapshot) (string, bool)) map[string]bool {
 	set := make(map[string]bool)
 	hasClaudePane := false
 	hasCodexPane := false
+	hasGrokPane := false
+	hasOpenCodePane := false
 	for _, pane := range openPanes {
 		agent := strings.ToLower(pane.Agent)
-		if agent == "claude" {
+		switch agent {
+		case "claude":
 			hasClaudePane = true
 			continue
-		}
-		if agent == "codex" {
+		case "codex":
 			hasCodexPane = true
+			continue
+		case "grok":
+			hasGrokPane = true
+			continue
+		case "opencode":
+			hasOpenCodePane = true
 			continue
 		}
 		if providerID, ok := resolve(pane); ok {
@@ -59,6 +71,14 @@ func activeProviderSetWith(profiles []claude.ClaudeProfile, codexProfiles []code
 				hasCodexPane = true
 				continue
 			}
+			if _, ok := grokProfileByIDIn(grokProfiles, providerID); ok {
+				hasGrokPane = true
+				continue
+			}
+			if _, ok := openCodeProfileByIDIn(openCodeProfiles, providerID); ok {
+				hasOpenCodePane = true
+				continue
+			}
 			for _, supportedID := range singleCollectorProviderIDs {
 				if providerID == supportedID {
 					set[providerID] = true
@@ -68,13 +88,23 @@ func activeProviderSetWith(profiles []claude.ClaudeProfile, codexProfiles []code
 		}
 	}
 	if hasClaudePane {
-		for _, p := range profiles {
-			set[p.ID] = true
+		for _, profile := range profiles {
+			set[profile.ID] = true
 		}
 	}
 	if hasCodexPane {
-		for _, p := range codexProfiles {
-			set[p.ID] = true
+		for _, profile := range codexProfiles {
+			set[profile.ID] = true
+		}
+	}
+	if hasGrokPane {
+		for _, profile := range grokProfiles {
+			set[profile.ID] = true
+		}
+	}
+	if hasOpenCodePane {
+		for _, profile := range openCodeProfiles {
+			set[profile.ID] = true
 		}
 	}
 	return set

@@ -89,6 +89,33 @@ codex_home = "/home/u/.codex-dev"
 	}
 }
 
+func TestParsePluginConfigTOML_GrokAndOpenCodeProfiles(t *testing.T) {
+	cfg := ParsePluginConfigTOML(`
+[[grok.profiles]]
+id = "grok-personal"
+label = "Grok Personal"
+grok_home = "/home/u/.grok-personal"
+
+[[opencode.profiles]]
+id = "opencode-work"
+label = "OpenCode Work"
+data_dir = "/home/u/.local/share/opencode-work"
+`)
+
+	if len(cfg.GrokProfiles) != 1 {
+		t.Fatalf("Grok profiles = %+v", cfg.GrokProfiles)
+	}
+	if got := cfg.GrokProfiles[0]; got.ID != "grok-personal" || got.Label != "Grok Personal" || got.GrokHome != "/home/u/.grok-personal" {
+		t.Fatalf("Grok profile = %+v", got)
+	}
+	if len(cfg.OpenCodeProfiles) != 1 {
+		t.Fatalf("OpenCode profiles = %+v", cfg.OpenCodeProfiles)
+	}
+	if got := cfg.OpenCodeProfiles[0]; got.ID != "opencode-work" || got.Label != "OpenCode Work" || got.DataDir != "/home/u/.local/share/opencode-work" {
+		t.Fatalf("OpenCode profile = %+v", got)
+	}
+}
+
 func TestParsePluginConfigTOML_NoProfilesByDefault(t *testing.T) {
 	cfg := ParsePluginConfigTOML(DefaultPluginConfigTOML(DefaultPluginConfig))
 	if len(cfg.ClaudeProfiles) != 0 {

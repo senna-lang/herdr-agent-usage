@@ -141,7 +141,7 @@ codex_home = "` + t.TempDir() + `"
 func TestActiveAndBillingFilters_RoutedOMPClaudeSurvivesIntersection(t *testing.T) {
 	profiles := []claude.ClaudeProfile{{ID: "claude"}}
 	panes := []OpenPaneSnapshot{{PaneID: "omp-claude", Agent: "omp"}}
-	active := activeProviderSetWith(profiles, nil, panes, func(OpenPaneSnapshot) (string, bool) {
+	active := activeProviderSetWith(profiles, nil, nil, nil, panes, func(OpenPaneSnapshot) (string, bool) {
 		return "claude", true
 	})
 	billing := BillingProviderFilter(panes, true, BillingDeps{

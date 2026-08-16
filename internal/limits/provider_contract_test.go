@@ -17,6 +17,9 @@ import (
 
 	"github.com/senna-lang/herdr-agent-usage/internal/providers"
 	claudeprovider "github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 )
 
 func sortedCopy(ids []string) []string {
@@ -59,13 +62,15 @@ func TestAgentToProvider_MatchesRegistrations(t *testing.T) {
 // billingmode.go's derived list: every still-single quota-owning provider must
 // be present, and no profile family must be.
 func TestSingleCollectorQuotaOwnerIDs_MatchCapabilityRegistrations(t *testing.T) {
-	skip := map[string]bool{
+	profileFamilies := map[string]bool{
 		claudeprovider.Provider.AgentID(): true,
-		"codex":                           true,
+		codex.Provider.AgentID():          true,
+		grok.Provider.AgentID():           true,
+		opencode.Provider.AgentID():       true,
 	}
 	var want []string
 	for _, id := range providers.IDsWithCapability(providers.CapOwnsSubscriptionQuota) {
-		if !skip[id] {
+		if !profileFamilies[id] {
 			want = append(want, id)
 		}
 	}
@@ -78,7 +83,9 @@ func TestSingleCollectorQuotaOwnerIDs_MatchCapabilityRegistrations(t *testing.T)
 func TestSingleCollectorQuotaSpecs_MatchCapabilityRegistrations(t *testing.T) {
 	profileFamilies := map[string]bool{
 		claudeprovider.Provider.AgentID(): true,
-		"codex":                           true,
+		codex.Provider.AgentID():          true,
+		grok.Provider.AgentID():           true,
+		opencode.Provider.AgentID():       true,
 	}
 	var want []string
 	for _, id := range providers.IDsWithCapability(providers.CapOwnsSubscriptionQuota) {

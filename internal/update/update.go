@@ -15,6 +15,8 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/providers"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 )
 
 // findClaudeProfile looks up one resolved profile by provider id.
@@ -34,6 +36,24 @@ func findCodexProfile(profiles []codex.CodexProfile, id string) (codex.CodexProf
 		}
 	}
 	return codex.CodexProfile{}, false
+}
+
+func findGrokProfile(profiles []grok.GrokProfile, id string) (grok.GrokProfile, bool) {
+	for _, profile := range profiles {
+		if profile.ID == id {
+			return profile, true
+		}
+	}
+	return grok.GrokProfile{}, false
+}
+
+func findOpenCodeProfile(profiles []opencode.OpenCodeProfile, id string) (opencode.OpenCodeProfile, bool) {
+	for _, profile := range profiles {
+		if profile.ID == id {
+			return profile, true
+		}
+	}
+	return opencode.OpenCodeProfile{}, false
 }
 
 // paneCwdForUpdate chooses the directory used to resolve agent-local session
@@ -218,13 +238,15 @@ func RunUpdate(force bool) {
 	}
 	snapshot := limits.OpenPaneSnapshot{PaneID: paneID, Agent: *pane.Agent, SessionID: sid, Cwd: cwd}
 
-	// Resolve which specific provider this pane belongs to. Claude and Codex
-	// are profile-aware (session match across configured accounts); other
-	// agents resolve 1:1 with p.AgentID() as before. ok=false only happens
-	// for an ambiguous multi-profile pane.
+	// Resolve which specific provider this pane belongs to. A multi-profile
+	// pane with no unique session-store match is intentionally left unresolved.
 	claudeProfiles := limits.ResolvedClaudeProfiles()
 	codexProfiles := limits.ResolvedCodexProfiles()
-	providerID, resolved := limits.BuildHarnessPaneProviderResolver(claudeProfiles, codexProfiles)(snapshot)
+	grokProfiles := limits.ResolvedGrokProfiles()
+	openCodeProfiles := limits.ResolvedOpenCodeProfiles()
+	providerID, resolved := limits.BuildHarnessPaneProviderResolver(
+		claudeProfiles, codexProfiles, grokProfiles, openCodeProfiles,
+	)(snapshot)
 	if !resolved {
 		// Cannot tell which account this pane belongs to: clear rather than
 		// guess into the wrong account's limits/tokens.
@@ -262,7 +284,9 @@ func RunUpdate(force bool) {
 	// since that's otherwise invisible in the sidebar. The limit percentage
 	// moves down into $context instead.
 	multiProfile := (*pane.Agent == "claude" && len(claudeProfiles) > 1) ||
-		(*pane.Agent == "codex" && len(codexProfiles) > 1)
+		(*pane.Agent == "codex" && len(codexProfiles) > 1) ||
+		(*pane.Agent == "grok" && len(grokProfiles) > 1) ||
+		(*pane.Agent == "opencode" && len(openCodeProfiles) > 1)
 	accountText := ""
 	limitToken := limitText
 	if multiProfile {
@@ -273,6 +297,14 @@ func RunUpdate(force bool) {
 			}
 		case "codex":
 			if profile, ok := findCodexProfile(codexProfiles, providerID); ok {
+				accountText = profile.Label
+			}
+		case "grok":
+			if profile, ok := findGrokProfile(grokProfiles, providerID); ok {
+				accountText = profile.Label
+			}
+		case "opencode":
+			if profile, ok := findOpenCodeProfile(openCodeProfiles, providerID); ok {
 				accountText = profile.Label
 			}
 		}
@@ -306,6 +338,22 @@ func RunUpdate(force bool) {
 					u.WindowTokens = extracted.WindowTokens
 				}
 				usage = &u
+			}
+		}
+	case "grok":
+		if profile, ok := findGrokProfile(grokProfiles, providerID); ok {
+			if profile.Implicit {
+				usage = p.ResolveUsage(provider.UsageResolveInput{Session: pane.AgentSession, Cwd: cwd})
+			} else {
+				usage = grok.ResolveUsageForGrokIn(profile.Home, sid, cwd)
+			}
+		}
+	case "opencode":
+		if profile, ok := findOpenCodeProfile(openCodeProfiles, providerID); ok {
+			if profile.Implicit {
+				usage = p.ResolveUsage(provider.UsageResolveInput{Session: pane.AgentSession, Cwd: cwd})
+			} else {
+				usage = opencode.ResolveUsageForOpenCodeIn(profile.DataDir, sid, cwd)
 			}
 		}
 	default:

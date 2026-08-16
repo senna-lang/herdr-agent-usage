@@ -106,3 +106,37 @@ func ResolveUsageForOpenCode(sessionID, cwd *string) *core.ContextUsage {
 
 	return usageForSessionID(db, id)
 }
+
+// ResolveUsageForOpenCodeIn resolves context usage from one configured data
+// directory and never consults OPENCODE_DB or OPENCODE_DATA_DIR.
+func ResolveUsageForOpenCodeIn(dataDir string, sessionID, cwd *string) *core.ContextUsage {
+	dbPath := ResolveOpenCodeDBPathIn(dataDir)
+	if dbPath == "" {
+		return nil
+	}
+	db, err := openReadonlyDB(dbPath)
+	if err != nil {
+		return nil
+	}
+	defer db.Close()
+
+	id := ""
+	if sessionID != nil {
+		id = *sessionID
+	}
+	if id == "" {
+		if cwd == nil || *cwd == "" {
+			return nil
+		}
+		id = resolveSessionIDByCwd(db, *cwd)
+	}
+	if id == "" {
+		return nil
+	}
+
+	var found int
+	if err := db.QueryRow(`SELECT 1 FROM session WHERE id = ? LIMIT 1`, id).Scan(&found); err != nil {
+		return nil
+	}
+	return usageForSessionID(db, id)
+}

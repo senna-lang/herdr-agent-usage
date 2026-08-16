@@ -10,6 +10,8 @@ import (
 
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 	"github.com/senna-lang/herdr-agent-usage/internal/setup"
 )
 
@@ -126,4 +128,52 @@ func applyCodexProfileGrouping(pl ProviderLimits, p codex.CodexProfile, multiPro
 	pl.GroupLabel = "Codex"
 	pl.AccountLabel = p.Label
 	return pl
+}
+
+// applyGrokProfileGrouping nests configured Grok accounts beneath one family
+// heading while retaining the configured account label on each row.
+func applyGrokProfileGrouping(pl ProviderLimits, profile grok.GrokProfile, multiProfile bool) ProviderLimits {
+	if !multiProfile {
+		return pl
+	}
+	pl.GroupLabel = "Grok"
+	pl.AccountLabel = profile.Label
+	return pl
+}
+
+// applyOpenCodeProfileGrouping nests configured OpenCode accounts beneath one
+// family heading while retaining the configured account label on each row.
+func applyOpenCodeProfileGrouping(pl ProviderLimits, profile opencode.OpenCodeProfile, multiProfile bool) ProviderLimits {
+	if !multiProfile {
+		return pl
+	}
+	pl.GroupLabel = "OpenCode"
+	pl.AccountLabel = profile.Label
+	return pl
+}
+
+func ResolvedGrokProfiles() []grok.GrokProfile {
+	return setup.ResolveGrokProfiles(processEnvMap())
+}
+
+func ResolvedOpenCodeProfiles() []opencode.OpenCodeProfile {
+	return setup.ResolveOpenCodeProfiles(processEnvMap())
+}
+
+func grokProfileByIDIn(profiles []grok.GrokProfile, id string) (grok.GrokProfile, bool) {
+	for _, profile := range profiles {
+		if profile.ID == id {
+			return profile, true
+		}
+	}
+	return grok.GrokProfile{}, false
+}
+
+func openCodeProfileByIDIn(profiles []opencode.OpenCodeProfile, id string) (opencode.OpenCodeProfile, bool) {
+	for _, profile := range profiles {
+		if profile.ID == id {
+			return profile, true
+		}
+	}
+	return opencode.OpenCodeProfile{}, false
 }

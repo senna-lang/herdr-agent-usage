@@ -41,3 +41,13 @@ func ResolveOpenCodeDBPath() string {
 	}
 	return ""
 }
+
+// ResolveOpenCodeDBPathIn returns the database owned by one configured
+// OPENCODE_DATA_DIR without consulting process-wide environment overrides.
+func ResolveOpenCodeDBPathIn(dataDir string) string {
+	path := filepath.Join(dataDir, "opencode.db")
+	if st, err := os.Stat(path); err == nil && st.Mode().IsRegular() {
+		return path
+	}
+	return ""
+}

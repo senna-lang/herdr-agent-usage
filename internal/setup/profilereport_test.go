@@ -10,6 +10,8 @@ import (
 
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 )
 
 func reportText(specs []claude.ProfileSpec, home string) string {
@@ -142,5 +144,33 @@ func TestCodexProfileReport_WarnsWhenDefaultAccountUncovered(t *testing.T) {
 	got := codexReportText(specs, home)
 	if !strings.Contains(got, "no profile has codex_home = "+filepath.Join(home, ".codex")) {
 		t.Fatalf("uncovered-default warning missing: %q", got)
+	}
+}
+
+func TestGrokProfileReport_ListsProfilesAndWarnsWhenDefaultUncovered(t *testing.T) {
+	home := "/home/u"
+	specs := []grok.ProfileSpec{{ID: "work", GrokHome: "/accounts/work"}}
+	profiles := grok.ResolveProfiles(specs, map[string]string{}, home)
+	report := strings.Join(grokProfileReportLines(specs, profiles, home), "\n")
+
+	if !strings.Contains(report, "work  /accounts/work") {
+		t.Fatalf("report = %q", report)
+	}
+	if !strings.Contains(report, "no profile has grok_home") {
+		t.Fatalf("missing uncovered-default warning: %q", report)
+	}
+}
+
+func TestOpenCodeProfileReport_ListsProfilesAndWarnsWhenDefaultUncovered(t *testing.T) {
+	home := "/home/u"
+	specs := []opencode.ProfileSpec{{ID: "work", DataDir: "/accounts/work"}}
+	profiles := opencode.ResolveProfiles(specs, map[string]string{}, home)
+	report := strings.Join(openCodeProfileReportLines(specs, profiles, map[string]string{}, home), "\n")
+
+	if !strings.Contains(report, "work  /accounts/work") {
+		t.Fatalf("report = %q", report)
+	}
+	if !strings.Contains(report, "no profile has data_dir") {
+		t.Fatalf("missing uncovered-default warning: %q", report)
 	}
 }

@@ -32,47 +32,76 @@ const statusLineCacheFreshMs = 7 * 24 * 60 * 60 * 1000
 // re-resolving config/env per pane.
 func DefaultBillingDeps() BillingDeps {
 	profiles := ResolvedClaudeProfiles()
-	ids := make([]string, len(profiles))
-	for i, p := range profiles {
-		ids[i] = p.ID
-	}
 	codexProfiles := ResolvedCodexProfiles()
-	codexIDs := make([]string, len(codexProfiles))
-	for i, p := range codexProfiles {
-		codexIDs[i] = p.ID
+	grokProfiles := ResolvedGrokProfiles()
+	openCodeProfiles := ResolvedOpenCodeProfiles()
+
+	ids := make([]string, len(profiles))
+	for i, profile := range profiles {
+		ids[i] = profile.ID
 	}
+	codexIDs := make([]string, len(codexProfiles))
+	for i, profile := range codexProfiles {
+		codexIDs[i] = profile.ID
+	}
+	grokIDs := make([]string, len(grokProfiles))
+	for i, profile := range grokProfiles {
+		grokIDs[i] = profile.ID
+	}
+	openCodeIDs := make([]string, len(openCodeProfiles))
+	for i, profile := range openCodeProfiles {
+		openCodeIDs[i] = profile.ID
+	}
+
 	return BillingDeps{
-		PaneMode: func(providerID string, pane OpenPaneSnapshot) BillingMode {
-			return paneBillingModeWith(profiles, codexProfiles, providerID, pane)
+		PaneMode: func(harnessID string, pane OpenPaneSnapshot) BillingMode {
+			providerID := harnessID
+			switch harnessID {
+			case "claude":
+				providerID, _ = BuildClaudePaneProviderResolver(profiles)(pane)
+			case "codex":
+				providerID, _ = BuildCodexPaneProviderResolver(codexProfiles)(pane)
+			case "grok":
+				providerID, _ = BuildGrokPaneProviderResolver(grokProfiles)(pane)
+			case "opencode":
+				providerID, _ = BuildOpenCodePaneProviderResolver(openCodeProfiles)(pane)
+			}
+			return paneBillingModeWith(profiles, codexProfiles, grokProfiles, openCodeProfiles, providerID, pane)
 		},
 		AccountMode: func(providerID string) BillingMode {
-			return accountBillingModeWith(profiles, providerID)
+			return accountBillingModeWith(profiles, grokProfiles, providerID)
 		},
-		ClaudeProfileIDs: ids,
-		CodexProfileIDs:  codexIDs,
+		ClaudeProfileIDs:   ids,
+		CodexProfileIDs:    codexIDs,
+		GrokProfileIDs:     grokIDs,
+		OpenCodeProfileIDs: openCodeIDs,
 		ResolvePane: func(pane OpenPaneSnapshot) (string, string, bool) {
-			return resolveBilledPane(profiles, codexProfiles, pane)
+			return resolveBilledPane(profiles, codexProfiles, grokProfiles, openCodeProfiles, pane)
 		},
 	}
 }
 
-func resolveBilledPane(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile, pane OpenPaneSnapshot) (providerID, harnessID string, ok bool) {
+func resolveBilledPane(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile, grokProfiles []grok.GrokProfile, openCodeProfiles []opencode.OpenCodeProfile, pane OpenPaneSnapshot) (providerID, harnessID string, ok bool) {
 	harnessID, ok = agentToProvider[strings.ToLower(pane.Agent)]
 	if !ok {
 		return "", "", false
 	}
-	if harnessID == "claude" {
+	switch harnessID {
+	case "claude":
 		providerID, ok = BuildClaudePaneProviderResolver(profiles)(pane)
-		return providerID, harnessID, ok
-	}
-	if harnessID == "codex" {
+	case "codex":
 		providerID, ok = BuildCodexPaneProviderResolver(codexProfiles)(pane)
-		return providerID, harnessID, ok
+	case "grok":
+		providerID, ok = BuildGrokPaneProviderResolver(grokProfiles)(pane)
+	case "opencode":
+		providerID, ok = BuildOpenCodePaneProviderResolver(openCodeProfiles)(pane)
+	default:
+		if route, routed := paneSubscriptionRoute(harnessID, pane); routed {
+			return route.CollectorProviderID, harnessID, true
+		}
+		return harnessID, harnessID, true
 	}
-	if route, routed := paneSubscriptionRoute(harnessID, pane); routed {
-		return route.CollectorProviderID, harnessID, true
-	}
-	return harnessID, harnessID, true
+	return providerID, harnessID, ok
 }
 
 // paneBillingModeWith dispatches by provider id against an explicit profile
@@ -80,13 +109,26 @@ func resolveBilledPane(profiles []claude.ClaudeProfile, codexProfiles []codex.Co
 // "claude") resolve via that profile's own ConfigDir rather than the ambient
 // CLAUDE_CONFIG_DIR — the read side (panel/sidebar) never sees that env var, so
 // per-profile billing detection must thread the resolved profile's paths.
-func paneBillingModeWith(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile, providerID string, pane OpenPaneSnapshot) BillingMode {
+func paneBillingModeWith(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile, grokProfiles []grok.GrokProfile, openCodeProfiles []opencode.OpenCodeProfile, providerID string, pane OpenPaneSnapshot) BillingMode {
 	if profile, ok := profileByIDIn(profiles, providerID); ok {
 		return claudePaneBillingModeIn(profile.ConfigDir, pane)
 	}
 	if profile, ok := codexProfileByIDIn(codexProfiles, providerID); ok {
 		return codexPaneBillingModeIn(profile.Home, pane)
 	}
+	if profile, ok := grokProfileByIDIn(grokProfiles, providerID); ok {
+		if profile.Implicit {
+			return grokPaneBillingMode(pane)
+		}
+		return grokPaneBillingModeIn(profile.Home, pane)
+	}
+	if profile, ok := openCodeProfileByIDIn(openCodeProfiles, providerID); ok {
+		if profile.Implicit {
+			return opencodePaneBillingMode(pane)
+		}
+		return opencodePaneBillingModeIn(profile.DataDir, pane)
+	}
+
 	switch providerID {
 	case "opencode":
 		if _, ok := paneSubscriptionRoute(providerID, pane); ok {
@@ -101,7 +143,7 @@ func paneBillingModeWith(profiles []claude.ClaudeProfile, codexProfiles []codex.
 		return opencodePaneBillingMode(pane)
 	case "omp", "pi":
 		if _, ok := paneSubscriptionRoute(providerID, pane); ok {
-			// The session records a known subscription gateway.  Its quota is
+			// The session records a known subscription gateway. Its quota is
 			// owned by that gateway's account, not by the OMP/Pi harness.
 			return BillingSubscription
 		}
@@ -138,9 +180,15 @@ func SubscriptionDisplayProviderID(providerID string, pane OpenPaneSnapshot) str
 	return providerID
 }
 
-func accountBillingModeWith(profiles []claude.ClaudeProfile, providerID string) BillingMode {
+func accountBillingModeWith(profiles []claude.ClaudeProfile, grokProfiles []grok.GrokProfile, providerID string) BillingMode {
 	if profile, ok := profileByIDIn(profiles, providerID); ok {
 		return claudeAccountBillingModeIn(profile.JSONPath, profile.LimitsCache, profile.ConfigDir)
+	}
+	if profile, ok := grokProfileByIDIn(grokProfiles, providerID); ok {
+		if profile.Implicit {
+			return grokAccountBillingMode()
+		}
+		return grokAccountBillingModeAt(filepath.Join(profile.Home, "auth.json"))
 	}
 	switch providerID {
 	case "grok":
@@ -155,6 +203,21 @@ func accountBillingModeWith(profiles []claude.ClaudeProfile, providerID string) 
 func opencodePaneBillingMode(pane OpenPaneSnapshot) BillingMode {
 	backendID := opencodePaneBackendID(pane)
 	if backendID == "" {
+		return BillingUnknown
+	}
+	return OpenCodeBillingModeFromProviderID(&backendID)
+}
+
+func opencodePaneBillingModeIn(dataDir string, pane OpenPaneSnapshot) BillingMode {
+	backendID := opencodePaneBackendIDIn(dataDir, pane)
+	if backendID == "" {
+		return BillingUnknown
+	}
+	credentialType := opencode.CredentialType(backendID)
+	if _, ok := SubscriptionRouteForProviderAuth(backendID, credentialType); ok {
+		return BillingSubscription
+	}
+	if strings.Contains(credentialType, "oauth") {
 		return BillingUnknown
 	}
 	return OpenCodeBillingModeFromProviderID(&backendID)
@@ -179,6 +242,27 @@ func payAsYouGoBackendID(providerID string, pane OpenPaneSnapshot) string {
 	if profile, ok := claudeProfileByID(providerID); ok {
 		return ResolveClaudeBackendID(loadClaudeEnvIn(profile.ConfigDir, cwdStr(pane)))
 	}
+	if profile, ok := grokProfileByIDIn(ResolvedGrokProfiles(), providerID); ok {
+		if profile.Implicit {
+			return resolveGrokBackendForPane(pane)
+		}
+		return resolveGrokBackendForPaneIn(profile.Home, pane)
+	}
+	if profile, ok := openCodeProfileByIDIn(ResolvedOpenCodeProfiles(), providerID); ok {
+		if profile.Implicit {
+			backendID := opencodePaneBackendID(pane)
+			if backendID == openCodeGoBackendID {
+				return ""
+			}
+			return backendID
+		}
+		backendID := opencodePaneBackendIDIn(profile.DataDir, pane)
+		if backendID == openCodeGoBackendID {
+			return ""
+		}
+		return backendID
+	}
+
 	switch providerID {
 	case "opencode":
 		backendID := opencodePaneBackendID(pane)
@@ -210,6 +294,10 @@ func claudePaneBillingModeIn(configDir string, pane OpenPaneSnapshot) BillingMod
 // non-xAI base_url in config.toml.
 func grokPaneBillingMode(pane OpenPaneSnapshot) BillingMode {
 	return GrokBillingModeFromBackendID(resolveGrokBackendForPane(pane))
+}
+
+func grokPaneBillingModeIn(home string, pane OpenPaneSnapshot) BillingMode {
+	return GrokBillingModeFromBackendID(resolveGrokBackendForPaneIn(home, pane))
 }
 
 // claudeEnvForPane merges process env, user settings, and project settings
@@ -299,6 +387,41 @@ func resolveGrokBackendForPane(pane OpenPaneSnapshot) string {
 	modelID := grokPaneModelID(pane)
 	models, base := loadGrokModelConfig()
 	return ResolveGrokBackendID(modelID, models, base)
+}
+
+func resolveGrokBackendForPaneIn(home string, pane OpenPaneSnapshot) string {
+	modelID := grokPaneModelIDIn(home, pane)
+	models, base := loadGrokModelConfigIn(home)
+	return ResolveGrokBackendID(modelID, models, base)
+}
+
+func grokPaneModelIDIn(home string, pane OpenPaneSnapshot) string {
+	signals := grok.ResolveSignalsPathIn(home, pane.SessionID, pane.Cwd)
+	if signals == "" {
+		return ""
+	}
+	// Prefer summary.json (cheap, authoritative current model).
+	summaryPath := strings.Replace(signals, "signals.json", "summary.json", 1)
+	if raw, err := os.ReadFile(summaryPath); err == nil {
+		if id := GrokModelIDFromSummaryJSON(string(raw)); id != "" {
+			return id
+		}
+	}
+	updatesPath := strings.Replace(signals, "signals.json", "updates.jsonl", 1)
+	raw, err := os.ReadFile(updatesPath)
+	if err != nil {
+		return ""
+	}
+	return GrokModelIDFromLines(strings.Split(string(raw), "\n"))
+}
+
+func loadGrokModelConfigIn(home string) (map[string]GrokModelConfig, string) {
+	raw, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil {
+		return nil, ""
+	}
+	body := string(raw)
+	return ParseGrokModelConfigs(body), ParseGrokModelsBaseURL(body)
 }
 
 func grokPaneModelID(pane OpenPaneSnapshot) string {
@@ -429,7 +552,19 @@ func codexPaneRolloutLines(pane OpenPaneSnapshot) []string {
 // most recent assistant message (by session id, else newest session in the
 // pane cwd). Empty when the DB, session, or message cannot be resolved.
 func opencodePaneBackendID(pane OpenPaneSnapshot) string {
-	dbPath := ResolveOpenCodeLimitsDBPath()
+	return opencodePaneBackendIDAt(ResolveOpenCodeLimitsDBPath(), pane)
+}
+
+// opencodePaneBackendIDIn reads a pane backend from one configured profile's
+// data directory and never consults the ambient OpenCode database.
+func opencodePaneBackendIDIn(dataDir string, pane OpenPaneSnapshot) string {
+	return opencodePaneBackendIDAt(opencode.ResolveOpenCodeDBPathIn(dataDir), pane)
+}
+
+func opencodePaneBackendIDAt(dbPath string, pane OpenPaneSnapshot) string {
+	if dbPath == "" {
+		return ""
+	}
 	if _, err := os.Stat(dbPath); err != nil {
 		return ""
 	}
@@ -504,7 +639,11 @@ func claudeAccountBillingModeIn(jsonPath, limitsCachePath, configDir string) Bil
 }
 
 func grokAccountBillingMode() BillingMode {
-	raw, err := os.ReadFile(ResolveGrokAuthPath())
+	return grokAccountBillingModeAt(ResolveGrokAuthPath())
+}
+
+func grokAccountBillingModeAt(authPath string) BillingMode {
+	raw, err := os.ReadFile(authPath)
 	if err != nil {
 		return BillingUnknown
 	}

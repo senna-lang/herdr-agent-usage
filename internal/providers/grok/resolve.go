@@ -25,3 +25,21 @@ func ResolveUsageForGrok(sessionID, cwd *string) *core.ContextUsage {
 	}
 	return UsageFromSignals(*signals)
 }
+
+// ResolveUsageForGrokIn resolves context usage from one configured GROK_HOME.
+// It does not consult GROK_HOME or another profile's session store.
+func ResolveUsageForGrokIn(home string, sessionID, cwd *string) *core.ContextUsage {
+	path := ResolveSignalsPathIn(home, sessionID, cwd)
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	signals, ok := ParseSignalsJSON(string(raw))
+	if !ok {
+		return nil
+	}
+	return UsageFromSignals(*signals)
+}

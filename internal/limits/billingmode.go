@@ -26,6 +26,9 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/limitscore"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers"
 	claudeprovider "github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 )
 
 // BillingMode classifies how a pane/account is billed.
@@ -48,14 +51,16 @@ const (
 var singleCollectorProviderIDs = singleCollectorQuotaOwnerIDs()
 
 func singleCollectorQuotaOwnerIDs() []string {
-	skip := map[string]bool{
+	profileFamilyIDs := map[string]bool{
 		claudeprovider.Provider.AgentID(): true,
-		"codex":                           true,
+		codex.Provider.AgentID():          true,
+		grok.Provider.AgentID():           true,
+		opencode.Provider.AgentID():       true,
 	}
 	ids := providers.IDsWithCapability(providers.CapOwnsSubscriptionQuota)
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
-		if !skip[id] {
+		if !profileFamilyIDs[id] {
 			out = append(out, id)
 		}
 	}
@@ -211,6 +216,12 @@ type BillingDeps struct {
 	// CodexProfileIDs are the configured Codex profile ids, same role as
 	// ClaudeProfileIDs. Empty defaults to ["codex"].
 	CodexProfileIDs []string
+	// OpenCodeProfileIDs are the configured OpenCode profile ids. Empty defaults
+	// to ["opencode"].
+	OpenCodeProfileIDs []string
+	// GrokProfileIDs are the configured Grok profile ids. Empty defaults to
+	// ["grok"].
+	GrokProfileIDs []string
 	// ResolvePane maps one harness pane to its billed provider while retaining
 	// the harness id needed to read session-specific evidence.
 	ResolvePane func(pane OpenPaneSnapshot) (providerID, harnessID string, ok bool)
@@ -237,15 +248,26 @@ func PaneBillingMode(providerID string, pane OpenPaneSnapshot, deps BillingDeps)
 func BillingProviderFilter(openPanes []OpenPaneSnapshot, paneQueryOK bool, deps BillingDeps) map[string]bool {
 	claudeIDs := deps.ClaudeProfileIDs
 	if len(claudeIDs) == 0 {
-		claudeIDs = []string{"claude"}
+		claudeIDs = []string{claudeprovider.Provider.AgentID()}
 	}
 	codexIDs := deps.CodexProfileIDs
 	if len(codexIDs) == 0 {
-		codexIDs = []string{"codex"}
+		codexIDs = []string{codex.Provider.AgentID()}
 	}
-	allIDs := make([]string, 0, len(claudeIDs)+len(codexIDs)+len(singleCollectorProviderIDs))
+	openCodeIDs := deps.OpenCodeProfileIDs
+	if len(openCodeIDs) == 0 {
+		openCodeIDs = []string{opencode.Provider.AgentID()}
+	}
+	grokIDs := deps.GrokProfileIDs
+	if len(grokIDs) == 0 {
+		grokIDs = []string{grok.Provider.AgentID()}
+	}
+
+	allIDs := make([]string, 0, len(claudeIDs)+len(codexIDs)+len(openCodeIDs)+len(grokIDs)+len(singleCollectorProviderIDs))
 	allIDs = append(allIDs, claudeIDs...)
 	allIDs = append(allIDs, codexIDs...)
+	allIDs = append(allIDs, openCodeIDs...)
+	allIDs = append(allIDs, grokIDs...)
 	allIDs = append(allIDs, singleCollectorProviderIDs...)
 
 	type billedPane struct {
@@ -266,6 +288,7 @@ func BillingProviderFilter(openPanes []OpenPaneSnapshot, paneQueryOK bool, deps 
 			}
 		}
 	}
+
 	set := make(map[string]bool)
 	for _, providerID := range allIDs {
 		account := BillingUnknown

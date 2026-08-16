@@ -17,6 +17,8 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 )
 
 // DefaultRemainingThresholds are the toast remaining-% buckets.
@@ -32,7 +34,9 @@ type PluginConfig struct {
 	ClaudeProfiles []claude.ProfileSpec
 	// CodexProfiles are the configured [[codex.profiles]] entries (unresolved).
 	// Empty means the single implicit "codex" profile is synthesized downstream.
-	CodexProfiles []codex.ProfileSpec
+	CodexProfiles    []codex.ProfileSpec
+	GrokProfiles     []grok.ProfileSpec
+	OpenCodeProfiles []opencode.ProfileSpec
 }
 
 // DefaultPluginConfig is the seed default.
@@ -53,6 +57,12 @@ type pluginConfigWire struct {
 	Codex struct {
 		Profiles []codexProfileWire `toml:"profiles"`
 	} `toml:"codex"`
+	Grok struct {
+		Profiles []grokProfileWire `toml:"profiles"`
+	} `toml:"grok"`
+	OpenCode struct {
+		Profiles []openCodeProfileWire `toml:"profiles"`
+	} `toml:"opencode"`
 }
 
 type profileWire struct {
@@ -66,6 +76,18 @@ type codexProfileWire struct {
 	ID        string `toml:"id"`
 	Label     string `toml:"label"`
 	CodexHome string `toml:"codex_home"`
+}
+
+type grokProfileWire struct {
+	ID       string `toml:"id"`
+	Label    string `toml:"label"`
+	GrokHome string `toml:"grok_home"`
+}
+
+type openCodeProfileWire struct {
+	ID      string `toml:"id"`
+	Label   string `toml:"label"`
+	DataDir string `toml:"data_dir"`
 }
 
 // ResolvePluginConfigDir resolves the config directory.
@@ -144,6 +166,18 @@ func DefaultPluginConfigTOML(config PluginConfig) string {
 		"# label = \"product\"",
 		"# codex_home = \"~/.codex-dev\"",
 		"",
+		"# Multi-account Grok: one GROK_HOME per profile.",
+		"# [[grok.profiles]]",
+		"# id = \"grok\"",
+		"# label = \"personal\"",
+		"# grok_home = \"~/.grok\"",
+		"#",
+		"# Multi-account OpenCode: one OPENCODE_DATA_DIR per profile.",
+		"# [[opencode.profiles]]",
+		"# id = \"opencode\"",
+		"# label = \"personal\"",
+		"# data_dir = \"~/.local/share/opencode\"",
+		"",
 	}, "\n")
 }
 
@@ -194,6 +228,12 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 			Label:     p.Label,
 			CodexHome: p.CodexHome,
 		})
+	}
+	for _, p := range wire.Grok.Profiles {
+		cfg.GrokProfiles = append(cfg.GrokProfiles, grok.ProfileSpec{ID: p.ID, Label: p.Label, GrokHome: p.GrokHome})
+	}
+	for _, p := range wire.OpenCode.Profiles {
+		cfg.OpenCodeProfiles = append(cfg.OpenCodeProfiles, opencode.ProfileSpec{ID: p.ID, Label: p.Label, DataDir: p.DataDir})
 	}
 	return cfg
 }
@@ -246,6 +286,18 @@ func ResolveActiveCodexProfile(env map[string]string) (codex.CodexProfile, []cod
 	home, _ := os.UserHomeDir()
 	profile, ok := codex.ResolveActiveProfile(profiles, env["CODEX_HOME"], home)
 	return profile, profiles, ok
+}
+
+func ResolveGrokProfiles(env map[string]string) []grok.GrokProfile {
+	cfg := LoadPluginConfig(ResolvePluginConfigDir(env))
+	home, _ := os.UserHomeDir()
+	return grok.ResolveProfiles(cfg.GrokProfiles, env, home)
+}
+
+func ResolveOpenCodeProfiles(env map[string]string) []opencode.OpenCodeProfile {
+	cfg := LoadPluginConfig(ResolvePluginConfigDir(env))
+	home, _ := os.UserHomeDir()
+	return opencode.ResolveProfiles(cfg.OpenCodeProfiles, env, home)
 }
 
 // LoadPluginConfig loads config.toml or returns defaults.
