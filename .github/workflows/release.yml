@@ -19,8 +19,9 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          # Match CI: use the latest supported Go 1.25 patch release.
-          go-version: '1.25'
+          # Keep the release verifier on CI's current patched Go release.
+          # A minor-only selector can resolve an older vulnerable patch.
+          go-version: '1.25.13'
 
       - name: Vet
         run: go vet ./...
@@ -55,7 +56,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: '1.25.13'
 
       - name: Cross-compile
         run: |
