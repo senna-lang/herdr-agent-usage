@@ -50,7 +50,7 @@ type CollectOptions struct {
 }
 
 // DefaultCollectOptions wires production local collectors (no network), one
-// Claude/Codex collector per configured profile.
+// collector per configured Claude, Codex, Grok, or OpenCode profile.
 func DefaultCollectOptions() CollectOptions {
 	profiles := ResolvedClaudeProfiles()
 	multiProfile := len(profiles) > 1

@@ -329,6 +329,33 @@ func TestBuildOpenCodePaneProviderResolver_MultiProfileRejectsUnknownSession(t *
 	}
 }
 
+func TestBuildPaneActivityProviderResolver_OpenCodeProfilesIgnoreAmbientRoute(t *testing.T) {
+	personalDir := t.TempDir()
+	workDir := t.TempDir()
+	ambientDir := t.TempDir()
+	const sessionID = "session-work"
+	const cwd = "/work/project"
+
+	writeOpenCodeSession(t, workDir, sessionID, cwd)
+	writeOpenCodeSession(t, ambientDir, sessionID, cwd)
+	writeOpenCodeUsage(t, ambientDir, sessionID, 10)
+	t.Setenv("OPENCODE_DB", filepath.Join(ambientDir, "opencode.db"))
+
+	resolve := BuildPaneActivityProviderResolver(
+		nil,
+		nil,
+		nil,
+		[]opencode.OpenCodeProfile{
+			{ID: "opencode-personal", DataDir: personalDir},
+			{ID: "opencode-work", DataDir: workDir},
+		},
+	)
+	got, ok := resolve(OpenPaneSnapshot{Agent: "opencode", SessionID: strPtr(sessionID)})
+	if !ok || got != "opencode-work" {
+		t.Fatalf("ok=%v provider=%q, want opencode-work", ok, got)
+	}
+}
+
 func TestTokensForPaneDefault_OpenCodeProfileReadsOnlyItsDatabase(t *testing.T) {
 	pluginConfigDir := t.TempDir()
 	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", pluginConfigDir)

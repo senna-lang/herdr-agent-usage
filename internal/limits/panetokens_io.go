@@ -43,7 +43,7 @@ func DefaultPaneActivityDeps() PaneActivityDeps {
 func BuildPaneActivityProviderResolver(profiles []claude.ClaudeProfile, codexProfiles []codex.CodexProfile, grokProfiles []grok.GrokProfile, openCodeProfiles []opencode.OpenCodeProfile) PaneProviderResolver {
 	base := BuildHarnessPaneProviderResolver(profiles, codexProfiles, grokProfiles, openCodeProfiles)
 	return func(pane OpenPaneSnapshot) (string, bool) {
-		if pane.Agent == "omp" || pane.Agent == "pi" || pane.Agent == "opencode" {
+		if pane.Agent == "omp" || pane.Agent == "pi" {
 			if route, ok := paneSubscriptionRoute(pane.Agent, pane); ok {
 				return route.CollectorProviderID, true
 			}

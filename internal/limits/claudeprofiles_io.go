@@ -1,6 +1,6 @@
 /**
- * Resolves the configured Claude profiles from the plugin config, shared by
- * the read-side collectors (panel, sidebar, notify, activity attribution).
+ * Resolves configured harness profiles from plugin config for read-side
+ * collectors, billing, sidebar context, and activity attribution.
  */
 package limits
 
