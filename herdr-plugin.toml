@@ -3,7 +3,7 @@ name = "Agent Usage"
 version = "0.5.10"
 # Configurable sidebar rows and metadata tokens landed in Herdr 0.7.4.
 min_herdr_version = "0.7.4"
-description = "Sidebar context meters, provider limit windows, and rate-limit toasts for Claude, Codex, OpenCode Go, OMP, Pi coding agent, and Grok"
+description = "Sidebar context meters, provider limit windows, and rate-limit toasts for Claude, Codex, OpenCode Go, OMP, Pi coding agent, and Grok, plus context meters for Cursor"
 platforms = ["macos", "linux"]
 
 # Runs on every `herdr plugin install` (including reinstall/update — there is

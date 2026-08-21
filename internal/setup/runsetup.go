@@ -135,6 +135,7 @@ func RunSetup(options SetupOptions) SetupReport {
 		`  "command": "bash `+root+`/bin/run-statusline.sh"`,
 		"",
 	)
+	lines = append(lines, cursorSetupLines(root)...)
 
 	return SetupReport{Lines: lines, PluginConfigSeeded: seeded, ToastWrote: toastWrote}
 }

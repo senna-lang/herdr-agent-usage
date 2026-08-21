@@ -32,17 +32,23 @@ func TestRegistrations_EveryProviderHasACapability(t *testing.T) {
 	}
 }
 
-// TestRegistrations_QuotaAndRoutingArePartition asserts CapOwnsSubscriptionQuota
-// and CapRoutesToCollector classify every registered provider exactly once
-// between them, with no provider left unclassified or double-classified. A
-// newly registered provider that declares neither (or both) fails here
-// instead of silently missing from every dependent internal/limits table.
-func TestRegistrations_QuotaAndRoutingArePartition(t *testing.T) {
+// TestRegistrations_CapabilitiesArePartition asserts the capability set
+// classifies every registered provider exactly once: a provider either owns
+// subscription quota, routes to another provider's collector, or reports
+// context only. A newly registered provider that declares none (or more than
+// one) fails here instead of silently missing from, or wrongly appearing in,
+// every dependent internal/limits table.
+func TestRegistrations_CapabilitiesArePartition(t *testing.T) {
+	partition := []Capability{CapOwnsSubscriptionQuota, CapRoutesToCollector, CapContextOnly}
 	for _, r := range Registrations {
-		ownsQuota := r.Has(CapOwnsSubscriptionQuota)
-		routes := r.Has(CapRoutesToCollector)
-		if ownsQuota == routes {
-			t.Errorf("%s: must declare exactly one of CapOwnsSubscriptionQuota/CapRoutesToCollector, got owns=%v routes=%v", r.Provider.AgentID(), ownsQuota, routes)
+		declared := 0
+		for _, cap := range partition {
+			if r.Has(cap) {
+				declared++
+			}
+		}
+		if declared != 1 {
+			t.Errorf("%s: must declare exactly one partition capability, declared %d", r.Provider.AgentID(), declared)
 		}
 	}
 }

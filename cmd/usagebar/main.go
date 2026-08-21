@@ -15,6 +15,7 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/herdrcli"
 	"github.com/senna-lang/herdr-agent-usage/internal/limits"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/cursor"
 	"github.com/senna-lang/herdr-agent-usage/internal/ratelimit"
 	"github.com/senna-lang/herdr-agent-usage/internal/setup"
 	"github.com/senna-lang/herdr-agent-usage/internal/update"
@@ -60,6 +61,9 @@ func main() {
 	case "statusline":
 		// Claude Code statusLine bridge (stdin JSON → cache + toasts + summary stdout)
 		runStatusLine()
+	case "cursor-statusline":
+		// Cursor CLI statusLine bridge (stdin JSON → context snapshot + summary stdout)
+		runCursorStatusLine()
 	case "collect":
 		// debug: print JSON of collected limits once
 		runCollectJSON(args)
@@ -86,6 +90,7 @@ Usage:
   usagebar check-update --current-version X.Y.Z [--force] [--quiet]
                                      Check GitHub Releases for a newer plugin version
   usagebar statusline                Claude Code statusLine (stdin rate_limits)
+  usagebar cursor-statusline         Cursor CLI statusLine (stdin context_window)
   usagebar setup [--write-toast]     Seed plugin config / show snippets
   usagebar collect                   Debug: print collected limits as JSON
   usagebar opencode-check            Debug: report the OpenCode Go usage path
@@ -630,4 +635,26 @@ func runCollectJSON(args []string) {
 		Providers []limits.ProviderLimits   `json:"providers"`
 		APIUsage  []limits.APIProviderUsage `json:"apiUsage,omitempty"`
 	}{snap.providers, snap.apiUsage})
+}
+
+// runCursorStatusLine records one Cursor statusLine payload and prints the line
+// Cursor renders above its prompt.
+//
+// An unusable payload exits non-zero with empty stdout, which Cursor documents
+// as "keep the previous status line" — the correct outcome for an update that
+// carries no usage, and one that leaves the stored snapshot untouched.
+func runCursorStatusLine() {
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		os.Exit(1)
+	}
+	stateDir := cursor.StateDir()
+	if stateDir == "" {
+		os.Exit(1)
+	}
+	text, err := cursor.RunStatusLineIn(cursor.SessionsDir(stateDir), data, os.Getenv("HERDR_PANE_ID"), time.Now().UnixMilli())
+	if err != nil {
+		os.Exit(1)
+	}
+	fmt.Print(text)
 }

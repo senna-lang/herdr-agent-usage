@@ -15,6 +15,7 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/provider"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/cursor"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
@@ -39,6 +40,13 @@ const (
 	// internal/limits). Currently OMP and Pi: both can run through an
 	// OpenCode Go or Grok login without owning either quota themselves.
 	CapRoutesToCollector
+	// CapContextOnly means the provider reports context usage but owns no
+	// rate-limit quota and routes to no other provider's collector. Its panes
+	// get a $context row, an empty $limit, and no block in the Agent Usage
+	// panel. Currently Cursor: context occupancy arrives through the CLI
+	// statusLine, while plan windows stay server-side with no local or
+	// documented API surface to collect them from.
+	CapContextOnly
 )
 
 // Registration pairs one provider with its declared capabilities.
@@ -61,6 +69,7 @@ func (r Registration) Has(cap Capability) bool {
 var Registrations = []Registration{
 	{claude.Provider, []Capability{CapOwnsSubscriptionQuota}},
 	{codex.Provider, []Capability{CapOwnsSubscriptionQuota}},
+	{cursor.Provider, []Capability{CapContextOnly}},
 	{grok.Provider, []Capability{CapOwnsSubscriptionQuota}},
 	{omp.Provider, []Capability{CapRoutesToCollector}},
 	{omp.PiProvider, []Capability{CapRoutesToCollector}},
