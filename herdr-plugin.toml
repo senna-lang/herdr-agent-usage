@@ -1,8 +1,8 @@
 id = "usagebar"
 name = "Agent Usage"
 version = "0.5.10"
-# Configurable sidebar rows and metadata tokens landed in Herdr 0.7.4.
-min_herdr_version = "0.7.4"
+# [[startup]] hooks landed in Herdr 0.7.5. Sidebar tokens still require 0.7.4+.
+min_herdr_version = "0.7.5"
 description = "Sidebar context meters, provider limit windows, and rate-limit toasts for Claude, Codex, OpenCode Go, OMP, Pi coding agent, and Grok"
 platforms = ["macos", "linux"]
 
@@ -16,6 +16,12 @@ platforms = ["macos", "linux"]
 # See https://github.com/senna-lang/herdr-agent-usage/issues/48
 [[build]]
 command = ["bash", "bin/ensure-binary.sh", "--in-tree"]
+
+# Restores $title/$provider/$limit/$context after server start and live
+# handoff. Metadata tokens are ephemeral across a cold restart; event
+# hooks only see the focused pane.
+[[startup]]
+command = ["bash", "bin/run-startup.sh"]
 
 [[events]]
 on = "pane.agent_status_changed"

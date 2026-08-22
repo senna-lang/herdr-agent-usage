@@ -57,6 +57,10 @@ func main() {
 		}
 	case "notify":
 		runNotify()
+	case "startup":
+		// Herdr [[startup]] / live handoff: restore every open pane's tokens.
+		update.RepublishOpenAgentPanes()
+		startIdleWatch()
 	case "watch":
 		update.RunWatch(resolveCwd(), time.Now, time.Sleep, nil)
 	case "check-update":
@@ -82,6 +86,7 @@ func printUsage(w *os.File) {
 
 Usage:
   usagebar status|update [--force]   Update sidebar metadata tokens for HERDR_PANE_ID
+  usagebar startup                   Restore tokens for every open agent pane
   usagebar watch                     Idle $limit refresh while the limits pane is closed
   usagebar limits|panel              Interactive limits panel (q quit, r refresh)
                                      Shows providers with an open agent pane;
