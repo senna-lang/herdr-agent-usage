@@ -58,5 +58,20 @@
       "the reported percentage is used percentage and must be converted to percent left for display",
       "the provider continues to expose a weekly reset schedule"
     ]
+  },
+  {
+    "id": "cursor",
+    "label": "Cursor CLI configuration locations",
+    "url": "https://cursor.com/docs/cli/reference/configuration",
+    "requiredText": [
+      "cli-config.json",
+      "cursor_config_dir",
+      "xdg_config_home"
+    ],
+    "contracts": [
+      "cli-config.json remains the CLI configuration file",
+      "CURSOR_CONFIG_DIR remains the documented config-directory override",
+      "XDG_CONFIG_HOME/cursor remains the documented Linux/BSD location"
+    ]
   }
 ]

@@ -348,7 +348,7 @@ func RunUpdateForPane(paneID string, force bool) {
 	case "grok":
 		if profile, ok := findGrokProfile(grokProfiles, providerID); ok {
 			if profile.Implicit {
-				usage = p.ResolveUsage(provider.UsageResolveInput{Session: pane.AgentSession, Cwd: cwd})
+				usage = p.ResolveUsage(provider.UsageResolveInput{Session: pane.AgentSession, Cwd: cwd, PaneID: &paneID})
 			} else {
 				usage = grok.ResolveUsageForGrokIn(profile.Home, sid, cwd)
 			}
@@ -356,7 +356,7 @@ func RunUpdateForPane(paneID string, force bool) {
 	case "opencode":
 		if profile, ok := findOpenCodeProfile(openCodeProfiles, providerID); ok {
 			if profile.Implicit {
-				usage = p.ResolveUsage(provider.UsageResolveInput{Session: pane.AgentSession, Cwd: cwd})
+				usage = p.ResolveUsage(provider.UsageResolveInput{Session: pane.AgentSession, Cwd: cwd, PaneID: &paneID})
 			} else {
 				usage = opencode.ResolveUsageForOpenCodeIn(profile.DataDir, sid, cwd)
 			}
@@ -365,6 +365,7 @@ func RunUpdateForPane(paneID string, force bool) {
 		usage = p.ResolveUsage(provider.UsageResolveInput{
 			Session: pane.AgentSession,
 			Cwd:     cwd,
+			PaneID:  &paneID,
 		})
 	}
 

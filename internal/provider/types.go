@@ -18,6 +18,11 @@ type AgentSession struct {
 type UsageResolveInput struct {
 	Session *AgentSession
 	Cwd     *string
+	// PaneID is herdr's pane id for the pane being resolved, when known.
+	// Provider-neutral: an adapter whose upstream session identity can drift
+	// from the agent_session herdr reported at launch resolves by pane instead,
+	// which cwd cannot do because two panes may share one directory.
+	PaneID *string
 }
 
 // UsageProvider resolves usage for a single agent.

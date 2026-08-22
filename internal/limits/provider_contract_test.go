@@ -111,3 +111,32 @@ func TestLimitIDSlotTables_MatchCapabilityRegistrations(t *testing.T) {
 	}
 	assertSameIDSet(t, "limitIDSlotTables keys", got, want)
 }
+
+// TestContextOnlyProviders_AppearInNoLimitsTable guards the other direction of
+// the capability partition: a provider that reports context only must not
+// appear in any limits dispatch table, so it can never contribute a limit
+// window, a panel block, or a rate-limit notification.
+func TestContextOnlyProviders_AppearInNoLimitsTable(t *testing.T) {
+	contextOnly := map[string]bool{}
+	for _, id := range providers.IDsWithCapability(providers.CapContextOnly) {
+		contextOnly[id] = true
+	}
+	if len(contextOnly) == 0 {
+		t.Skip("no context-only providers registered")
+	}
+	for _, id := range singleCollectorProviderIDs {
+		if contextOnly[id] {
+			t.Errorf("%s: context-only provider present in singleCollectorProviderIDs", id)
+		}
+	}
+	for _, spec := range singleCollectorQuotaSpecs {
+		if contextOnly[spec.id] {
+			t.Errorf("%s: context-only provider present in singleCollectorQuotaSpecs", spec.id)
+		}
+	}
+	for id := range limitIDSlotTables {
+		if contextOnly[id] {
+			t.Errorf("%s: context-only provider present in limitIDSlotTables", id)
+		}
+	}
+}
