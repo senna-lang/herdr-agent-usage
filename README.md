@@ -3,7 +3,7 @@
 [![CI](https://github.com/senna-lang/herdr-agent-usage/actions/workflows/ci.yml/badge.svg)](https://github.com/senna-lang/herdr-agent-usage/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)
-![herdr 0.7.4+](https://img.shields.io/badge/herdr-0.7.4%2B-6E56CF)
+![herdr 0.7.5+](https://img.shields.io/badge/herdr-0.7.5%2B-6E56CF)
 ![platforms: linux | macOS](https://img.shields.io/badge/platforms-linux%20%7C%20macOS-lightgrey)
 
 Monitor context usage and provider rate limits for agents running in [Herdr](https://herdr.dev).
@@ -18,7 +18,7 @@ Monitor context usage and provider rate limits for agents running in [Herdr](htt
 
 ## Requirements
 
-- **Herdr ≥ 0.7.4**
+- **Herdr ≥ 0.7.5**
 - **macOS or Linux**
 - Agent integrations for reliable session matching (recommended):
 
@@ -61,7 +61,7 @@ The agent can install the plugin and guide you through the remaining setup.
 1. Install the plugin and run **setup** (above).
 2. Open a workspace with at least one agent pane.
 3. Add the sidebar rows printed by `usagebar.setup` to your Herdr config, then run `herdr server reload-config`.
-4. After an agent turn completes (or you focus the pane), the sidebar shows provider limit remaining above context usage.
+4. After an agent turn completes (or you focus the pane), the sidebar shows provider limit remaining above context usage. `$limit` also refreshes on its own while the pane sits idle. A Herdr restart restores the same tokens via the plugin startup hook.
 5. Open the limits pane:
 
 ```bash
@@ -106,7 +106,7 @@ herdr plugin action invoke usagebar.setup
 | Surface | What it shows |
 | --- | --- |
 | **Sidebar `$context` row** | Per-pane context usage: `⛁ 13% (130k)` when the window size is known, or the token count alone |
-| **Sidebar `$limit` row** | Shortest provider limit window (`5h 72%` remaining), or — on a pay-as-you-go pane — what that pane spent on its backend (`Σ 425k $0.04`, scoped to the pane's session and backend) |
+| **Sidebar `$limit` row** | Shortest provider limit window (`5h 72%` remaining), refreshed with the Agent Usage pane (15s) or every 60s while that pane is closed. Pay-as-you-go panes show what that pane spent on its backend (`Σ 425k $0.04`, scoped to the pane's session and backend) instead |
 | **Sidebar `$provider` row** | Subscription provider (`opencode-go`, `grok`, `claude`, …) on a subscription pane, or the backend actually billed on a pay-as-you-go pane (`deepseek`). The adjacent burn total is scoped to that same backend in the pane's session |
 | **Agent Usage pane** | One block per billing provider, independent of harness. Subscription providers show plan windows and cross-harness pane activity. Pay-as-you-go backends show one merged 24h / 7d / 30d block, model breakdown, and pane share even when multiple harnesses use the same backend |
 | **Toasts** (optional) | Remaining-limit warnings at configured thresholds (default 50 / 20 / 10 / 5 % left) |
@@ -127,7 +127,7 @@ Percentages in the limits pane are **remaining** (`% left`). Higher is safer.
 
 ## Agent Usage pane
 
-- Auto-refreshes every **15s**. Press **`r`** to refresh, **`q`** to quit.
+- Auto-refreshes every **15s**, and the same collect updates sidebar `$limit` on every open subscription pane. Press **`r`** to refresh, **`q`** to quit. With the pane closed, `$limit` still moves every **60s**. `$context` stays event-driven after the initial restore. After a Herdr restart or live handoff, a `[[startup]]` hook republishes `$title` / `$provider` / `$limit` / `$context` for every open agent pane so the sidebar is not blank until the next focus or turn.
 - OpenCode Go may show three windows (**5h / 7d / 30d**). Other providers show whichever usage windows their data sources make available.
 - Open pane **token share** is local activity share within the shortest window (including a **closed / other** bucket for usage outside open panes). It is not account quota attribution.
 - Sidebar meters update after the agent has **settled** (not while `working`), so they match the last completed turn. If the session cannot be resolved, the `$context` token is cleared rather than showing another session’s numbers.

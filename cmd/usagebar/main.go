@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -45,6 +46,7 @@ func main() {
 		// force when invoked as a plugin action (refresh)
 		force := os.Getenv("HERDR_PLUGIN_ACTION_ID") != "" || hasFlag(args, "--force")
 		update.RunUpdate(force)
+		startIdleWatch()
 	case "setup":
 		writeToast := hasFlag(args, "--write-toast") || hasFlag(args, "--apply-toast")
 		report := setup.RunSetup(setup.SetupOptions{WriteToast: writeToast})
@@ -56,6 +58,12 @@ func main() {
 		}
 	case "notify":
 		runNotify()
+	case "startup":
+		// Herdr [[startup]] / live handoff: restore every open pane's tokens.
+		update.RepublishOpenAgentPanes()
+		startIdleWatch()
+	case "watch":
+		update.RunWatch(resolveCwd(), time.Now, time.Sleep, nil)
 	case "check-update":
 		runUpdateCheck(args)
 	case "statusline":
@@ -82,6 +90,8 @@ func printUsage(w *os.File) {
 
 Usage:
   usagebar status|update [--force]   Update sidebar metadata tokens for HERDR_PANE_ID
+  usagebar startup                   Restore tokens for every open agent pane
+  usagebar watch                     Idle $limit refresh while the limits pane is closed
   usagebar limits|panel              Interactive limits panel (q quit, r refresh)
                                      Shows providers with an open agent pane;
                                      --all shows every provider
@@ -221,31 +231,8 @@ func resolveCwd() *string {
 	return &cwd
 }
 
-// openPaneSnapshots lists open agent panes; ok=false means the herdr pane
-// query failed (unknown state), as opposed to a confirmed empty pane list.
 func openPaneSnapshots() ([]limits.OpenPaneSnapshot, bool) {
-	open, ok := herdrcli.ListOpenAgentPanesOK()
-	snaps := make([]limits.OpenPaneSnapshot, 0, len(open))
-	for _, p := range open {
-		agent := ""
-		if p.Agent != nil {
-			agent = *p.Agent
-		}
-		label := agent
-		if p.RowLabel != nil {
-			label = *p.RowLabel
-		}
-		var sid *string
-		if p.AgentSession != nil {
-			sid = &p.AgentSession.Value
-		}
-		cwd := herdrcli.PaneSessionCwd(p.PaneInfo)
-		snaps = append(snaps, limits.OpenPaneSnapshot{
-			PaneID: p.PaneID, Agent: agent, Label: label,
-			SessionID: sid, Cwd: cwd,
-		})
-	}
-	return snaps, ok
+	return update.ListOpenPaneSnapshots()
 }
 
 // panelSnapshot is what one panel render needs: subscription providers plus
@@ -371,11 +358,13 @@ func runLimitsPane(args []string) error {
 		cachedSnap = collectPanel(nowMs, activeOnly)
 		cachedLoaded = true
 		cachedNowMs = nowMs
+		update.TouchPaneHeartbeat(time.Now())
+		update.PublishCollectedLimits(cachedSnap.providers, nowMs)
 		paintFrame(limits.FormatUsagePanel(cachedSnap.providers, cachedSnap.apiUsage, nowMs, layoutFor()))
 	}
 	renderFull()
 
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(update.PaneRefreshInterval)
 	defer ticker.Stop()
 
 	// SIGWINCH: instant layout-only repaint (debounced full refresh after drag
@@ -473,6 +462,20 @@ func runNotify() {
 	opts.Only = limits.BillingProviderFilter(snaps, panesOK, limits.DefaultBillingDeps())
 	providers := limits.CollectAllProviderLimits(resolveCwd(), nowMs, opts)
 	limits.NotifyProviderPrimaryLimitsWithThresholds(providers, nowMs, config.RemainingThresholds)
+}
+
+func startIdleWatch() {
+	if update.WatchAlreadyRunning(time.Now()) {
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	cmd := exec.Command(exe, "watch")
+	cmd.Env = os.Environ()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	_ = cmd.Start()
 }
 
 func runStatusLine() {
