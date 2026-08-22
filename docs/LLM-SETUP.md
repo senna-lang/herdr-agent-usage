@@ -64,7 +64,7 @@ End state:
 ### 1. Prerequisites
 
 - Confirm `herdr` is on `PATH` and works (`herdr --help` or `herdr plugin list`).  
-- Herdr **≥ 0.7.4** is required.
+- Herdr **≥ 0.7.5** is required.
 - OS: macOS or Linux.  
 - **Go toolchain ≥ 1.25** (`go version`) recommended. `usagebar.setup`
   resolves the binary automatically on first run: it builds with Go when

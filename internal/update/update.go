@@ -198,7 +198,12 @@ func writeMetadataTokenWith(writer metadataTokenWriter, current map[string]strin
 // RunUpdate resolves usage for HERDR_PANE_ID and refreshes its sidebar tokens,
 // including while the agent is working. force bypasses unchanged-value checks.
 func RunUpdate(force bool) {
-	paneID := os.Getenv("HERDR_PANE_ID")
+	RunUpdateForPane(os.Getenv("HERDR_PANE_ID"), force)
+}
+
+// RunUpdateForPane resolves usage for paneID and refreshes its sidebar tokens.
+// force bypasses unchanged-value checks.
+func RunUpdateForPane(paneID string, force bool) {
 	if paneID == "" {
 		return
 	}
