@@ -465,7 +465,7 @@ Everything is computed from files that the agents already keep on your machine:
 | Claude Code | `~/.claude.json`, statusLine cache under `~/.claude/herdr-usagebar/`, `settings.json` (deployment env) |
 | Codex | rollout files under `~/.codex/sessions/` |
 | OpenCode | `~/.local/share/opencode/opencode.db` (session usage), `~/.local/share/opencode/auth.json` (credential kind only), and — for OpenCode Go's official windows — the `opencode.ai` cookie in a local Chromium profile plus that browser's Keychain "Safe Storage" password (read-only, never persisted; see [OpenCode Go official usage](#opencode-go-official-usage)) |
-| Cursor | Context snapshots under `<config dir>/herdr-usagebar/`, written from the CLI statusLine payload. Honours `CURSOR_CONFIG_DIR`; no Cursor file is read or modified |
+| Cursor | Context snapshots under `~/.cursor/herdr-usagebar/` (or `USAGEBAR_STATE_DIR`), written from the CLI statusLine payload. The location is fixed rather than following `CURSOR_CONFIG_DIR`, which only the Cursor process can see; no Cursor file is read or modified |
 | Grok | `~/.grok/sessions/**/signals.json`, `~/.grok/auth.json` (credentials for the credits fetch), `~/.grok/config.toml` (custom-model base URLs) |
 | OMP | `~/.omp/agent/sessions/**/*.jsonl`, `~/.omp/agent/models.db` (context window lookup), `~/.omp/agent/agent.db` (credential kind, and the `usage_history` windows OMP records for the accounts it drives) |
 | Pi coding agent | `~/.pi/agent/sessions/**/*.jsonl`, `~/.pi/agent/models-store.json` and `~/.pi/agent/models.json` (or the matching `PI_CODING_AGENT_DIR`), `~/.pi/agent/auth.json` (credential kind only) |
