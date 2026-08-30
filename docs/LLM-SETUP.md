@@ -40,7 +40,7 @@ Follow every step in order. Do not skip confirmation gates.
    - Keybindings: append new `[[keys.command]]` blocks; do not rewrite
      unrelated sections.  
    - Sidebar: never append a second `[ui.sidebar.agents]` table. If it already
-     exists, merge `$limit` and `$context` into its existing `rows` while
+     exists, merge `$limit`, `$cache`, and `$context` into its existing `rows` while
      preserving unrelated rows and tokens. Apply the same merge to relevant
      `rows_by_agent` overrides because those replace the default rows.
    - Do not delete or rewrite the whole `config.toml`.

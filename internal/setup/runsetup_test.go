@@ -32,7 +32,7 @@ func TestRunSetup_SeedsAndSnippets(t *testing.T) {
 	for _, want := range []string{
 		"seeded plugin config", "toast: NOT configured", "[ui.toast]",
 		"[ui.sidebar.agents]", `["state_icon", "$title"]`,
-		`"$limit"`, `"$context"`,
+		`"$limit"`, `"$cache"`, `"$context"`,
 		"usagebar.open-limits", "--write-toast",
 	} {
 		if !strings.Contains(text, want) {

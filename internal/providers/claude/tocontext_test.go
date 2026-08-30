@@ -3,7 +3,11 @@
  */
 package claude
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
+)
 
 func usage(model string, cacheRead int) TranscriptUsage {
 	return TranscriptUsage{
@@ -51,5 +55,27 @@ func TestToContextUsage_CompactedPassthrough(t *testing.T) {
 	got := ToContextUsage(u)
 	if !got.Compacted || got.ContextTokens != 13_820 {
 		t.Fatalf("got %+v, want compacted passthrough", got)
+	}
+}
+
+func TestToContextUsage_CopiesSessionCache(t *testing.T) {
+	u := usage("claude-sonnet-5", 310_000)
+	u.InputTokens = 100
+	u.CacheCreationInputTokens = 50
+	u.SessionCache = core.CacheFromTokenCounts(100, 310_000, 50)
+	got := ToContextUsage(u)
+	if got.Cache == nil || got.Cache.ReadTokens != 310_000 {
+		t.Fatalf("got %+v", got.Cache)
+	}
+}
+
+func TestToContextUsage_CompactedDropsCache(t *testing.T) {
+	u := usage("claude-sonnet-5", 116000)
+	u.InputTokens = 13_820
+	u.Compacted = true
+	u.SessionCache = core.CacheFromTokenCounts(5, 116000, 0)
+	got := ToContextUsage(u)
+	if !got.Compacted || got.Cache != nil {
+		t.Fatalf("compacted must drop cache: %+v", got)
 	}
 }

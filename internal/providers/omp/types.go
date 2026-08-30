@@ -3,6 +3,8 @@
  */
 package omp
 
+import "github.com/senna-lang/herdr-agent-usage/internal/core"
+
 // SessionUsage is the latest assistant usage row from an OMP session.
 type SessionUsage struct {
 	Provider      string
@@ -10,6 +12,7 @@ type SessionUsage struct {
 	ContextTokens int
 	TotalTokens   int
 	CostUSD       float64
+	Cache         *core.CacheUsage
 }
 
 // UsageEvent is one assistant turn's token/cost contribution.

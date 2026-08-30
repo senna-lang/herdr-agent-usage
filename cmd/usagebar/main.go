@@ -361,6 +361,7 @@ func runLimitsPane(args []string) error {
 		cachedNowMs = nowMs
 		update.TouchPaneHeartbeat(time.Now())
 		update.PublishCollectedLimits(cachedSnap.providers, nowMs)
+		update.PublishOpenPaneCaches(time.UnixMilli(nowMs))
 		paintFrame(limits.FormatUsagePanel(cachedSnap.providers, cachedSnap.apiUsage, nowMs, layoutFor()))
 	}
 	renderFull()
@@ -508,19 +509,26 @@ func runStatusLine() {
 	}
 
 	rateLimits := ratelimit.ParseRateLimits(stdinJSON)
-	if rateLimits != nil {
+	promptCache := ratelimit.ParsePromptCache(stdinJSON)
+	if rateLimits != nil || promptCache != nil {
 		input := limits.RateLimitsInput{}
-		if rateLimits.FiveHour != nil {
-			input.FiveHour = &struct {
-				UsedPercentage float64
-				ResetsAt       int64
-			}{rateLimits.FiveHour.UsedPercentage, rateLimits.FiveHour.ResetsAt}
+		if rateLimits != nil {
+			if rateLimits.FiveHour != nil {
+				input.FiveHour = &struct {
+					UsedPercentage float64
+					ResetsAt       int64
+				}{rateLimits.FiveHour.UsedPercentage, rateLimits.FiveHour.ResetsAt}
+			}
+			if rateLimits.SevenDay != nil {
+				input.SevenDay = &struct {
+					UsedPercentage float64
+					ResetsAt       int64
+				}{rateLimits.SevenDay.UsedPercentage, rateLimits.SevenDay.ResetsAt}
+			}
 		}
-		if rateLimits.SevenDay != nil {
-			input.SevenDay = &struct {
-				UsedPercentage float64
-				ResetsAt       int64
-			}{rateLimits.SevenDay.UsedPercentage, rateLimits.SevenDay.ResetsAt}
+		if promptCache != nil {
+			input.PromptCachePresent = true
+			input.PromptCacheExpiresAt = promptCache.ExpiresAt
 		}
 		// Empty-payload guard lives in WriteClaudeLimitsCacheGuarded so `{}`
 		// cannot clobber a valid cache.
