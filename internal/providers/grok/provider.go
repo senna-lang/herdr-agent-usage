@@ -2,8 +2,10 @@
  * UsageProvider for Grok Build.
  *
  * When no session is provided, falls back to pane cwd combined with
- * active_sessions.json / the most recent session.
+ * unique live entries in active_sessions.json, then the most recent
+ * historical session if nothing is live.
  */
+
 package grok
 
 import (
