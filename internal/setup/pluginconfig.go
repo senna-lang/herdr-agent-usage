@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
@@ -29,6 +30,10 @@ type PluginConfig struct {
 	RemainingThresholds []int
 	// NotifyEnabled is the plugin-side intent (separate from host toast delivery).
 	NotifyEnabled bool
+	// LimitPercent is the presentation direction for quota percentages.
+	// remaining (default) shows headroom; used shows consumption. Notify
+	// firing still uses remaining thresholds.
+	LimitPercent core.LimitPercent
 	// ClaudeProfiles are the configured [[claude.profiles]] entries (unresolved).
 	// Empty means the single implicit "claude" profile is synthesized downstream.
 	ClaudeProfiles []claude.ProfileSpec
@@ -43,6 +48,7 @@ type PluginConfig struct {
 var DefaultPluginConfig = PluginConfig{
 	RemainingThresholds: append([]int(nil), DefaultRemainingThresholds...),
 	NotifyEnabled:       true,
+	LimitPercent:        core.LimitPercentRemaining,
 }
 
 // pluginConfigWire mirrors the on-disk TOML shape for decoding.
@@ -51,12 +57,16 @@ type pluginConfigWire struct {
 		Enabled             *bool `toml:"enabled"`
 		RemainingThresholds []int `toml:"remaining_thresholds"`
 	} `toml:"notify"`
+	UI struct {
+		LimitPercent *string `toml:"limit_percent"`
+	} `toml:"ui"`
 	Claude struct {
 		Profiles []profileWire `toml:"profiles"`
 	} `toml:"claude"`
 	Codex struct {
 		Profiles []codexProfileWire `toml:"profiles"`
 	} `toml:"codex"`
+
 	Grok struct {
 		Profiles []grokProfileWire `toml:"profiles"`
 	} `toml:"grok"`
@@ -131,7 +141,12 @@ func DefaultPluginConfigTOML(config PluginConfig) string {
 		"# remaining % thresholds that may fire a toast (once per window/bucket)",
 		"remaining_thresholds = [" + thresholds + "]",
 		"",
+		"[ui]",
+		"# remaining (default): % left / higher is safer. used: fill as you burn.",
+		`limit_percent = "` + string(core.ParseLimitPercent(string(config.LimitPercent))) + `"`,
+		"",
 		"# Multi-account Claude: uncomment and add one block per account.",
+
 		"# Absence of any profile keeps the single default account (fully backward",
 		"# compatible). config_dir must be unique per profile and may use ~.",
 		"#",
@@ -203,7 +218,9 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 	cfg := PluginConfig{
 		NotifyEnabled:       DefaultPluginConfig.NotifyEnabled,
 		RemainingThresholds: append([]int(nil), DefaultPluginConfig.RemainingThresholds...),
+		LimitPercent:        DefaultPluginConfig.LimitPercent,
 	}
+
 	var wire pluginConfigWire
 	if _, err := toml.Decode(raw, &wire); err != nil {
 		return cfg
@@ -214,6 +231,10 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 	if thr, ok := validThresholds(wire.Notify.RemainingThresholds); ok {
 		cfg.RemainingThresholds = thr
 	}
+	if wire.UI.LimitPercent != nil {
+		cfg.LimitPercent = core.ParseLimitPercent(*wire.UI.LimitPercent)
+	}
+
 	for _, p := range wire.Claude.Profiles {
 		cfg.ClaudeProfiles = append(cfg.ClaudeProfiles, claude.ProfileSpec{
 			ID:        p.ID,

@@ -8,12 +8,21 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 )
 
 func TestParsePluginConfigTOML_Defaults(t *testing.T) {
-	cfg := ParsePluginConfigTOML(DefaultPluginConfigTOML(DefaultPluginConfig))
+	raw := DefaultPluginConfigTOML(DefaultPluginConfig)
+	if !contains(raw, "[ui]") || !contains(raw, `limit_percent = "remaining"`) {
+		t.Fatalf("seed missing remaining default:\n%s", raw)
+	}
+	cfg := ParsePluginConfigTOML(raw)
 	if !cfg.NotifyEnabled {
 		t.Fatal("expected enabled")
+	}
+	if cfg.LimitPercent != core.LimitPercentRemaining {
+		t.Fatalf("limit_percent=%q", cfg.LimitPercent)
 	}
 	if !reflect.DeepEqual(cfg.RemainingThresholds, []int{50, 20, 10, 5}) {
 		t.Fatalf("thresholds=%v", cfg.RemainingThresholds)
@@ -29,8 +38,31 @@ remaining_thresholds = [30, 10]
 	if cfg.NotifyEnabled {
 		t.Fatal("expected disabled")
 	}
+	if cfg.LimitPercent != core.LimitPercentRemaining {
+		t.Fatal("missing [ui] must stay remaining")
+	}
 	if !reflect.DeepEqual(cfg.RemainingThresholds, []int{30, 10}) {
 		t.Fatalf("thresholds=%v", cfg.RemainingThresholds)
+	}
+}
+
+func TestParsePluginConfigTOML_LimitPercentUsed(t *testing.T) {
+	cfg := ParsePluginConfigTOML(`
+[ui]
+limit_percent = "used"
+`)
+	if cfg.LimitPercent != core.LimitPercentUsed {
+		t.Fatalf("got %q", cfg.LimitPercent)
+	}
+}
+
+func TestParsePluginConfigTOML_LimitPercentInvalidFallsBack(t *testing.T) {
+	cfg := ParsePluginConfigTOML(`
+[ui]
+limit_percent = "burned"
+`)
+	if cfg.LimitPercent != core.LimitPercentRemaining {
+		t.Fatalf("got %q", cfg.LimitPercent)
 	}
 }
 

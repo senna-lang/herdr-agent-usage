@@ -24,7 +24,7 @@ func TestProviderAndLimitText_ContextOnlyProviderHasEmptyLimit(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			providerText, limitText := formatSidebarBillingTokens(
-				limits.BillingUnknown, "cursor", "cursor", nil, tc.totalTokens, tc.totalCostUSD, 1_000)
+				limits.BillingUnknown, "cursor", "cursor", nil, tc.totalTokens, tc.totalCostUSD, 1_000, "")
 			if limitText != "" {
 				t.Errorf("limitText = %q, want empty", limitText)
 			}

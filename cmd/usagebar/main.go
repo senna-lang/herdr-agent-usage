@@ -197,7 +197,7 @@ func runStatusLineNotifications(
 	if !config.NotifyEnabled {
 		return
 	}
-	ratelimit.RunRateLimitCheckWithThresholdsIn(profile.StateDir, stdinJSON, nowMs, config.RemainingThresholds, notify)
+	ratelimit.RunRateLimitCheckWithThresholdsIn(profile.StateDir, stdinJSON, nowMs, config.RemainingThresholds, notify, config.LimitPercent)
 }
 
 func resolveCwd() *string {
@@ -294,7 +294,8 @@ func currentLayout() limits.PanelLayout {
 		}
 	}
 	color := term.IsTerminal(int(os.Stdout.Fd())) && os.Getenv("NO_COLOR") == ""
-	return limits.PanelLayout{Columns: cols, Rows: rows, Color: color}
+	cfg := setup.LoadPluginConfig(setup.ResolvePluginConfigDir(environment()))
+	return limits.PanelLayout{Columns: cols, Rows: rows, Color: color, LimitPercent: cfg.LimitPercent}
 }
 
 // paintFrame draws text on the alternate screen.
@@ -461,7 +462,8 @@ func runNotify() {
 	snaps, panesOK := openPaneSnapshots()
 	opts.Only = limits.BillingProviderFilter(snaps, panesOK, limits.DefaultBillingDeps())
 	providers := limits.CollectAllProviderLimits(resolveCwd(), nowMs, opts)
-	limits.NotifyProviderPrimaryLimitsWithThresholds(providers, nowMs, config.RemainingThresholds)
+	limits.NotifyProviderPrimaryLimitsWithThresholds(providers, nowMs, config.RemainingThresholds, config.LimitPercent)
+
 }
 
 func startIdleWatch() {
@@ -549,7 +551,8 @@ func runStatusLine() {
 }
 
 func printStatusLineSummary(stdinJSON string) {
-	summary := ratelimit.FormatStatusLineSummary(ratelimit.ParseRateLimits(stdinJSON))
+	config := setup.LoadPluginConfig(setup.ResolvePluginConfigDir(environment()))
+	summary := ratelimit.FormatStatusLineSummary(ratelimit.ParseRateLimits(stdinJSON), config.LimitPercent)
 	if summary != "" {
 		fmt.Println(summary)
 	}

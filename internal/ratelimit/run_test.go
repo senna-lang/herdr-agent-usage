@@ -21,6 +21,7 @@ func TestRunRateLimitCheckWithThresholdsInUsesConfiguredBuckets(t *testing.T) {
 			notifications = append(notifications, title+": "+body)
 			return true
 		},
+		"",
 	)
 
 	if len(notifications) != 1 || notifications[0] != "Session limit: 30% remaining · resets in 1157d 9h" {

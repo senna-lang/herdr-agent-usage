@@ -1,6 +1,10 @@
 package limits
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
+)
 
 const sidebarNowMs int64 = 1_800_000_000_000
 
@@ -11,7 +15,15 @@ func TestFormatSidebarLimit_PrefersShortestAvailableWindow(t *testing.T) {
 		Primary:   &LimitWindow{UsedPercentage: 28.4, WindowMinutes: &five},
 		Secondary: &LimitWindow{UsedPercentage: 70, WindowMinutes: &seven},
 	}
-	if got := FormatSidebarLimit(p, sidebarNowMs); got != "5h 72%" {
+	if got := FormatSidebarLimit(p, sidebarNowMs, ""); got != "5h 72%" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFormatSidebarLimit_UsedPercentInvertsNumber(t *testing.T) {
+	five := 300
+	p := ProviderLimits{Primary: &LimitWindow{UsedPercentage: 28.4, WindowMinutes: &five}}
+	if got := FormatSidebarLimit(p, sidebarNowMs, core.LimitPercentUsed); got != "5h 28%" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -23,7 +35,7 @@ func TestFormatSidebarLimit_UsesWindowDurationInsteadOfSlotOrder(t *testing.T) {
 		Primary:   &LimitWindow{UsedPercentage: 70, WindowMinutes: &seven},
 		Secondary: &LimitWindow{UsedPercentage: 28.4, WindowMinutes: &five},
 	}
-	if got := FormatSidebarLimit(p, sidebarNowMs); got != "5h 72%" {
+	if got := FormatSidebarLimit(p, sidebarNowMs, ""); got != "5h 72%" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -33,7 +45,7 @@ func TestFormatSidebarLimit_UsesSlotOrderWhenDurationsAreMissing(t *testing.T) {
 		Primary:   &LimitWindow{UsedPercentage: 28.4},
 		Secondary: &LimitWindow{UsedPercentage: 70},
 	}
-	if got := FormatSidebarLimit(p, sidebarNowMs); got != "5h 72%" {
+	if got := FormatSidebarLimit(p, sidebarNowMs, ""); got != "5h 72%" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -41,13 +53,13 @@ func TestFormatSidebarLimit_UsesSlotOrderWhenDurationsAreMissing(t *testing.T) {
 func TestFormatSidebarLimit_FallsBackToNextWindow(t *testing.T) {
 	seven := 10080
 	p := ProviderLimits{Secondary: &LimitWindow{UsedPercentage: 41.6, WindowMinutes: &seven}}
-	if got := FormatSidebarLimit(p, sidebarNowMs); got != "7d 58%" {
+	if got := FormatSidebarLimit(p, sidebarNowMs, ""); got != "7d 58%" {
 		t.Fatalf("got %q", got)
 	}
 }
 
 func TestFormatSidebarLimit_NoWindows(t *testing.T) {
-	if got := FormatSidebarLimit(ProviderLimits{}, sidebarNowMs); got != "" {
+	if got := FormatSidebarLimit(ProviderLimits{}, sidebarNowMs, ""); got != "" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -69,7 +81,7 @@ func TestFormatSidebarLimit_KeepsShortestWindowAcrossResetBoundary(t *testing.T)
 			ResetsAt:       &future,
 		},
 	}
-	if got := FormatSidebarLimit(p, sidebarNowMs); got != "5h 3%" {
+	if got := FormatSidebarLimit(p, sidebarNowMs, ""); got != "5h 3%" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -88,7 +100,7 @@ func TestFormatSidebarLimit_ClaudeKeepsFiveHourAtResetBoundary(t *testing.T) {
 	if provider == nil {
 		t.Fatal("expected Claude limits")
 	}
-	if got := FormatSidebarLimit(*provider, sidebarNowMs); got != "5h 87%" {
+	if got := FormatSidebarLimit(*provider, sidebarNowMs, ""); got != "5h 87%" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -96,7 +108,7 @@ func TestFormatSidebarLimit_ClaudeKeepsFiveHourAtResetBoundary(t *testing.T) {
 func TestFormatSidebarLimit_ReturnsShortestWhenAllWindowsPassedReset(t *testing.T) {
 	expired := sidebarNowMs/1000 - 1
 	p := ProviderLimits{Primary: &LimitWindow{UsedPercentage: 97, ResetsAt: &expired}}
-	if got := FormatSidebarLimit(p, sidebarNowMs); got != "5h 3%" {
+	if got := FormatSidebarLimit(p, sidebarNowMs, ""); got != "5h 3%" {
 		t.Fatalf("got %q", got)
 	}
 }

@@ -3,12 +3,16 @@
  */
 package ratelimit
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
+)
 
 func TestFormatNotificationBody_Session(t *testing.T) {
 	nowMs := int64(1_800_000_000_000)
 	resetsAt := nowMs/1000 + 2*3600 + 15*60
-	result := FormatNotificationBody(WindowFiveHour, Bucket20, resetsAt, nowMs)
+	result := FormatNotificationBody(WindowFiveHour, Bucket20, resetsAt, nowMs, "")
 	if result.Title != "Session limit" {
 		t.Fatalf("title=%q", result.Title)
 	}
@@ -20,7 +24,7 @@ func TestFormatNotificationBody_Session(t *testing.T) {
 func TestFormatNotificationBody_Weekly(t *testing.T) {
 	nowMs := int64(1_800_000_000_000)
 	resetsAt := nowMs/1000 + 3*86400 + 4*3600
-	result := FormatNotificationBody(WindowSevenDay, Bucket10, resetsAt, nowMs)
+	result := FormatNotificationBody(WindowSevenDay, Bucket10, resetsAt, nowMs, "")
 	if result.Title != "Weekly limit" {
 		t.Fatalf("title=%q", result.Title)
 	}
@@ -32,7 +36,7 @@ func TestFormatNotificationBody_Weekly(t *testing.T) {
 func TestFormatNotificationBody_MinutesOnly(t *testing.T) {
 	nowMs := int64(1_800_000_000_000)
 	resetsAt := nowMs/1000 + 30*60
-	result := FormatNotificationBody(WindowFiveHour, Bucket5, resetsAt, nowMs)
+	result := FormatNotificationBody(WindowFiveHour, Bucket5, resetsAt, nowMs, "")
 	if result.Body != "5% remaining · resets in 30m" {
 		t.Fatalf("body=%q", result.Body)
 	}
@@ -41,8 +45,29 @@ func TestFormatNotificationBody_MinutesOnly(t *testing.T) {
 func TestFormatNotificationBody_PastReset(t *testing.T) {
 	nowMs := int64(1_800_000_000_000)
 	resetsAt := nowMs/1000 - 100
-	result := FormatNotificationBody(WindowFiveHour, Bucket5, resetsAt, nowMs)
+	result := FormatNotificationBody(WindowFiveHour, Bucket5, resetsAt, nowMs, "")
 	if result.Body != "5% remaining · resets in 0m" {
+		t.Fatalf("body=%q", result.Body)
+	}
+}
+
+func TestFormatNotificationBody_UsedInvertsFiredBucket(t *testing.T) {
+	nowMs := int64(1_800_000_000_000)
+	resetsAt := nowMs/1000 + 2*3600 + 15*60
+	result := FormatNotificationBody(WindowFiveHour, Bucket20, resetsAt, nowMs, core.LimitPercentUsed)
+	if result.Body != "80% used · resets in 2h 15m" {
+		t.Fatalf("body=%q", result.Body)
+	}
+}
+
+func TestFormatProviderPrimaryNotification_UsedInvertsFiredBucket(t *testing.T) {
+	nowMs := int64(1_800_000_000_000)
+	resetsAt := nowMs/1000 + 2*3600
+	result := FormatProviderPrimaryNotification("Codex", Bucket20, resetsAt, nowMs, core.LimitPercentUsed)
+	if result.Title != "Codex limit" {
+		t.Fatalf("title=%q", result.Title)
+	}
+	if result.Body != "80% used · resets in 2h 0m" {
 		t.Fatalf("body=%q", result.Body)
 	}
 }

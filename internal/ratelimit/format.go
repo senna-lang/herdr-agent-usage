@@ -6,6 +6,8 @@ package ratelimit
 import (
 	"fmt"
 	"strconv"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 )
 
 // WindowKey is a Claude rate-limit window label key.
@@ -45,17 +47,19 @@ func formatDuration(remainingMs int64) string {
 }
 
 // FormatNotificationBody builds Claude window notification text.
-// remainingBucket is the configured remaining-percent threshold.
+// remainingBucket is the configured remaining-percent threshold. percent
+// only changes the rendered number and word; firing still uses remaining.
 func FormatNotificationBody(
 	windowKey WindowKey,
 	remainingBucket Bucket,
 	resetsAtEpochSeconds int64,
 	nowMs int64,
+	percent core.LimitPercent,
 ) NotificationText {
 	remainingMs := resetsAtEpochSeconds*1000 - nowMs
 	return NotificationText{
 		Title: windowLabel[windowKey],
-		Body:  fmt.Sprintf("%s%% remaining · resets in %s", remainingBucket, formatDuration(remainingMs)),
+		Body:  formatLimitBucketBody(remainingBucket, remainingMs, percent),
 	}
 }
 
@@ -65,10 +69,19 @@ func FormatProviderPrimaryNotification(
 	remainingBucket Bucket,
 	resetsAtEpochSeconds int64,
 	nowMs int64,
+	percent core.LimitPercent,
 ) NotificationText {
 	remainingMs := resetsAtEpochSeconds*1000 - nowMs
 	return NotificationText{
 		Title: providerLabel + " limit",
-		Body:  fmt.Sprintf("%s%% remaining · resets in %s", remainingBucket, formatDuration(remainingMs)),
+		Body:  formatLimitBucketBody(remainingBucket, remainingMs, percent),
 	}
+}
+
+func formatLimitBucketBody(remainingBucket Bucket, remainingMs int64, percent core.LimitPercent) string {
+	word := "remaining"
+	if percent.Used() {
+		word = "used"
+	}
+	return fmt.Sprintf("%d%% %s · resets in %s", percent.InvertRemainingBucket(string(remainingBucket)), word, formatDuration(remainingMs))
 }

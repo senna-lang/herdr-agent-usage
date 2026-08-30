@@ -9,6 +9,8 @@ package limits
 import (
 	"fmt"
 	"math"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 )
 
 // FormatSidebarBurn renders a pane's total token consumption (and USD cost,
@@ -69,8 +71,10 @@ func formatCompactTokens(tokens float64) string {
 // recorded reset time has passed: providers may refresh that window shortly
 // after the boundary, and switching to a longer window makes the sidebar
 // unstable. Collection freshness is handled by the provider adapters.
-// Context usage remains in its own $context row.
-func FormatSidebarLimit(provider ProviderLimits, _ int64) string {
+// Context usage remains in its own $context row. percent selects remaining
+// (default) vs used presentation; the tag has no left/used suffix.
+func FormatSidebarLimit(provider ProviderLimits, _ int64, percent core.LimitPercent) string {
+
 	candidates := []struct {
 		window   *LimitWindow
 		fallback string
@@ -109,5 +113,6 @@ func FormatSidebarLimit(provider ProviderLimits, _ int64) string {
 	if shortest == nil {
 		return ""
 	}
-	return fmt.Sprintf("%s %d%%", windowTag(shortest.window, shortest.fallback), remainingOf(shortest.window.UsedPercentage))
+	return fmt.Sprintf("%s %d%%", windowTag(shortest.window, shortest.fallback), percent.DisplayPercent(remainingOf(shortest.window.UsedPercentage)))
+
 }
