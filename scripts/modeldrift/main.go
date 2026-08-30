@@ -31,10 +31,13 @@ import (
 
 const defaultLiteLLMURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 
-// ignoredModels are LiteLLM Anthropic entries we deliberately do not track:
-// pre-4.5 models that Claude Code paid plans no longer default to. A new model
-// NOT in this set that resolves to nil is reported as "possibly new" so a human
-// decides whether to add it here or to modelwindows.go.
+// ignoredModels are LiteLLM Anthropic entries we deliberately do not track.
+// A new model NOT in this set that resolves to nil is reported as "possibly
+// new" so a human decides whether to add it here or to modelwindows.go.
+//
+// Tracked members:
+//   - pre-4.5 models Claude Code paid plans no longer default to
+//   - gated Mythos IDs that are not Claude Code paid-plan models
 var ignoredModels = map[string]bool{
 	"claude-3-7-sonnet-20250219": true,
 	"claude-3-haiku-20240307":    true,
@@ -42,6 +45,11 @@ var ignoredModels = map[string]bool{
 	"claude-4-opus-20250514":     true,
 	"claude-4-sonnet-20250514":   true,
 	"claude-opus-4-20250514":     true,
+	// Project Glasswing / research preview. Same 1M window as Fable 5,
+	// which is already in modelwindows.go. Unknown models fall back to
+	// absolute tokens, so omitting these only drops the % display.
+	"claude-mythos-5":       true,
+	"claude-mythos-preview": true,
 }
 
 // intentionalOverrides are models where our domain (the window Claude Code
