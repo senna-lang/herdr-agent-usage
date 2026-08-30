@@ -123,7 +123,10 @@ herdr plugin action invoke usagebar.setup
 | OMP (Oh My Pi) | Yes | Yes | Session jsonl plus its credential metadata. Subscription routes: OpenCode Go, Grok OAuth, Anthropic OAuth → Claude, and OpenAI Codex OAuth → Codex. API-key backends show backend-scoped session burn |
 | Pi coding agent | Yes | Yes | Session jsonl plus `~/.pi/agent/auth.json`; context windows come from Pi's `models-store.json` / `models.json`, and session trees plus compaction boundaries are respected. Uses the same recognized OAuth/subscription routes and pay-as-you-go rules as OMP |
 
-Percentages in the limits pane are **remaining** (`% left`). Higher is safer.
+Percentages in the limits pane default to **remaining** (`% left`). Higher is safer.
+Set `[ui] limit_percent = "used"` to show consumption instead; the bar fills as
+the window burns, but colour still tracks remaining headroom.
+
 
 ## Agent Usage pane
 
@@ -182,13 +185,19 @@ Created on first `usagebar.setup` (or when missing):
 [notify]
 enabled = true
 remaining_thresholds = [50, 20, 10, 5]
+
+[ui]
+limit_percent = "remaining"  # or "used"
 ```
 
 `enabled = false` suppresses all Agent Usage toasts, including remaining-limit
 warnings and update-available notices; statusLine summaries and cached limits
 continue to refresh. `remaining_thresholds` accepts remaining percentages from
 1 through 100 (for example `[30, 10]`); each threshold can notify once per
-window, from least to most severe.
+window, from least to most severe. `limit_percent = "used"` inverts the displayed
+number (and bar fill) on the pane, sidebar `$limit`, statusLine, and toast body;
+notify firing stays on remaining thresholds.
+
 
 ### Multiple Claude accounts
 

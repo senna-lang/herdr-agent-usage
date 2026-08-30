@@ -1,13 +1,16 @@
 /**
  * Renders a list of ProviderLimits as text for a plugin pane.
  *
- * The remaining amount is shown as a bar gauge. Herdr's plugin pane clips
- * the top lines when the viewport hugs the bottom, so we render in three
- * tiers based on the pane's rows budget:
+ * Quota percentages default to remaining (headroom). [ui] limit_percent = "used"
+ * inverts the number and bar fill so they track consumption; colour still
+ * follows remaining headroom. Herdr's plugin pane clips the top lines when
+ * the viewport hugs the bottom, so we render in three tiers based on the
+ * pane's rows budget:
  *   1. rich      : header + 2 bars + extras (pane/note)
  *   2. rich-slim : header + 2 bars (no extras)
  *   3. compact   : 1 line per provider (inline mini bar)
  */
+
 package limits
 
 import (
@@ -20,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/bar"
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 )
 
 // PanelLayout gathers external layout dependencies (color/width/height).
@@ -30,6 +34,8 @@ type PanelLayout struct {
 	// EmptyMessage replaces the default "(no usage data yet)" text when the
 	// provider list is empty (e.g. "(no agent panes open)" for active-only mode).
 	EmptyMessage string
+	// LimitPercent selects remaining (default) vs used presentation.
+	LimitPercent core.LimitPercent
 }
 
 var defaultLayout = PanelLayout{Columns: 44, Rows: 9999, Color: false}
@@ -137,8 +143,12 @@ func windowLine(w *LimitWindow, tag string, layout PanelLayout, nowMs int64) str
 	}
 	rem := remainingOf(w.UsedPercentage)
 	tone := bar.ToneForRemaining(float64(rem))
-	barStr := bar.Colorize(bar.RenderBar(float64(rem), barWidth(layout.Columns)), tone, layout.Color)
-	pct := bar.Colorize(fmt.Sprintf("%3d%% left", rem), tone, layout.Color)
+	barStr := bar.Colorize(bar.RenderBar(layout.LimitPercent.BarFill(rem), barWidth(layout.Columns)), tone, layout.Color)
+	word := "left"
+	if layout.LimitPercent.Used() {
+		word = "used"
+	}
+	pct := bar.Colorize(fmt.Sprintf("%3d%% %s", layout.LimitPercent.DisplayPercent(rem), word), tone, layout.Color)
 	line := "  " + tagCol + "  " + barStr + "   " + pct
 	if w.ResetsAt != nil && *w.ResetsAt > 0 {
 		hint := formatResetIn(*w.ResetsAt*1000 - nowMs)
@@ -181,8 +191,8 @@ func inlineWindow(w *LimitWindow, tag string, layout PanelLayout) string {
 	}
 	rem := remainingOf(w.UsedPercentage)
 	tone := bar.ToneForRemaining(float64(rem))
-	barStr := bar.Colorize(bar.RenderBar(float64(rem), 5), tone, layout.Color)
-	pct := bar.Colorize(fmt.Sprintf("%d%%", rem), tone, layout.Color)
+	barStr := bar.Colorize(bar.RenderBar(layout.LimitPercent.BarFill(rem), 5), tone, layout.Color)
+	pct := bar.Colorize(fmt.Sprintf("%d%%", layout.LimitPercent.DisplayPercent(rem)), tone, layout.Color)
 	warn := ""
 	if w.RunOut != nil && w.RunOut.EmptyBeforeReset {
 		warn = bar.Colorize("⚠", bar.ToneLow, layout.Color)

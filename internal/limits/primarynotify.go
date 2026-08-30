@@ -7,6 +7,7 @@
 package limits
 
 import (
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/ratelimit"
 )
@@ -23,6 +24,7 @@ func processProvider(
 	nowMs int64,
 	thresholds []int,
 	notify NotifyFunc,
+	percent core.LimitPercent,
 ) *ratelimit.WindowState {
 	primary := provider.Primary
 	if primary == nil || primary.ResetsAt == nil {
@@ -44,6 +46,7 @@ func processProvider(
 		*decision.BucketToNotify,
 		*primary.ResetsAt,
 		nowMs,
+		percent,
 	)
 	return ratelimit.ApplyNotifyResult(previous, decision.NewState, notify(text.Title, text.Body))
 }
@@ -58,6 +61,7 @@ func CheckProviderPrimaryLimitsWithThresholds(
 	thresholds []int,
 	notify NotifyFunc,
 	claudeProfiles []claude.ClaudeProfile,
+	percent core.LimitPercent,
 ) ProviderNotifyState {
 	next := make(ProviderNotifyState, len(current)+len(providers))
 	for k, v := range current {
@@ -68,7 +72,7 @@ func CheckProviderPrimaryLimitsWithThresholds(
 			continue
 		}
 		prev := current[provider.ProviderID]
-		next[provider.ProviderID] = processProvider(provider, prev, nowMs, thresholds, notify)
+		next[provider.ProviderID] = processProvider(provider, prev, nowMs, thresholds, notify, percent)
 	}
 	return next
 }
@@ -81,5 +85,5 @@ func CheckProviderPrimaryLimits(
 	notify NotifyFunc,
 	claudeProfiles []claude.ClaudeProfile,
 ) ProviderNotifyState {
-	return CheckProviderPrimaryLimitsWithThresholds(providers, current, nowMs, nil, notify, claudeProfiles)
+	return CheckProviderPrimaryLimitsWithThresholds(providers, current, nowMs, nil, notify, claudeProfiles, core.LimitPercentRemaining)
 }

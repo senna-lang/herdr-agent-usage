@@ -264,7 +264,7 @@ func TestSidebarSecondRowContract(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			providerText, limitText := formatSidebarBillingTokens(
 				tt.mode, tt.fallback, tt.display, tt.providerLimits,
-				tt.tokens, tt.cost, 1_800_000_000_000,
+				tt.tokens, tt.cost, 1_800_000_000_000, "",
 			)
 			if providerText != tt.wantProvider || limitText != tt.wantLim {
 				t.Fatalf("got provider=%q limit=%q, want provider=%q limit=%q", providerText, limitText, tt.wantProvider, tt.wantLim)

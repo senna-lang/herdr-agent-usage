@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
@@ -29,6 +30,13 @@ func processEnvMap() map[string]string {
 // the single implicit default when none are configured) from process env.
 func ResolvedClaudeProfiles() []claude.ClaudeProfile {
 	return setup.ResolveClaudeProfiles(processEnvMap())
+}
+
+// ResolvedLimitPercent is the plugin-config presentation direction for quota
+// percentages. Unknown or missing values are remaining.
+func ResolvedLimitPercent() core.LimitPercent {
+	cfg := setup.LoadPluginConfig(setup.ResolvePluginConfigDir(processEnvMap()))
+	return cfg.LimitPercent
 }
 
 // profileByIDIn looks up one profile by provider id within an already-resolved

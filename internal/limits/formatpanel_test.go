@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 )
 
 var wide = PanelLayout{Columns: 60, Rows: 9999, Color: false}
@@ -45,6 +47,31 @@ func TestFormatProviderBlock_HeaderBar(t *testing.T) {
 		t.Fatal("should not contain source")
 	}
 	assertNoANSI(t, text)
+}
+
+func TestFormatProviderBlock_UsedPercentInvertsNumberAndBarNotTone(t *testing.T) {
+	layout := PanelLayout{Columns: 60, Rows: 9999, Color: false, LimitPercent: core.LimitPercentUsed}
+	text := FormatProviderBlock(sampleProvider(), layout, 1_700_000_000_000)
+	for _, want := range []string{"10% used", "40% used"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "left") {
+		t.Fatalf("used mode must not say left:\n%s", text)
+	}
+	colored := FormatProviderBlock(sampleProvider(), PanelLayout{Columns: 60, Rows: 9999, Color: true, LimitPercent: core.LimitPercentUsed}, 0)
+	if !strings.Contains(colored, "\x1b[32m") {
+		t.Fatal("tone must stay remaining-based (green at 90% left / 10% used)")
+	}
+}
+
+func TestFormatLimitsPanel_UsedCompactInvertsInlinePercent(t *testing.T) {
+	layout := PanelLayout{Columns: 60, Rows: 9, Color: false, LimitPercent: core.LimitPercentUsed}
+	compact := FormatLimitsPanel([]ProviderLimits{sampleProvider(), sampleProvider(), sampleProvider()}, 1_700_000_000_000, layout)
+	if !strings.Contains(compact, "10%") || strings.Contains(compact, "90%") {
+		t.Fatalf("compact used mode should show consumed percent:\n%s", compact)
+	}
 }
 
 func TestFormatProviderBlock_EmDash(t *testing.T) {

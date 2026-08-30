@@ -4,25 +4,26 @@
 package limits
 
 import (
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 	"github.com/senna-lang/herdr-agent-usage/internal/ratelimit"
 )
 
 // NotifyProviderPrimaryLimits checks non-Claude primary windows with default
 // thresholds under the shared notification-state lock.
 func NotifyProviderPrimaryLimits(providers []ProviderLimits, nowMs int64) {
-	NotifyProviderPrimaryLimitsWithThresholds(providers, nowMs, nil)
+	NotifyProviderPrimaryLimitsWithThresholds(providers, nowMs, nil, core.LimitPercentRemaining)
 }
 
 // NotifyProviderPrimaryLimitsWithThresholds applies plugin-configured
 // remaining-percent thresholds under the shared notification-state lock.
-func NotifyProviderPrimaryLimitsWithThresholds(providers []ProviderLimits, nowMs int64, thresholds []int) {
+func NotifyProviderPrimaryLimitsWithThresholds(providers []ProviderLimits, nowMs int64, thresholds []int, percent core.LimitPercent) {
 	claudeProfiles := ResolvedClaudeProfiles()
 	ratelimit.WithLockedProviderState(func(current ratelimit.ProviderNotifyStateMap) ratelimit.ProviderNotifyStateMap {
 		cur := ProviderNotifyState{}
 		for k, v := range current {
 			cur[k] = v
 		}
-		next := CheckProviderPrimaryLimitsWithThresholds(providers, cur, nowMs, thresholds, herdrcliShowNotification, claudeProfiles)
+		next := CheckProviderPrimaryLimitsWithThresholds(providers, cur, nowMs, thresholds, herdrcliShowNotification, claudeProfiles, percent)
 		out := ratelimit.ProviderNotifyStateMap{}
 		for k, v := range next {
 			out[k] = v

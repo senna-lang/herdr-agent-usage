@@ -1,8 +1,11 @@
 /**
  * Reads rate_limits from the statusLine stdin and sends notifications when
- * a window crosses a bucket threshold (5h and 7d).
+ * a window crosses a bucket threshold (5h and 7d). Toast body presentation
+ * follows LimitPercent; bucket decisions stay remaining-based.
  */
 package ratelimit
+
+import "github.com/senna-lang/herdr-agent-usage/internal/core"
 
 // ShowNotificationFn displays a toast; returns whether it was shown.
 type ShowNotificationFn func(title, body string) bool
@@ -15,6 +18,7 @@ func ProcessWindow(
 	nowMs int64,
 	thresholds []int,
 	notify ShowNotificationFn,
+	percent core.LimitPercent,
 ) *WindowState {
 	if input == nil {
 		return previous
@@ -27,7 +31,7 @@ func ProcessWindow(
 		next := decision.NewState
 		return &next
 	}
-	text := FormatNotificationBody(key, *decision.BucketToNotify, input.ResetsAt, nowMs)
+	text := FormatNotificationBody(key, *decision.BucketToNotify, input.ResetsAt, nowMs, percent)
 	shown := false
 	if notify != nil {
 		shown = notify(text.Title, text.Body)
@@ -44,7 +48,7 @@ func RunRateLimitCheck(stdinJSON string, nowMs int64, notify ShowNotificationFn)
 // RunRateLimitCheckIn is RunRateLimitCheck scoped to an explicit per-profile
 // state dir, so two Claude accounts keep independent notify state.
 func RunRateLimitCheckIn(stateDir string, stdinJSON string, nowMs int64, notify ShowNotificationFn) {
-	RunRateLimitCheckWithThresholdsIn(stateDir, stdinJSON, nowMs, nil, notify)
+	RunRateLimitCheckWithThresholdsIn(stateDir, stdinJSON, nowMs, nil, notify, "")
 }
 
 // RunRateLimitCheckWithThresholdsIn applies the configured remaining-percent
@@ -55,6 +59,7 @@ func RunRateLimitCheckWithThresholdsIn(
 	nowMs int64,
 	thresholds []int,
 	notify ShowNotificationFn,
+	percent core.LimitPercent,
 ) {
 	rateLimits := ParseRateLimits(stdinJSON)
 	if rateLimits == nil {
@@ -65,8 +70,8 @@ func RunRateLimitCheckWithThresholdsIn(
 	}
 	WithLockedStateIn(stateDir, func(current ClaudeNotifyState) ClaudeNotifyState {
 		return ClaudeNotifyState{
-			FiveHour: ProcessWindow(WindowFiveHour, rateLimits.FiveHour, current.FiveHour, nowMs, thresholds, notify),
-			SevenDay: ProcessWindow(WindowSevenDay, rateLimits.SevenDay, current.SevenDay, nowMs, thresholds, notify),
+			FiveHour: ProcessWindow(WindowFiveHour, rateLimits.FiveHour, current.FiveHour, nowMs, thresholds, notify, percent),
+			SevenDay: ProcessWindow(WindowSevenDay, rateLimits.SevenDay, current.SevenDay, nowMs, thresholds, notify, percent),
 		}
 	})
 }

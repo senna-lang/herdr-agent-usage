@@ -147,6 +147,7 @@ func formatSidebarBillingTokens(
 	providerLimits *limits.ProviderLimits,
 	totalTokens, totalCostUSD float64,
 	nowMs int64,
+	percent core.LimitPercent,
 ) (providerText, limitText string) {
 	providerText = fallbackProviderText
 	if billingMode != limits.BillingPayAsYouGo {
@@ -154,7 +155,7 @@ func formatSidebarBillingTokens(
 			providerText = displayProviderID
 		}
 		if providerLimits != nil {
-			limitText = limits.FormatSidebarLimit(*providerLimits, nowMs)
+			limitText = limits.FormatSidebarLimit(*providerLimits, nowMs, percent)
 		}
 		return providerText, limitText
 	}
@@ -281,7 +282,7 @@ func RunUpdateForPane(paneID string, force bool) {
 	fallbackProviderText := formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot)
 	providerText, limitText := formatSidebarBillingTokens(
 		billingMode, fallbackProviderText, displayProviderID,
-		providerLimits, totalTokens, totalCostUSD, nowMs,
+		providerLimits, totalTokens, totalCostUSD, nowMs, limits.ResolvedLimitPercent(),
 	)
 
 	// With 2+ configured accounts of the same family, the $limit row's job

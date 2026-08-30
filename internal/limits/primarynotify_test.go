@@ -6,6 +6,7 @@ package limits
 import (
 	"testing"
 
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/ratelimit"
 )
@@ -143,6 +144,7 @@ func TestCheckProviderPrimaryLimitsWithThresholds_UsesConfiguredBuckets(t *testi
 			return true
 		},
 		defaultClaudeProfiles,
+		"",
 	)
 	if len(notifications) != 0 {
 		t.Fatalf("45%% remaining must not cross a 30%% threshold: %v", notifications)
@@ -164,11 +166,34 @@ func TestCheckProviderPrimaryLimitsWithThresholds_UsesConfiguredBuckets(t *testi
 			return true
 		},
 		defaultClaudeProfiles,
+		"",
 	)
 	if len(notifications) != 1 || notifications[0] != "Codex limit: 30% remaining · resets in 2h 0m" {
 		t.Fatalf("notifications=%v", notifications)
 	}
 	if next["codex"] == nil || next["codex"].NotifiedBucket == nil || *next["codex"].NotifiedBucket != ratelimit.Bucket("30") {
 		t.Fatalf("next=%+v", next["codex"])
+	}
+}
+
+func TestCheckProviderPrimaryLimitsWithThresholds_UsedInvertsToastBody(t *testing.T) {
+	var notifications []string
+	p := notifyTestProvider(func(pl *ProviderLimits) {
+		pl.Primary.UsedPercentage = 85
+	})
+	CheckProviderPrimaryLimitsWithThresholds(
+		[]ProviderLimits{p},
+		ProviderNotifyState{},
+		notifyNowMs,
+		[]int{20},
+		func(title, body string) bool {
+			notifications = append(notifications, title+": "+body)
+			return true
+		},
+		defaultClaudeProfiles,
+		core.LimitPercentUsed,
+	)
+	if len(notifications) != 1 || notifications[0] != "Codex limit: 80% used · resets in 2h 0m" {
+		t.Fatalf("notifications=%v", notifications)
 	}
 }

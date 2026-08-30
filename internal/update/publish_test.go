@@ -6,6 +6,7 @@ package update
 import (
 	"testing"
 
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 	"github.com/senna-lang/herdr-agent-usage/internal/limits"
 )
 
@@ -26,7 +27,7 @@ func TestLimitPublishTargets_SubscriptionPaneGetsMatchingProvider(t *testing.T) 
 		BillingMode:      limits.BillingSubscription,
 		LimitsProviderID: "claude",
 	}}
-	got := LimitPublishTargets(providers, panes, 0)
+	got := LimitPublishTargets(providers, panes, 0, "")
 	if len(got) != 1 || got[0].PaneID != "w1:p1" || got[0].LimitToken != "5h 72%" {
 		t.Fatalf("got %#v", got)
 	}
@@ -44,7 +45,7 @@ func TestLimitPublishTargets_TwoPanesSameAccount(t *testing.T) {
 		{PaneID: "w1:p1", Resolved: true, BillingMode: limits.BillingSubscription, LimitsProviderID: "claude"},
 		{PaneID: "w1:p2", Resolved: true, BillingMode: limits.BillingSubscription, LimitsProviderID: "claude"},
 	}
-	got := LimitPublishTargets(providers, panes, 0)
+	got := LimitPublishTargets(providers, panes, 0, "")
 	if len(got) != 2 {
 		t.Fatalf("len=%d", len(got))
 	}
@@ -62,7 +63,7 @@ func TestLimitPublishTargets_RoutesEachPaneToOwnProvider(t *testing.T) {
 		{PaneID: "p-claude", Resolved: true, BillingMode: limits.BillingSubscription, LimitsProviderID: "claude"},
 		{PaneID: "p-grok", Resolved: true, BillingMode: limits.BillingSubscription, LimitsProviderID: "grok"},
 	}
-	got := LimitPublishTargets(providers, panes, 0)
+	got := LimitPublishTargets(providers, panes, 0, "")
 	if len(got) != 2 || got[0].LimitToken != "5h 72%" || got[1].LimitToken != "7d 14%" {
 		t.Fatalf("got %#v", got)
 	}
@@ -74,7 +75,7 @@ func TestLimitPublishTargets_SkipsMissingProvider(t *testing.T) {
 		Resolved:         true,
 		BillingMode:      limits.BillingSubscription,
 		LimitsProviderID: "claude",
-	}}, 0)
+	}}, 0, "")
 	if len(got) != 0 {
 		t.Fatalf("got %#v", got)
 	}
@@ -87,7 +88,7 @@ func TestLimitPublishTargets_SkipsEmptyLimit(t *testing.T) {
 		Resolved:         true,
 		BillingMode:      limits.BillingSubscription,
 		LimitsProviderID: "claude",
-	}}, 0)
+	}}, 0, "")
 	if len(got) != 0 {
 		t.Fatalf("empty windows must keep last-known-good, got %#v", got)
 	}
@@ -103,7 +104,7 @@ func TestLimitPublishTargets_SkipsPayAsYouGo(t *testing.T) {
 		Resolved:         true,
 		BillingMode:      limits.BillingPayAsYouGo,
 		LimitsProviderID: "claude",
-	}}, 0)
+	}}, 0, "")
 	if len(got) != 0 {
 		t.Fatalf("PAYG must stay on the event path, got %#v", got)
 	}
@@ -119,7 +120,7 @@ func TestLimitPublishTargets_SkipsUnresolved(t *testing.T) {
 		Resolved:         false,
 		BillingMode:      limits.BillingSubscription,
 		LimitsProviderID: "claude",
-	}}, 0)
+	}}, 0, "")
 	if len(got) != 0 {
 		t.Fatalf("got %#v", got)
 	}
@@ -135,7 +136,7 @@ func TestLimitPublishTargets_UnknownBillingFailOpen(t *testing.T) {
 		Resolved:         true,
 		BillingMode:      limits.BillingUnknown,
 		LimitsProviderID: "opencode",
-	}}, 0)
+	}}, 0, "")
 	if len(got) != 1 || got[0].LimitToken != "5h 80%" {
 		t.Fatalf("unknown billing must fail open, got %#v", got)
 	}
@@ -154,7 +155,7 @@ func TestLimitPublishTargets_MultiProfileMovesPercentToContext(t *testing.T) {
 		MultiProfile:     true,
 		AccountLabel:     "user@example.com",
 		Tokens:           map[string]string{"context": "5h 99% · ⛁ 14% (136k)"},
-	}}, 0)
+	}}, 0, "")
 	if len(got) != 1 {
 		t.Fatalf("len=%d", len(got))
 	}
@@ -177,8 +178,24 @@ func TestLimitPublishTargets_MultiProfileWithoutAccountLabelKeepsLimitRow(t *tes
 		BillingMode:      limits.BillingSubscription,
 		LimitsProviderID: "claude",
 		MultiProfile:     true,
-	}}, 0)
+	}}, 0, "")
 	if len(got) != 1 || got[0].LimitToken != "5h 72%" || got[0].ContextToken != nil {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestLimitPublishTargets_UsedPercentInvertsSidebarNumber(t *testing.T) {
+	providers := []limits.ProviderLimits{{
+		ProviderID: "claude",
+		Primary:    window(28, 300),
+	}}
+	got := LimitPublishTargets(providers, []LimitPublishPane{{
+		PaneID:           "w1:p1",
+		Resolved:         true,
+		BillingMode:      limits.BillingSubscription,
+		LimitsProviderID: "claude",
+	}}, 0, core.LimitPercentUsed)
+	if len(got) != 1 || got[0].LimitToken != "5h 28%" {
 		t.Fatalf("got %#v", got)
 	}
 }

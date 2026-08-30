@@ -12,6 +12,7 @@ package update
 import (
 	"strings"
 
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 	"github.com/senna-lang/herdr-agent-usage/internal/herdrcli"
 	"github.com/senna-lang/herdr-agent-usage/internal/limits"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
@@ -43,7 +44,7 @@ type LimitPublishTarget struct {
 
 // LimitPublishTargets decides $limit (and multi-profile $context prefix)
 // writes from one collected snapshot. It does not I/O.
-func LimitPublishTargets(providers []limits.ProviderLimits, panes []LimitPublishPane, nowMs int64) []LimitPublishTarget {
+func LimitPublishTargets(providers []limits.ProviderLimits, panes []LimitPublishPane, nowMs int64, percent core.LimitPercent) []LimitPublishTarget {
 	byID := make(map[string]limits.ProviderLimits, len(providers))
 	for _, provider := range providers {
 		byID[provider.ProviderID] = provider
@@ -57,7 +58,7 @@ func LimitPublishTargets(providers []limits.ProviderLimits, panes []LimitPublish
 		if !ok {
 			continue
 		}
-		limitText := limits.FormatSidebarLimit(provider, nowMs)
+		limitText := limits.FormatSidebarLimit(provider, nowMs, percent)
 		if limitText == "" {
 			continue
 		}
@@ -187,5 +188,6 @@ func PublishCollectedLimitsWith(
 		}
 		panes = append(panes, pane)
 	}
-	applyLimitPublishTargets(writer, panes, LimitPublishTargets(providers, panes, nowMs))
+	applyLimitPublishTargets(writer, panes, LimitPublishTargets(providers, panes, nowMs, limits.ResolvedLimitPercent()))
+
 }
