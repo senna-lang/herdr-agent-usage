@@ -81,14 +81,14 @@ func TestFormatCacheStatus_HitAndTTL(t *testing.T) {
 	expires := int64(1_700_003_480)
 	cache := CacheUsage{HitPercent: 99.6, ExpiresAtUnix: &expires}
 	got := FormatCacheStatus(cache, 1_700_000_000)
-	if got != "cache reuse 99.6% · ttl≈58m" {
+	if got != "cache hit 99.6% · ttl≈58m" {
 		t.Fatalf("got %q", got)
 	}
 }
 
 func TestFormatCacheStatus_HitOnlyWhenTTLUnknown(t *testing.T) {
 	got := FormatCacheStatus(CacheUsage{HitPercent: 80}, 1)
-	if got != "cache reuse 80.0%" {
+	if got != "cache hit 80.0%" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -96,14 +96,14 @@ func TestFormatCacheStatus_HitOnlyWhenTTLUnknown(t *testing.T) {
 func TestFormatCacheStatus_ExpiredTTLWarns(t *testing.T) {
 	expires := int64(1_000)
 	got := FormatCacheStatus(CacheUsage{HitPercent: 50, ExpiresAtUnix: &expires}, 2_000)
-	if got != "⚠️ cache reuse 50.0%" {
+	if got != "⚠️ cache hit 50.0%" {
 		t.Fatalf("got %q", got)
 	}
 }
 
 func TestFormatCacheStatus_UnknownTTLDoesNotWarn(t *testing.T) {
 	got := FormatCacheStatus(CacheUsage{HitPercent: 10}, 2_000)
-	if got != "cache reuse 10.0%" {
+	if got != "cache hit 10.0%" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -111,7 +111,37 @@ func TestFormatCacheStatus_UnknownTTLDoesNotWarn(t *testing.T) {
 func TestFormatCacheStatus_HourTTL(t *testing.T) {
 	expires := int64(1_700_003_600)
 	got := FormatCacheStatus(CacheUsage{HitPercent: 10, ExpiresAtUnix: &expires}, 1_700_000_000)
-	if got != "cache reuse 10.0% · ttl≈1h" {
+	if got != "cache hit 10.0% · ttl≈1h" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestSidebarCache_PrefersSessionHitRateKeepsLatestTTL(t *testing.T) {
+	expires := int64(1_700_000_300)
+	usage := ContextUsage{
+		Cache:        &CacheUsage{HitPercent: 0, ExpiresAtUnix: &expires},
+		SessionCache: &CacheUsage{HitPercent: 43.1},
+	}
+	got := SidebarCache(usage)
+	if got == nil || got.HitPercent != 43.1 || got.ExpiresAtUnix == nil || *got.ExpiresAtUnix != expires {
+		t.Fatalf("%+v", got)
+	}
+	if FormatCacheStatus(*got, 1_700_000_000) != "cache hit 43.1% · ttl≈5m" {
+		t.Fatalf("got %q", FormatCacheStatus(*got, 1_700_000_000))
+	}
+}
+
+func TestCacheHitBandFor(t *testing.T) {
+	if CacheHitBandFor(80) != CacheHitHigh {
+		t.Fatal("80")
+	}
+	if CacheHitBandFor(79.9) != CacheHitMid {
+		t.Fatal("79.9")
+	}
+	if CacheHitBandFor(50) != CacheHitMid {
+		t.Fatal("50")
+	}
+	if CacheHitBandFor(49.9) != CacheHitLow {
+		t.Fatal("49.9")
 	}
 }

@@ -1,8 +1,9 @@
 /**
- * Fans session-specific cache diagnostics out to open panes.
+ * Fans session-cumulative cache diagnostics out to open panes as `$cache_*`.
  *
  * Unlike account-level limits, cache data belongs to each session. This
- * publisher reads every open pane's resolved usage but writes only `$cache`.
+ * publisher reads every open pane's resolved usage but writes only cache
+ * metadata, which it clears when the user opts out.
  */
 package update
 
@@ -18,6 +19,15 @@ import (
 // PublishOpenPaneCaches refreshes the $cache token for every open agent pane.
 // It deliberately does not re-collect provider limits or alter $context.
 func PublishOpenPaneCaches(now time.Time) {
+	if !limits.ResolvedCacheDisplay() {
+		clearOpenPaneCacheTokensWith(
+			herdrMetadataTokenWriter,
+			ListOpenPaneSnapshots,
+			herdrcli.GetPaneInfo,
+		)
+		return
+	}
+
 	claudeProfiles := limits.ResolvedClaudeProfiles()
 	codexProfiles := limits.ResolvedCodexProfiles()
 	grokProfiles := limits.ResolvedGrokProfiles()
@@ -48,6 +58,24 @@ func PublishOpenPaneCaches(now time.Time) {
 		},
 		now,
 	)
+}
+
+// clearOpenPaneCacheTokensWith removes all cache metadata immediately after a
+// user opt-out. It intentionally clears working panes too: retaining stale
+// cache text would violate an explicit display preference.
+func clearOpenPaneCacheTokensWith(
+	writer metadataTokenWriter,
+	listSnapshots func() ([]limits.OpenPaneSnapshot, bool),
+	getPane func(string) herdrcli.PaneInfo,
+) {
+	snapshots, ok := listSnapshots()
+	if !ok {
+		return
+	}
+	for _, snapshot := range snapshots {
+		pane := getPane(snapshot.PaneID)
+		writeCacheHitTokensWith(writer, pane.Tokens, snapshot.PaneID, "", 0, false, false)
+	}
 }
 
 func publishOpenPaneCachesWith(
@@ -81,12 +109,13 @@ func writePaneCacheToken(
 	now time.Time,
 ) {
 	cacheText := ""
-	if usage != nil && usage.Cache != nil {
-		cacheText = core.FormatCacheStatus(*usage.Cache, now.Unix())
+	hit := 0.0
+	if usage != nil {
+		if cache := core.SidebarCache(*usage); cache != nil {
+			cacheText = core.FormatCacheStatus(*cache, now.Unix())
+			hit = cache.HitPercent
+		}
 	}
 	retainExistingOnEmpty := pane.AgentStatus != nil && *pane.AgentStatus == "working"
-	if retainExistingOnEmpty && cacheText == "" {
-		return
-	}
-	writeMetadataTokenWith(writer, pane.Tokens, paneID, "cache", cacheText, false)
+	writeCacheHitTokensWith(writer, pane.Tokens, paneID, cacheText, hit, false, retainExistingOnEmpty)
 }

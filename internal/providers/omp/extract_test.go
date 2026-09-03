@@ -183,8 +183,11 @@ func TestExtractLatestUsageFromLines_SessionCacheAndAnthropicTTL(t *testing.T) {
 	if got == nil || got.ContextTokens != 200 {
 		t.Fatalf("occupancy %+v", got)
 	}
-	if got.Cache == nil || got.Cache.ReadTokens != 100 || got.Cache.CreationTokens != 100 {
-		t.Fatalf("cache %+v", got.Cache)
+	if got.Cache == nil || got.Cache.ReadTokens != 100 || got.Cache.CreationTokens != 0 {
+		t.Fatalf("latest cache %+v", got.Cache)
+	}
+	if got.SessionCache == nil || got.SessionCache.ReadTokens != 100 || got.SessionCache.CreationTokens != 100 {
+		t.Fatalf("session cache %+v", got.SessionCache)
 	}
 	if got.Cache.TTLSeconds == nil || *got.Cache.TTLSeconds != 3600 {
 		t.Fatalf("ttl %+v", got.Cache.TTLSeconds)
@@ -234,6 +237,9 @@ func TestExtractLatestUsageFromLines_CompactionResetsCache(t *testing.T) {
 		t.Fatalf("occupancy %+v", got)
 	}
 	if got.Cache == nil || got.Cache.ReadTokens != 180 || got.Cache.CreationTokens != 0 {
-		t.Fatalf("post-compact cache must not include pre-compact rows: %+v", got.Cache)
+		t.Fatalf("post-compact latest cache must not include pre-compact rows: %+v", got.Cache)
+	}
+	if got.SessionCache == nil || got.SessionCache.ReadTokens != 180 || got.SessionCache.CreationTokens != 0 {
+		t.Fatalf("post-compact session cache must not include pre-compact rows: %+v", got.SessionCache)
 	}
 }

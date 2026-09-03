@@ -17,5 +17,6 @@ type TranscriptUsage struct {
 	Compacted bool
 	// SessionCache is the cumulative prompt-cache counters after the newest
 	// compact boundary. Nil when compacted or when the session recorded none.
+	// Latest-turn counters live on the row fields themselves.
 	SessionCache *core.CacheUsage
 }

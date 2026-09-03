@@ -58,14 +58,17 @@ func TestToContextUsage_CompactedPassthrough(t *testing.T) {
 	}
 }
 
-func TestToContextUsage_CopiesSessionCache(t *testing.T) {
-	u := usage("claude-sonnet-5", 310_000)
-	u.InputTokens = 100
-	u.CacheCreationInputTokens = 50
-	u.SessionCache = core.CacheFromTokenCounts(100, 310_000, 50)
+func TestToContextUsage_SplitsLatestAndSessionCache(t *testing.T) {
+	u := usage("claude-sonnet-5", 180)
+	u.InputTokens = 20
+	u.CacheCreationInputTokens = 0
+	u.SessionCache = core.CacheFromTokenCounts(150, 1250, 100)
 	got := ToContextUsage(u)
-	if got.Cache == nil || got.Cache.ReadTokens != 310_000 {
-		t.Fatalf("got %+v", got.Cache)
+	if got.Cache == nil || got.Cache.FreshInputTokens != 20 || got.Cache.ReadTokens != 180 {
+		t.Fatalf("latest cache %+v", got.Cache)
+	}
+	if got.SessionCache == nil || got.SessionCache.FreshInputTokens != 150 || got.SessionCache.ReadTokens != 1250 {
+		t.Fatalf("session cache %+v", got.SessionCache)
 	}
 }
 
@@ -75,7 +78,7 @@ func TestToContextUsage_CompactedDropsCache(t *testing.T) {
 	u.Compacted = true
 	u.SessionCache = core.CacheFromTokenCounts(5, 116000, 0)
 	got := ToContextUsage(u)
-	if !got.Compacted || got.Cache != nil {
+	if !got.Compacted || got.Cache != nil || got.SessionCache != nil {
 		t.Fatalf("compacted must drop cache: %+v", got)
 	}
 }

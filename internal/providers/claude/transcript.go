@@ -1,6 +1,8 @@
 /**
  * Reads the latest assistant usage for a given session ID from a Claude Code
- * session transcript (jsonl), including session-cumulative prompt-cache counters.
+ * session transcript (jsonl). Latest-turn cache counters stay on the row;
+ * SessionCache accumulates prompt-cache counters after the newest compact
+ * boundary.
  */
 package claude
 
@@ -80,7 +82,7 @@ func totalTokensOf(usage TranscriptUsage) int {
 //
 // SessionCache sums cache counters from assistant rows after the newest
 // compact boundary. Pre-compact rows and compacted occupancy itself publish
-// no cache, so a stale hit rate cannot outlive the compaction.
+// no cache, so a stale cumulative rate cannot outlive the compaction.
 func ExtractLatestUsageFromLines(lines []string) *TranscriptUsage {
 	compacted := false
 	compactBeforeLatest := false

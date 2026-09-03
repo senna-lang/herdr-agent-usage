@@ -19,7 +19,9 @@ type MessageUsage struct {
 	CacheFresh    int
 	CacheRead     int
 	CacheWrite    int
-	Cache         *core.CacheUsage
+	// Cache is the latest completed turn. SessionCache sums the scan window.
+	Cache        *core.CacheUsage
+	SessionCache *core.CacheUsage
 }
 
 // ContextTokensFromMessageTokens returns input + cache.read + cache.write.
@@ -113,8 +115,9 @@ func asFloat(v any) float64 {
 }
 
 // UsageFromLatestMessageJSONs uses the first assistant tokens row from the
-// start of rows (rows are newest-first) for occupancy, and sums cache
-// counters across every assistant row in the scan window.
+// start of rows (rows are newest-first) for occupancy and latest-turn cache.
+// SessionCache sums cache counters across every assistant row in the scan
+// window for the Agent Usage pane.
 func UsageFromLatestMessageJSONs(rows []string) *MessageUsage {
 	var latest *MessageUsage
 	fresh, read, write := 0, 0, 0
@@ -138,6 +141,7 @@ func UsageFromLatestMessageJSONs(rows []string) *MessageUsage {
 	if latest == nil {
 		return nil
 	}
-	latest.Cache = core.CacheFromTokenCounts(fresh, read, write)
+	latest.Cache = core.CacheFromTokenCounts(latest.CacheFresh, latest.CacheRead, latest.CacheWrite)
+	latest.SessionCache = core.CacheFromTokenCounts(fresh, read, write)
 	return latest
 }

@@ -238,8 +238,9 @@ func openPaneSnapshots() ([]limits.OpenPaneSnapshot, bool) {
 // panelSnapshot is what one panel render needs: subscription providers plus
 // pay-as-you-go spend blocks for the backends open panes are running.
 type panelSnapshot struct {
-	providers []limits.ProviderLimits
-	apiUsage  []limits.APIProviderUsage
+	providers     []limits.ProviderLimits
+	apiUsage      []limits.APIProviderUsage
+	lowCachePanes []limits.LowCachePane
 }
 
 // collectPanel gathers everything the panel shows. activeOnly hides providers
@@ -264,10 +265,16 @@ func collectPanel(nowMs int64, activeOnly bool) panelSnapshot {
 	limits.SaveUsageHistory(res.History)
 
 	// Pay-as-you-go blocks have no quota to run out of, so they skip the
-	// run-out enrichment entirely.
+	// run-out enrichment entirely. Cache diagnostics stay sidebar-only except
+	// the explicit red-band warnings passed to the panel.
+	var lowCachePanes []limits.LowCachePane
+	if limits.ResolvedCacheDisplay() {
+		lowCachePanes = update.CollectLowCachePanes(snaps)
+	}
 	return panelSnapshot{
-		providers: res.Providers,
-		apiUsage:  limits.CollectAPIProviderUsage(snaps, nowMs),
+		providers:     res.Providers,
+		apiUsage:      limits.CollectAPIProviderUsage(snaps, nowMs),
+		lowCachePanes: lowCachePanes,
 	}
 }
 
@@ -317,10 +324,15 @@ func runLimitsPane(args []string) error {
 		}
 		return layout
 	}
+	formatPanel := func(snap panelSnapshot, nowMs int64) string {
+		layout := layoutFor()
+		layout.LowCachePanes = snap.lowCachePanes
+		return limits.FormatUsagePanel(snap.providers, snap.apiUsage, nowMs, layout)
+	}
 	if once || !term.IsTerminal(int(os.Stdout.Fd())) {
 		nowMs := time.Now().UnixMilli()
 		snap := collectPanel(nowMs, activeOnly)
-		text := limits.FormatUsagePanel(snap.providers, snap.apiUsage, nowMs, layoutFor())
+		text := formatPanel(snap, nowMs)
 		fmt.Print(text)
 		if !strings.HasSuffix(text, "\n") {
 			fmt.Println()
@@ -351,7 +363,7 @@ func runLimitsPane(args []string) error {
 		if !cachedLoaded {
 			return
 		}
-		paintFrame(limits.FormatUsagePanel(cachedSnap.providers, cachedSnap.apiUsage, cachedNowMs, layoutFor()))
+		paintFrame(formatPanel(cachedSnap, cachedNowMs))
 	}
 
 	renderFull := func() {
@@ -362,7 +374,7 @@ func runLimitsPane(args []string) error {
 		update.TouchPaneHeartbeat(time.Now())
 		update.PublishCollectedLimits(cachedSnap.providers, nowMs)
 		update.PublishOpenPaneCaches(time.UnixMilli(nowMs))
-		paintFrame(limits.FormatUsagePanel(cachedSnap.providers, cachedSnap.apiUsage, nowMs, layoutFor()))
+		paintFrame(formatPanel(cachedSnap, nowMs))
 	}
 	renderFull()
 

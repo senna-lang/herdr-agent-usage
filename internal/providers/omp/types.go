@@ -12,7 +12,10 @@ type SessionUsage struct {
 	ContextTokens int
 	TotalTokens   int
 	CostUSD       float64
-	Cache         *core.CacheUsage
+	// Cache describes the latest completed turn; SessionCache aggregates the
+	// active transcript segment for detail views.
+	Cache        *core.CacheUsage
+	SessionCache *core.CacheUsage
 }
 
 // UsageEvent is one assistant turn's token/cost contribution.

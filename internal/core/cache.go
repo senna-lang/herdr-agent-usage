@@ -1,10 +1,10 @@
 /**
- * Session prompt-cache diagnostics for the sidebar.
+ * Prompt-cache diagnostics for the sidebar.
  *
  * Hit rate is session-cumulative: read / (fresh + read + creation).
- * Remaining TTL is published only from a recorded expiry: an absolute
- * expires_at, or a recorded bucket duration plus last cache-bearing
- * activity. Missing evidence leaves TTL blank rather than guessing 5m/1h.
+ * Remaining TTL is published only from a recorded expiry. A remaining TTL
+ * of 0 prefixes ⚠️. Sidebar tokens are plain text: Herdr colors $cache_high /
+ * $cache_mid / $cache_low from config.toml, not from ANSI in the value.
  */
 package core
 
@@ -13,9 +13,10 @@ import (
 	"math"
 )
 
-// CacheUsage is the prompt-cache observation for one session.
+// CacheUsage is one prompt-cache observation.
 // Counters are already aggregated by the provider; this type only carries
-// the display-ready result.
+// the display-ready result. The same type is used for a single turn and
+// for a session-cumulative segment.
 type CacheUsage struct {
 	FreshInputTokens int
 	ReadTokens       int
@@ -76,11 +77,12 @@ func RemainingTTLSeconds(cache CacheUsage, nowUnix int64) *int64 {
 	return &remaining
 }
 
-// FormatCacheStatus renders the sidebar cache row.
-// A recorded remaining TTL of 0 (prefix already cold) prefixes ⚠️.
+// FormatCacheStatus renders the sidebar cache row from session-cumulative
+// hit rate. A recorded remaining TTL of 0 (prefix already cold) prefixes ⚠️.
 // Unknown TTL is not a warning: missing expiry is not evidence of a miss.
+// The string is plain text; Herdr metadata tokens do not interpret ANSI.
 func FormatCacheStatus(cache CacheUsage, nowUnix int64) string {
-	hit := fmt.Sprintf("cache reuse %.1f%%", cache.HitPercent)
+	hit := fmt.Sprintf("cache hit %.1f%%", cache.HitPercent)
 	remaining := RemainingTTLSeconds(cache, nowUnix)
 	if remaining == nil {
 		return hit
@@ -104,4 +106,54 @@ func formatCacheTTL(seconds int64) string {
 		minutes = 1
 	}
 	return fmt.Sprintf("%dm", minutes)
+}
+
+// CacheHitBand is which styled sidebar token should carry the hit-rate row.
+type CacheHitBand string
+
+const (
+	CacheHitHigh CacheHitBand = "cache_high"
+	CacheHitMid  CacheHitBand = "cache_mid"
+	CacheHitLow  CacheHitBand = "cache_low"
+)
+
+// CacheHitTokenNames is the exclusive set written for one pane's cache row.
+var CacheHitTokenNames = []string{string(CacheHitHigh), string(CacheHitMid), string(CacheHitLow)}
+
+// CacheHitBandFor maps session hit rate onto the styled token.
+// ≥80% high/green, ≥50% mid/yellow, otherwise low/red.
+func CacheHitBandFor(hit float64) CacheHitBand {
+	if hit >= 80 {
+		return CacheHitHigh
+	}
+	if hit >= 50 {
+		return CacheHitMid
+	}
+	return CacheHitLow
+}
+
+// SidebarCache prefers session-cumulative counters for the hit rate and
+// overlays recorded TTL from the latest observation when present.
+func SidebarCache(usage ContextUsage) *CacheUsage {
+	src := usage.SessionCache
+	if src == nil {
+		src = usage.Cache
+	}
+	if src == nil {
+		return nil
+	}
+	out := *src
+	if usage.Cache == nil {
+		return &out
+	}
+	if usage.Cache.ExpiresAtUnix != nil {
+		out.ExpiresAtUnix = usage.Cache.ExpiresAtUnix
+	}
+	if usage.Cache.TTLSeconds != nil {
+		out.TTLSeconds = usage.Cache.TTLSeconds
+	}
+	if usage.Cache.LastActivityUnix != nil {
+		out.LastActivityUnix = usage.Cache.LastActivityUnix
+	}
+	return &out
 }

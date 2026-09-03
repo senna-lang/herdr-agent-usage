@@ -346,6 +346,31 @@ func TestFormatUsagePanel_GroupsMultipleCodexProfilesUnderSharedHeading(t *testi
 	}
 }
 
+func TestFormatUsagePanel_LowCachePaneWarning(t *testing.T) {
+	provider := sampleProvider()
+	layout := PanelLayout{
+		Columns: 80,
+		Rows:    40,
+		LowCachePanes: []LowCachePane{{
+			Label:      "research",
+			HitPercent: 43.1,
+		}},
+	}
+	text := FormatUsagePanel([]ProviderLimits{provider}, nil, 1_700_000_000_000, layout)
+	warning := "⚠ low cache performance: research 43.1%"
+	if !strings.Contains(text, warning) {
+		t.Fatalf("missing low-cache warning:\n%s", text)
+	}
+	if strings.Index(text, warning) <= strings.Index(text, "Codex") {
+		t.Fatalf("warning must follow provider content:\n%s", text)
+	}
+
+	withoutWarnings := FormatUsagePanel([]ProviderLimits{provider}, nil, 1_700_000_000_000, PanelLayout{Columns: 80, Rows: 40})
+	if strings.Contains(withoutWarnings, "low cache performance") {
+		t.Fatalf("unexpected cache warning:\n%s", withoutWarnings)
+	}
+}
+
 func codexProfileSample(accountLabel string, usedPct float64) ProviderLimits {
 	r1 := int64(2_000_000_000)
 	wm1 := 10080

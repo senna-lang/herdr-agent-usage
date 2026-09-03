@@ -16,7 +16,8 @@ func ToContextUsage(usage TranscriptUsage) core.ContextUsage {
 		out.WindowTokens = &w
 	}
 	if !usage.Compacted {
-		out.Cache = usage.SessionCache
+		out.Cache = core.CacheFromTokenCounts(usage.InputTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens)
+		out.SessionCache = usage.SessionCache
 	}
 	return out
 }

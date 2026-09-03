@@ -195,6 +195,32 @@ func writeMetadataTokenWith(writer metadataTokenWriter, current map[string]strin
 	}
 }
 
+// writeCacheHitTokens writes the hit-rate string onto exactly one of
+// $cache_high / $cache_mid / $cache_low and clears the others. Herdr colors
+// those tokens from config.toml. The unstyled $cache token is cleared so a
+// leftover layout row cannot keep a previous ANSI value.
+func writeCacheHitTokens(current map[string]string, paneID, cacheText string, hit float64, force, retainExistingOnEmpty bool) {
+	writeCacheHitTokensWith(herdrMetadataTokenWriter, current, paneID, cacheText, hit, force, retainExistingOnEmpty)
+}
+
+func writeCacheHitTokensWith(writer metadataTokenWriter, current map[string]string, paneID, cacheText string, hit float64, force, retainExistingOnEmpty bool) {
+	if retainExistingOnEmpty && cacheText == "" {
+		return
+	}
+	active := ""
+	if cacheText != "" {
+		active = string(core.CacheHitBandFor(hit))
+	}
+	for _, name := range core.CacheHitTokenNames {
+		value := ""
+		if name == active {
+			value = cacheText
+		}
+		writeMetadataTokenWith(writer, current, paneID, name, value, force)
+	}
+	writeMetadataTokenWith(writer, current, paneID, "cache", "", force)
+}
+
 // RunUpdate resolves usage for HERDR_PANE_ID and refreshes its sidebar tokens,
 // including while the agent is working. force bypasses unchanged-value checks.
 func RunUpdate(force bool) {
@@ -258,7 +284,7 @@ func RunUpdateForPane(paneID string, force bool) {
 		writeMetadataToken(pane.Tokens, paneID, "limit", "", force, retainExistingOnEmpty)
 		writeMetadataToken(pane.Tokens, paneID, "provider", formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot), force, retainExistingOnEmpty)
 		writeMetadataToken(pane.Tokens, paneID, "context", "", force, retainExistingOnEmpty)
-		writeMetadataToken(pane.Tokens, paneID, "cache", "", force, retainExistingOnEmpty)
+		writeCacheHitTokens(pane.Tokens, paneID, "", 0, force, retainExistingOnEmpty)
 		return
 	}
 
@@ -345,7 +371,7 @@ func RunUpdateForPane(paneID string, force bool) {
 
 	if usage == nil {
 		writeMetadataToken(pane.Tokens, paneID, "context", contextPrefix, force, retainExistingOnEmpty)
-		writeMetadataToken(pane.Tokens, paneID, "cache", "", force, retainExistingOnEmpty)
+		writeCacheHitTokens(pane.Tokens, paneID, "", 0, force, retainExistingOnEmpty)
 		return
 	}
 
@@ -355,11 +381,18 @@ func RunUpdateForPane(paneID string, force bool) {
 	maxCols = reserveColumnsFor(maxCols, contextPrefix)
 	statusText := core.FormatUsageStatus(*usage, core.FormatUsageOptions{MaxColumns: maxCols})
 	writeMetadataToken(pane.Tokens, paneID, "context", combineLimitAndContext(contextPrefix, statusText), force, retainExistingOnEmpty)
-	cacheText := ""
-	if usage.Cache != nil {
-		cacheText = core.FormatCacheStatus(*usage.Cache, time.Now().Unix())
+	if !limits.ResolvedCacheDisplay() {
+		// Explicit opt-out clears prior cache metadata, including working panes.
+		writeCacheHitTokens(pane.Tokens, paneID, "", 0, force, false)
+		return
 	}
-	writeMetadataToken(pane.Tokens, paneID, "cache", cacheText, force, retainExistingOnEmpty)
+	cacheText := ""
+	hit := 0.0
+	if cache := core.SidebarCache(*usage); cache != nil {
+		cacheText = core.FormatCacheStatus(*cache, time.Now().Unix())
+		hit = cache.HitPercent
+	}
+	writeCacheHitTokens(pane.Tokens, paneID, cacheText, hit, force, retainExistingOnEmpty)
 }
 
 func attachClaudePromptCacheTTL(usage *core.ContextUsage, limitsCachePath string) {

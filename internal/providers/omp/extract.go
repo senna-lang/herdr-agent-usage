@@ -81,6 +81,18 @@ func totalTokensOf(usage *assistantUsage) int {
 		floatOrZero(usage.CacheRead) + floatOrZero(usage.CacheWrite))
 }
 
+// cacheFromMessage returns only the counters reported by one completed turn.
+func cacheFromMessage(msg *assistantMessage) *core.CacheUsage {
+	if msg == nil || msg.Usage == nil {
+		return nil
+	}
+	return core.CacheFromTokenCounts(
+		intOrZero(msg.Usage.Input),
+		intOrZero(msg.Usage.CacheRead),
+		intOrZero(msg.Usage.CacheWrite),
+	)
+}
+
 func sessionUsageFromMessage(msg *assistantMessage) *SessionUsage {
 	if msg == nil || msg.Role != "assistant" || msg.StopReason == "aborted" || msg.StopReason == "error" {
 		return nil
@@ -106,6 +118,7 @@ func sessionUsageFromMessage(msg *assistantMessage) *SessionUsage {
 		ContextTokens: contextTokens,
 		TotalTokens:   totalTokens,
 		CostUSD:       cost,
+		Cache:         cacheFromMessage(msg),
 	}
 }
 
@@ -349,15 +362,14 @@ func (a cacheAccum) apply(usage *SessionUsage) *SessionUsage {
 	if usage == nil {
 		return nil
 	}
-	cache := core.CacheFromTokenCounts(a.fresh, a.read, a.write)
-	if cache == nil {
+	usage.SessionCache = core.CacheFromTokenCounts(a.fresh, a.read, a.write)
+	if usage.Cache == nil {
 		return usage
 	}
 	if a.anthropicActive && strings.EqualFold(usage.Provider, "anthropic") {
-		cache.TTLSeconds = a.ttlSeconds
-		cache.LastActivityUnix = a.lastActivity
+		usage.Cache.TTLSeconds = a.ttlSeconds
+		usage.Cache.LastActivityUnix = a.lastActivity
 	}
-	usage.Cache = cache
 	return usage
 }
 
