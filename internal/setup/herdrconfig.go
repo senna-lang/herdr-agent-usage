@@ -62,6 +62,7 @@ func SidebarRowsSnippet() string {
 		"rows = [",
 		`  ["state_icon", "$title"],`,
 		`  ["$provider", "$limit"],`,
+		`  ["$cache_high", { token = "$cache_mid", fg = "#e0af68" }, { token = "$cache_low", fg = "#f7768e" }],`,
 		`  ["$context"],`,
 		"]",
 		"",

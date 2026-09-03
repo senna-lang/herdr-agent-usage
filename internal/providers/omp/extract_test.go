@@ -173,3 +173,73 @@ func TestExtractLatestUsageFollowsActiveBranch(t *testing.T) {
 		t.Fatalf("got %#v", got)
 	}
 }
+
+func TestExtractLatestUsageFromLines_SessionCacheAndAnthropicTTL(t *testing.T) {
+	lines := []string{
+		`{"type":"message","id":"w","parentId":null,"message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-5","timestamp":1700000000000,"usage":{"totalTokens":100,"cacheRead":0,"cacheWrite":100,"cacheWrite1h":100},"stopReason":"stop","contextSnapshot":{"promptTokens":100}}}`,
+		`{"type":"message","id":"r","parentId":"w","message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-5","timestamp":1700000060000,"usage":{"totalTokens":100,"cacheRead":100,"cacheWrite":0,"cacheWrite1h":0},"stopReason":"stop","contextSnapshot":{"promptTokens":200}}}`,
+	}
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || got.ContextTokens != 200 {
+		t.Fatalf("occupancy %+v", got)
+	}
+	if got.Cache == nil || got.Cache.ReadTokens != 100 || got.Cache.CreationTokens != 0 {
+		t.Fatalf("latest cache %+v", got.Cache)
+	}
+	if got.SessionCache == nil || got.SessionCache.ReadTokens != 100 || got.SessionCache.CreationTokens != 100 {
+		t.Fatalf("session cache %+v", got.SessionCache)
+	}
+	if got.Cache.TTLSeconds == nil || *got.Cache.TTLSeconds != 3600 {
+		t.Fatalf("ttl %+v", got.Cache.TTLSeconds)
+	}
+	if got.Cache.LastActivityUnix == nil || *got.Cache.LastActivityUnix != 1_700_000_060 {
+		t.Fatalf("last activity %+v", got.Cache.LastActivityUnix)
+	}
+}
+
+func TestExtractLatestUsageFromLines_CacheHitIncludesFreshInput(t *testing.T) {
+	lines := []string{
+		`{"type":"message","id":"a","parentId":null,"message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-5","usage":{"input":100,"cacheRead":800,"cacheWrite":100},"stopReason":"stop","contextSnapshot":{"promptTokens":1000}}}`,
+	}
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || got.Cache == nil {
+		t.Fatalf("cache %+v", got)
+	}
+	if got.Cache.FreshInputTokens != 100 || got.Cache.ReadTokens != 800 || got.Cache.CreationTokens != 100 {
+		t.Fatalf("counters %+v", got.Cache)
+	}
+	if got.Cache.HitPercent != 80 {
+		t.Fatalf("hit=%v want 80", got.Cache.HitPercent)
+	}
+}
+
+func TestExtractLatestUsageFromLines_NonAnthropicHasNoTTL(t *testing.T) {
+	lines := []string{
+		`{"type":"message","id":"a","parentId":null,"message":{"role":"assistant","provider":"openai-codex","model":"model-b","timestamp":1700000000,"usage":{"totalTokens":100,"cacheRead":70,"cacheWrite":0},"stopReason":"stop","contextSnapshot":{"promptTokens":100}}}`,
+	}
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || got.Cache == nil || got.Cache.ReadTokens != 70 {
+		t.Fatalf("cache %+v", got)
+	}
+	if got.Cache.TTLSeconds != nil || got.Cache.LastActivityUnix != nil {
+		t.Fatalf("non-anthropic must not guess TTL: %+v", got.Cache)
+	}
+}
+
+func TestExtractLatestUsageFromLines_CompactionResetsCache(t *testing.T) {
+	lines := []string{
+		`{"type":"message","id":"a1","parentId":null,"message":{"role":"assistant","provider":"anthropic","usage":{"totalTokens":90000,"cacheRead":80000,"cacheWrite":100},"stopReason":"stop"}}`,
+		`{"type":"compaction","id":"cmp1","parentId":"a1","tokensBefore":90000,"summary":"summary"}`,
+		`{"type":"message","id":"a2","parentId":"cmp1","message":{"role":"assistant","provider":"anthropic","usage":{"totalTokens":22000,"cacheRead":180,"cacheWrite":0},"stopReason":"stop"}}`,
+	}
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || got.ContextTokens != 22000 {
+		t.Fatalf("occupancy %+v", got)
+	}
+	if got.Cache == nil || got.Cache.ReadTokens != 180 || got.Cache.CreationTokens != 0 {
+		t.Fatalf("post-compact latest cache must not include pre-compact rows: %+v", got.Cache)
+	}
+	if got.SessionCache == nil || got.SessionCache.ReadTokens != 180 || got.SessionCache.CreationTokens != 0 {
+		t.Fatalf("post-compact session cache must not include pre-compact rows: %+v", got.SessionCache)
+	}
+}

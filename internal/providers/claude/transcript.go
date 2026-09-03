@@ -1,6 +1,8 @@
 /**
  * Reads the latest assistant usage for a given session ID from a Claude Code
- * session transcript (jsonl).
+ * session transcript (jsonl). Latest-turn cache counters stay on the row;
+ * SessionCache accumulates prompt-cache counters after the newest compact
+ * boundary.
  */
 package claude
 
@@ -10,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
 
@@ -76,9 +79,17 @@ func totalTokensOf(usage TranscriptUsage) int {
 // assistant usage row of its own, so until the next turn the latest usage
 // still reports the pre-compact context; the boundary's postTokens is the
 // live size.
+//
+// SessionCache sums cache counters from assistant rows after the newest
+// compact boundary. Pre-compact rows and compacted occupancy itself publish
+// no cache, so a stale cumulative rate cannot outlive the compaction.
 func ExtractLatestUsageFromLines(lines []string) *TranscriptUsage {
-	seenCompactBoundary := false
+	compacted := false
+	compactBeforeLatest := false
 	compactPostTokens := 0
+	var latest *TranscriptUsage
+	fresh, read, creation := 0, 0, 0
+
 	for i := len(lines) - 1; i >= 0; i-- {
 		raw := strings.TrimSpace(lines[i])
 		if raw == "" {
@@ -105,14 +116,17 @@ func ExtractLatestUsageFromLines(lines []string) *TranscriptUsage {
 			continue
 		}
 		if parsed.Type == "system" && parsed.Subtype == "compact_boundary" {
-			// Only the newest boundary counts; older ones are already
-			// superseded by whatever followed them.
-			if !seenCompactBoundary {
-				seenCompactBoundary = true
-				if parsed.CompactMetadata != nil {
-					compactPostTokens = intOrZero(parsed.CompactMetadata.PostTokens)
-				}
+			if compacted {
+				continue
 			}
+			compacted = true
+			if parsed.CompactMetadata != nil {
+				compactPostTokens = intOrZero(parsed.CompactMetadata.PostTokens)
+			}
+			if latest != nil {
+				break
+			}
+			compactBeforeLatest = true
 			continue
 		}
 		if parsed.Type != "assistant" || parsed.IsSidechain {
@@ -132,19 +146,32 @@ func ExtractLatestUsageFromLines(lines []string) *TranscriptUsage {
 		if totalTokensOf(candidate) == 0 {
 			continue
 		}
-		if compactPostTokens > 0 {
-			// Keep the model so the context-window lookup still works.
-			return &TranscriptUsage{Model: candidate.Model, InputTokens: compactPostTokens, Compacted: true}
+		if latest == nil {
+			copied := candidate
+			latest = &copied
+			if compacted {
+				break
+			}
 		}
-		return &candidate
+		if !compacted {
+			fresh += candidate.InputTokens
+			read += candidate.CacheReadInputTokens
+			creation += candidate.CacheCreationInputTokens
+		}
 	}
-	if compactPostTokens > 0 {
-		// Boundary in the tail window but the pre-compact assistant row is
-		// not (e.g. cut off by tailScanBytes): report the size without a
-		// model rather than nothing.
-		return &TranscriptUsage{InputTokens: compactPostTokens, Compacted: true}
+
+	if compactBeforeLatest && compactPostTokens > 0 {
+		model := ""
+		if latest != nil {
+			model = latest.Model
+		}
+		return &TranscriptUsage{Model: model, InputTokens: compactPostTokens, Compacted: true}
 	}
-	return nil
+	if latest == nil {
+		return nil
+	}
+	latest.SessionCache = core.CacheFromTokenCounts(fresh, read, creation)
+	return latest
 }
 
 func intOrZero(n *float64) int {

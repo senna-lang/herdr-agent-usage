@@ -11,6 +11,7 @@ Monitor context usage and provider rate limits for agents running in [Herdr](htt
 ![Agent Usage pane showing Claude, Codex, OpenCode Go, and Grok subscription limits alongside a pay-as-you-go API spend block (DeepSeek shown as one example), with per-pane activity shares](docs/assets/agent-usage-pane.png)
 
 - **Per-pane context meters** — every agent pane's sidebar label shows how much of its context window the session is using (`⛁ 13% (130k)` = 130k tokens, 13% of the window), updated after each completed turn.
+- **Prompt-cache row** — session-cumulative hit rate (`cache hit 93.3%`) with remaining TTL only from a recorded expiry. ⚠️ when that TTL has already elapsed. ≥80% uses the default sidebar color; `$cache_mid` yellow ≥50%; `$cache_low` red otherwise.
 - **Provider limit row** — a separate sidebar row shows the shortest account-limit window (`5h 72%`) without crowding the context meter.
 - **Account rate-limit windows at a glance** — one live pane shows how much 5h / 7d / 30d allowance is left for Claude, Codex, OpenCode Go, and Grok, with reset countdowns and which open pane is burning it.
 - **Low-allowance warnings** — optional toasts fire when a window drops below your thresholds (default 50 / 20 / 10 / 5 % left), before you hit the wall mid-task.
@@ -91,7 +92,7 @@ On Mac that is **Control+Shift+U** / **Control+Shift+M** (not Command). Then `he
 | Action | Command | What it does |
 | --- | --- | --- |
 | Open limits pane | `usagebar.open-limits` | Split pane with provider windows |
-| Refresh meters | `usagebar.refresh` | Recompute sidebar `$limit` and `$context` tokens for the target pane |
+| Refresh meters | `usagebar.refresh` | Recompute sidebar `$limit`, `$cache`, and `$context` tokens for the target pane |
 | Setup | `usagebar.setup` | Seed plugin config, show sidebar/toast/key snippets, report Herdr toast status |
 | Enable toast | `usagebar.enable-toast` | Append `[ui.toast]` only if missing (never overwrites) |
 | Check for updates | `usagebar.check-updates` | Check GitHub Releases now and show the release/update instructions |
@@ -106,9 +107,10 @@ herdr plugin action invoke usagebar.setup
 | Surface | What it shows |
 | --- | --- |
 | **Sidebar `$context` row** | Per-pane context usage: `⛁ 13% (130k)` when the window size is known, or the token count alone |
+| **Sidebar `$cache_*` row** | Session-cumulative prompt-cache hit rate (`cache hit 93.3%`), plus remaining TTL only from a recorded expiry. ⚠️ when that TTL has already elapsed. Exactly one of `$cache_high` / `$cache_mid` / `$cache_low` is set. High uses the default sidebar color; mid/low are yellow/red in `config.toml` |
 | **Sidebar `$limit` row** | Shortest provider limit window (`5h 72%` remaining), refreshed with the Agent Usage pane (15s) or every 60s while that pane is closed. Pay-as-you-go panes show what that pane spent on its backend (`Σ 425k $0.04`, scoped to the pane's session and backend) instead |
 | **Sidebar `$provider` row** | Subscription provider (`opencode-go`, `grok`, `claude`, …) on a subscription pane, or the backend actually billed on a pay-as-you-go pane (`deepseek`). The adjacent burn total is scoped to that same backend in the pane's session |
-| **Agent Usage pane** | One block per billing provider, independent of harness. Subscription providers show plan windows and cross-harness pane activity. Pay-as-you-go backends show one merged 24h / 7d / 30d block, model breakdown, and pane share even when multiple harnesses use the same backend |
+| **Agent Usage pane** | One block per billing provider, independent of harness. Subscription providers show plan windows and cross-harness pane activity. Pay-as-you-go backends show one merged 24h / 7d / 30d block, model breakdown, and pane share even when multiple harnesses use the same backend. Prompt-cache data stays sidebar-only, except red-band panes (<50% session hit rate), which produce a `⚠ low cache performance` warning |
 | **Toasts** (optional) | Remaining-limit warnings at configured thresholds (default 50 / 20 / 10 / 5 % left) |
 
 ### Supported agents
@@ -125,16 +127,17 @@ herdr plugin action invoke usagebar.setup
 
 Percentages in the limits pane default to **remaining** (`% left`). Higher is safer.
 Set `[ui] limit_percent = "used"` to show consumption instead; the bar fills as
-the window burns, but colour still tracks remaining headroom.
+the window burns, but colour still tracks remaining headroom. Set `[ui] cache_display = false`
+to hide cache data from both the sidebar and Agent Usage pane.
 
 
 ## Agent Usage pane
 
-- Auto-refreshes every **15s**, and the same collect updates sidebar `$limit` on every open subscription pane. Press **`r`** to refresh, **`q`** to quit. With the pane closed, `$limit` still moves every **60s**. `$context` stays event-driven after the initial restore. After a Herdr restart or live handoff, a `[[startup]]` hook republishes `$title` / `$provider` / `$limit` / `$context` for every open agent pane so the sidebar is not blank until the next focus or turn.
+- Auto-refreshes every **15s**. The pane tick updates sidebar `$limit` on open subscription panes and `$cache_*` on every open agent pane. Press **`r`** to refresh, **`q`** to quit. With the pane closed, `$limit` and `$cache_*` still refresh every **60s**. `$context` stays event-driven after the initial restore. After a Herdr restart or live handoff, a `[[startup]]` hook republishes `$title` / `$provider` / `$limit` / `$cache_*` / `$context` for every open agent pane so the sidebar is not blank until the next focus or turn.
 - OpenCode Go may show three windows (**5h / 7d / 30d**). Other providers show whichever usage windows their data sources make available.
 - Open pane **token share** is local activity share within the shortest window (including a **closed / other** bucket for usage outside open panes). It is not account quota attribution.
-- Sidebar meters update after the agent has **settled** (not while `working`), so they match the last completed turn. If the session cannot be resolved, the `$context` token is cleared rather than showing another session’s numbers.
-- After a Claude Code **compaction**, the meter shows `⛁ compacted (14k)` — the boundary’s own post-compaction estimate — instead of the stale pre-compact size, until the next completed turn reports real usage again.
+- Sidebar values ordinarily update after the agent has **settled** (not while `working`), so they match the last completed turn. `$cache_*` also refreshes on the periodic path to keep an evidence-backed TTL current. If the session cannot be resolved, the `$context` and `$cache_*` tokens are cleared rather than showing another session’s numbers.
+- After a Claude Code **compaction**, the meter shows `⛁ compacted (14k)` — the boundary’s own post-compaction estimate — instead of the stale pre-compact size, until the next completed turn reports real usage again. Its cache row clears until post-compaction cache counters exist.
 
 ```bash
 herdr plugin action invoke usagebar.open-limits
@@ -153,6 +156,7 @@ row_gap = 0
 rows = [
   ["state_icon", "$title"],
   ["$provider", "$limit"],
+  ["$cache_high", { token = "$cache_mid", fg = "#e0af68" }, { token = "$cache_low", fg = "#f7768e" }],
   ["$context"],
 ]
 ```
@@ -188,7 +192,7 @@ remaining_thresholds = [50, 20, 10, 5]
 
 [ui]
 limit_percent = "remaining"  # or "used"
-```
+cache_display = true         # false hides sidebar and pane cache displays
 
 `enabled = false` suppresses all Agent Usage toasts, including remaining-limit
 warnings and update-available notices; statusLine summaries and cached limits
@@ -196,7 +200,8 @@ continue to refresh. `remaining_thresholds` accepts remaining percentages from
 1 through 100 (for example `[30, 10]`); each threshold can notify once per
 window, from least to most severe. `limit_percent = "used"` inverts the displayed
 number (and bar fill) on the pane, sidebar `$limit`, statusLine, and toast body;
-notify firing stays on remaining thresholds.
+notify firing stays on remaining thresholds. `cache_display = false` clears cache
+metadata from every sidebar pane and suppresses the Agent Usage low-cache warning.
 
 
 ### Multiple Claude accounts

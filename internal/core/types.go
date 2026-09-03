@@ -3,7 +3,7 @@
  */
 package core
 
-// ContextUsage is the minimum usage information required for the sidebar display.
+// ContextUsage is the minimum usage information required for display.
 // Token aggregation and model-window resolution must already be done by each
 // provider; this type only carries the final result.
 type ContextUsage struct {
@@ -14,4 +14,9 @@ type ContextUsage struct {
 	// Compacted marks a post-compaction estimate (no real usage row yet):
 	// the display shows a "compacted" label instead of a measured size.
 	Compacted bool
+	// Cache is the latest completed turn, including recorded TTL when known.
+	Cache *CacheUsage
+	// SessionCache aggregates prompt-cache counters for the current transcript
+	// segment. Sidebar hit rate prefers this; recorded TTL still comes from Cache.
+	SessionCache *CacheUsage
 }

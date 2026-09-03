@@ -17,7 +17,7 @@ platforms = ["macos", "linux"]
 [[build]]
 command = ["bash", "bin/ensure-binary.sh", "--in-tree"]
 
-# Restores $title/$provider/$limit/$context after server start and live
+# Restores $title/$provider/$limit/$cache/$context after server start and live
 # handoff. Metadata tokens are ephemeral across a cold restart; event
 # hooks only see the focused pane.
 [[startup]]

@@ -6,6 +6,8 @@ package opencode
 import (
 	"encoding/json"
 	"math"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 )
 
 // MessageUsage is tokens and model identifiers extracted from a message.
@@ -14,6 +16,12 @@ type MessageUsage struct {
 	ContextTokens int
 	ModelID       *string
 	ProviderID    *string
+	CacheFresh    int
+	CacheRead     int
+	CacheWrite    int
+	// Cache is the latest completed turn. SessionCache sums the scan window.
+	Cache        *core.CacheUsage
+	SessionCache *core.CacheUsage
 }
 
 // ContextTokensFromMessageTokens returns input + cache.read + cache.write.
@@ -60,6 +68,9 @@ func UsageFromMessageData(raw map[string]any) *MessageUsage {
 		ContextTokens: *ct,
 		ModelID:       modelIDOf(raw),
 		ProviderID:    providerIDOf(raw),
+		CacheFresh:    int(finiteOrZero(input)),
+		CacheRead:     int(finiteOrZero(cacheRead)),
+		CacheWrite:    int(finiteOrZero(cacheWrite)),
 	}
 }
 
@@ -104,16 +115,33 @@ func asFloat(v any) float64 {
 }
 
 // UsageFromLatestMessageJSONs uses the first assistant tokens row from the
-// start of rows (rows are newest-first).
+// start of rows (rows are newest-first) for occupancy and latest-turn cache.
+// SessionCache sums cache counters across every assistant row in the scan
+// window for the Agent Usage pane.
 func UsageFromLatestMessageJSONs(rows []string) *MessageUsage {
+	var latest *MessageUsage
+	fresh, read, write := 0, 0, 0
 	for _, raw := range rows {
 		var data map[string]any
 		if err := json.Unmarshal([]byte(raw), &data); err != nil {
 			continue
 		}
-		if usage := UsageFromMessageData(data); usage != nil {
-			return usage
+		usage := UsageFromMessageData(data)
+		if usage == nil {
+			continue
 		}
+		if latest == nil {
+			copied := *usage
+			latest = &copied
+		}
+		fresh += usage.CacheFresh
+		read += usage.CacheRead
+		write += usage.CacheWrite
 	}
-	return nil
+	if latest == nil {
+		return nil
+	}
+	latest.Cache = core.CacheFromTokenCounts(latest.CacheFresh, latest.CacheRead, latest.CacheWrite)
+	latest.SessionCache = core.CacheFromTokenCounts(fresh, read, write)
+	return latest
 }

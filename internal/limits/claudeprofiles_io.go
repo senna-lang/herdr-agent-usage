@@ -39,6 +39,13 @@ func ResolvedLimitPercent() core.LimitPercent {
 	return cfg.LimitPercent
 }
 
+// ResolvedCacheDisplay returns whether cache data may be rendered. It keeps the
+// sidebar and Agent Usage pane behind one explicit user preference.
+func ResolvedCacheDisplay() bool {
+	cfg := setup.LoadPluginConfig(setup.ResolvePluginConfigDir(processEnvMap()))
+	return cfg.CacheDisplay
+}
+
 // profileByIDIn looks up one profile by provider id within an already-resolved
 // snapshot, so a caller that resolved the profiles once (e.g. per
 // AttachPaneActivity pass) can dispatch without re-reading config/env per hit.

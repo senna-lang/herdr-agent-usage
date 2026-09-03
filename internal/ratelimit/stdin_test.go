@@ -54,3 +54,23 @@ func TestParseRateLimits_Invalid(t *testing.T) {
 	// sanity: valid empty object
 	_ = json.Valid([]byte(`{}`))
 }
+
+func TestParsePromptCache_ExpiresAt(t *testing.T) {
+	got := ParsePromptCache(`{"prompt_cache":{"warm":true,"ttl":"1h","expires_at":1700003600,"hit_ratio":0.996}}`)
+	if got == nil || !got.Present || got.ExpiresAt == nil || *got.ExpiresAt != 1_700_003_600 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestParsePromptCache_NullExpiresAtIsPresent(t *testing.T) {
+	got := ParsePromptCache(`{"prompt_cache":{"warm":false,"ttl":"5m","expires_at":null}}`)
+	if got == nil || !got.Present || got.ExpiresAt != nil {
+		t.Fatalf("cold prefix must hide TTL: %+v", got)
+	}
+}
+
+func TestParsePromptCache_Absent(t *testing.T) {
+	if ParsePromptCache(`{"rate_limits":{"five_hour":{"used_percentage":10,"resets_at":1}}}`) != nil {
+		t.Fatal("missing prompt_cache must be absent, not an empty object")
+	}
+}

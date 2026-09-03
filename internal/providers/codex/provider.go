@@ -23,7 +23,7 @@ func resolveCodexUsage(input provider.UsageResolveInput) *core.ContextUsage {
 	if usage == nil {
 		return nil
 	}
-	out := core.ContextUsage{ContextTokens: usage.ContextTokens}
+	out := core.ContextUsage{ContextTokens: usage.ContextTokens, Cache: usage.Cache}
 	if usage.WindowTokens != nil {
 		out.WindowTokens = usage.WindowTokens
 	}

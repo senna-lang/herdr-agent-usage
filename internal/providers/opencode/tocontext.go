@@ -8,7 +8,7 @@ import "github.com/senna-lang/herdr-agent-usage/internal/core"
 // ToContextUsage attaches windowTokens for known models.
 func ToContextUsage(usage MessageUsage) core.ContextUsage {
 	window := ContextWindowFor(usage.ProviderID, usage.ModelID)
-	out := core.ContextUsage{ContextTokens: usage.ContextTokens}
+	out := core.ContextUsage{ContextTokens: usage.ContextTokens, Cache: usage.Cache, SessionCache: usage.SessionCache}
 	if window != nil {
 		out.WindowTokens = window
 	}
