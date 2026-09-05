@@ -56,3 +56,7 @@ For any provider, model, registry, or shared provider behavior change:
 5. Confirm that exhaustive constraints detect omitted dependent updates.
 6. Add or update focused contract tests for the changed behavior.
 7. Run the relevant package tests, then the repository checks required by `CONTRIBUTING.md`.
+
+## README Screenshots
+
+When a change affects the README screenshot, prepare an isolated Herdr fixture and open it with `scripts/open-readme-screenshot.sh`. The maintainer captures and approves the image manually; follow `docs/README-SCREENSHOT.md`. Never use a personal Herdr session or credentials for the fixture.
