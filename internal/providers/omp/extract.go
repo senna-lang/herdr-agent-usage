@@ -11,12 +11,13 @@ import (
 )
 
 type assistantUsage struct {
-	Input        *float64 `json:"input"`
-	Output       *float64 `json:"output"`
-	CacheRead    *float64 `json:"cacheRead"`
-	CacheWrite   *float64 `json:"cacheWrite"`
-	CacheWrite1h *float64 `json:"cacheWrite1h"`
-	TotalTokens  *float64 `json:"totalTokens"`
+	Input        *float64           `json:"input"`
+	Output       *float64           `json:"output"`
+	CacheRead    *float64           `json:"cacheRead"`
+	CacheWrite   *float64           `json:"cacheWrite"`
+	CacheWrite1h *float64           `json:"cacheWrite1h"`
+	CacheTTL     map[string]float64 `json:"cttl"`
+	TotalTokens  *float64           `json:"totalTokens"`
 	Cost         *struct {
 		Total *float64 `json:"total"`
 	} `json:"cost"`
@@ -331,7 +332,6 @@ func (a *cacheAccum) add(msg *assistantMessage) {
 	fresh := intOrZero(msg.Usage.Input)
 	cacheRead := intOrZero(msg.Usage.CacheRead)
 	cacheWrite := intOrZero(msg.Usage.CacheWrite)
-	cacheWrite1h := intOrZero(msg.Usage.CacheWrite1h)
 	a.fresh += fresh
 	a.read += cacheRead
 	a.write += cacheWrite
@@ -340,22 +340,28 @@ func (a *cacheAccum) add(msg *assistantMessage) {
 	}
 	a.anthropicActive = true
 	activity := unixSecondsFromMs(msg.Timestamp)
-	if activity <= 0 {
+	if activity <= 0 || a.lastActivity != nil {
 		return
 	}
-	if a.lastActivity == nil {
-		a.lastActivity = &activity
-		ttl := int64(5 * 60)
-		if cacheWrite1h > 0 {
-			ttl = 60 * 60
-		}
-		a.ttlSeconds = &ttl
-		return
+	// Lines are visited newest-first. Keep TTL only when the newest
+	// cache-bearing response names its cache bucket explicitly.
+	a.lastActivity = &activity
+	a.ttlSeconds = explicitCacheTTLSeconds(msg.Usage)
+}
+
+func explicitCacheTTLSeconds(usage *assistantUsage) *int64 {
+	if usage == nil {
+		return nil
 	}
-	if cacheWrite1h > 0 && a.ttlSeconds != nil && *a.ttlSeconds < 3600 {
+	if intOrZero(usage.CacheWrite1h) > 0 {
 		ttl := int64(60 * 60)
-		a.ttlSeconds = &ttl
+		return &ttl
 	}
+	if usage.CacheTTL["ephemeral5m"] > 0 {
+		ttl := int64(5 * 60)
+		return &ttl
+	}
+	return nil
 }
 
 func (a cacheAccum) apply(usage *SessionUsage) *SessionUsage {

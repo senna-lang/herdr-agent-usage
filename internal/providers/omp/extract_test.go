@@ -174,10 +174,10 @@ func TestExtractLatestUsageFollowsActiveBranch(t *testing.T) {
 	}
 }
 
-func TestExtractLatestUsageFromLines_SessionCacheAndAnthropicTTL(t *testing.T) {
+func TestExtractLatestUsageFromLines_SessionCacheAndExplicitAnthropicTTL(t *testing.T) {
 	lines := []string{
 		`{"type":"message","id":"w","parentId":null,"message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-5","timestamp":1700000000000,"usage":{"totalTokens":100,"cacheRead":0,"cacheWrite":100,"cacheWrite1h":100},"stopReason":"stop","contextSnapshot":{"promptTokens":100}}}`,
-		`{"type":"message","id":"r","parentId":"w","message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-5","timestamp":1700000060000,"usage":{"totalTokens":100,"cacheRead":100,"cacheWrite":0,"cacheWrite1h":0},"stopReason":"stop","contextSnapshot":{"promptTokens":200}}}`,
+		`{"type":"message","id":"r","parentId":"w","message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-5","timestamp":1700000060000,"usage":{"totalTokens":100,"cacheRead":100,"cacheWrite":0,"cttl":{"ephemeral5m":100}},"stopReason":"stop","contextSnapshot":{"promptTokens":200}}}`,
 	}
 	got := ExtractLatestUsageFromLines(lines)
 	if got == nil || got.ContextTokens != 200 {
@@ -189,11 +189,24 @@ func TestExtractLatestUsageFromLines_SessionCacheAndAnthropicTTL(t *testing.T) {
 	if got.SessionCache == nil || got.SessionCache.ReadTokens != 100 || got.SessionCache.CreationTokens != 100 {
 		t.Fatalf("session cache %+v", got.SessionCache)
 	}
-	if got.Cache.TTLSeconds == nil || *got.Cache.TTLSeconds != 3600 {
+	if got.Cache.TTLSeconds == nil || *got.Cache.TTLSeconds != 300 {
 		t.Fatalf("ttl %+v", got.Cache.TTLSeconds)
 	}
 	if got.Cache.LastActivityUnix == nil || *got.Cache.LastActivityUnix != 1_700_000_060 {
 		t.Fatalf("last activity %+v", got.Cache.LastActivityUnix)
+	}
+}
+
+func TestExtractLatestUsageFromLines_AnthropicCacheWithoutTTLEvidenceHasNoTTL(t *testing.T) {
+	lines := []string{
+		`{"type":"message","id":"a","parentId":null,"message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-5","timestamp":1700000000000,"usage":{"totalTokens":100,"cacheRead":80,"cacheWrite":20},"stopReason":"stop","contextSnapshot":{"promptTokens":100}}}`,
+	}
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || got.Cache == nil {
+		t.Fatalf("cache %+v", got)
+	}
+	if got.Cache.TTLSeconds != nil {
+		t.Fatalf("unqualified Anthropic cache must not infer TTL: %+v", got.Cache)
 	}
 }
 
