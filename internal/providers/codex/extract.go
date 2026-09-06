@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"math"
 	"strings"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 )
 
 // ExtractLatestUsageFromLines walks lines from the end and returns the most
@@ -24,8 +26,9 @@ func ExtractLatestUsageFromLines(lines []string) *TokenUsage {
 				Type string `json:"type"`
 				Info *struct {
 					LastTokenUsage *struct {
-						InputTokens *float64 `json:"input_tokens"`
-						TotalTokens *float64 `json:"total_tokens"`
+						InputTokens       *float64 `json:"input_tokens"`
+						CachedInputTokens *float64 `json:"cached_input_tokens"`
+						TotalTokens       *float64 `json:"total_tokens"`
 					} `json:"last_token_usage"`
 					ModelContextWindow *float64 `json:"model_context_window"`
 				} `json:"info"`
@@ -50,14 +53,19 @@ func ExtractLatestUsageFromLines(lines []string) *TokenUsage {
 			w := int(*info.ModelContextWindow)
 			window = &w
 		}
-		return &TokenUsage{ContextTokens: contextTokens, WindowTokens: window}
+		return &TokenUsage{
+			ContextTokens: contextTokens,
+			WindowTokens:  window,
+			Cache:         cacheFromLastTokenUsage(info.LastTokenUsage),
+		}
 	}
 	return nil
 }
 
 func contextTokensFrom(block *struct {
-	InputTokens *float64 `json:"input_tokens"`
-	TotalTokens *float64 `json:"total_tokens"`
+	InputTokens       *float64 `json:"input_tokens"`
+	CachedInputTokens *float64 `json:"cached_input_tokens"`
+	TotalTokens       *float64 `json:"total_tokens"`
 }) (int, bool) {
 	if block == nil {
 		return 0, false
@@ -69,6 +77,29 @@ func contextTokensFrom(block *struct {
 		return int(*block.InputTokens), true
 	}
 	return 0, false
+}
+
+func cacheFromLastTokenUsage(block *struct {
+	InputTokens       *float64 `json:"input_tokens"`
+	CachedInputTokens *float64 `json:"cached_input_tokens"`
+	TotalTokens       *float64 `json:"total_tokens"`
+}) *core.CacheUsage {
+	if block == nil || block.CachedInputTokens == nil || !isFinite(*block.CachedInputTokens) {
+		return nil
+	}
+	read := int(*block.CachedInputTokens)
+	if read < 0 {
+		read = 0
+	}
+	input := 0
+	if block.InputTokens != nil && isFinite(*block.InputTokens) {
+		input = int(*block.InputTokens)
+	}
+	fresh := input - read
+	if fresh < 0 {
+		fresh = 0
+	}
+	return core.CacheFromTokenCounts(fresh, read, 0)
 }
 
 func isFinite(n float64) bool {

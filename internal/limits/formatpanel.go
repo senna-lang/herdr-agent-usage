@@ -36,6 +36,16 @@ type PanelLayout struct {
 	EmptyMessage string
 	// LimitPercent selects remaining (default) vs used presentation.
 	LimitPercent core.LimitPercent
+	// LowCachePanes are the only prompt-cache details shown in Agent Usage.
+	// The collector includes only red-band (<50%) session hit rates.
+	LowCachePanes []LowCachePane
+}
+
+// LowCachePane identifies an open pane whose session-cumulative cache hit rate
+// is in the red band. It is omitted from the Agent Usage pane otherwise.
+type LowCachePane struct {
+	Label      string
+	HitPercent float64
 }
 
 var defaultLayout = PanelLayout{Columns: 44, Rows: 9999, Color: false}
@@ -241,13 +251,32 @@ func noteLine(note *string, layout PanelLayout) string {
 	if note == nil || *note == "" {
 		return ""
 	}
-	text := *note
-	budget := max(layout.Columns-3, 8) // "  " prefix + 1 margin
-	if utf8.RuneCountInString(text) > budget {
-		runes := []rune(text)
-		text = string(runes[:budget-1]) + "…"
+	return "  " + bar.Dim(truncatePanelText(*note, layout.Columns), layout.Color)
+}
+
+// lowCacheWarningLine renders the only cache diagnostic in Agent Usage: panes
+// that have a red-band session hit rate. A single line preserves the panel's
+// provider-first layout and is always included in the row budget.
+func lowCacheWarningLine(panes []LowCachePane, layout PanelLayout) string {
+	if len(panes) == 0 {
+		return ""
 	}
-	return "  " + bar.Dim(text, layout.Color)
+
+	parts := make([]string, 0, len(panes))
+	for _, pane := range panes {
+		parts = append(parts, fmt.Sprintf("%s %.1f%%", pane.Label, pane.HitPercent))
+	}
+	text := truncatePanelText("⚠ low cache performance: "+strings.Join(parts, ", "), layout.Columns)
+	return "  " + bar.Colorize(text, bar.ToneLow, layout.Color)
+}
+
+func truncatePanelText(text string, columns int) string {
+	budget := max(columns-3, 8) // "  " prefix + 1 margin
+	if utf8.RuneCountInString(text) <= budget {
+		return text
+	}
+	runes := []rune(text)
+	return string(runes[:budget-1]) + "…"
 }
 
 func providerHeader(p ProviderLimits, layout PanelLayout) string {
@@ -453,13 +482,18 @@ func FormatUsagePanel(providers []ProviderLimits, apiUsage []APIProviderUsage, n
 	rule := strings.Repeat(ruleChar, ruleWidth(layout.Columns))
 	footerText := fittingFooter(timeStr, layout.Columns-1)
 	footer := bar.Dim(footerText, layout.Color)
-
+	warning := lowCacheWarningLine(layout.LowCachePanes, layout)
 	if len(providers) == 0 && len(apiUsage) == 0 {
 		empty := layout.EmptyMessage
 		if empty == "" {
 			empty = "(no usage data yet)"
 		}
-		return strings.Join(indent([]string{"", empty, "", rule, footer, ""}), "\n")
+		lines := []string{"", empty}
+		if warning != "" {
+			lines = append(lines, warning)
+		}
+		lines = append(lines, "", rule, footer, "")
+		return strings.Join(indent(lines), "\n")
 	}
 
 	blocks := make([]panelBlock, 0, len(providers)+len(apiUsage))
@@ -468,10 +502,19 @@ func FormatUsagePanel(providers []ProviderLimits, apiUsage []APIProviderUsage, n
 		blocks = append(blocks, apiBlock(p, layout))
 	}
 
-	chrome := 5
+	warningRows := 0
+	if warning != "" {
+		warningRows = 1
+	}
+	chrome := 5 + warningRows
 	bodyBudget := int(math.Max(1, float64(layout.Rows)-float64(chrome)))
 	body := renderBody(blocks, layout, bodyBudget)
-	return strings.Join(indent([]string{"", body, "", rule, footer, ""}), "\n")
+	lines := []string{"", body}
+	if warning != "" {
+		lines = append(lines, warning)
+	}
+	lines = append(lines, "", rule, footer, "")
+	return strings.Join(indent(lines), "\n")
 }
 
 func fittingFooter(timeStr string, width int) string {

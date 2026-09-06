@@ -10,10 +10,14 @@ import (
 // ToContextUsage maps TranscriptUsage to core.ContextUsage.
 func ToContextUsage(usage TranscriptUsage) core.ContextUsage {
 	contextTokens := ContextTokensOf(usage)
-	window := ContextWindowFor(usage.Model)
-	if window == nil {
-		return core.ContextUsage{ContextTokens: contextTokens, Compacted: usage.Compacted}
+	out := core.ContextUsage{ContextTokens: contextTokens, Compacted: usage.Compacted}
+	if window := ContextWindowFor(usage.Model); window != nil {
+		w := *window
+		out.WindowTokens = &w
 	}
-	w := *window
-	return core.ContextUsage{ContextTokens: contextTokens, WindowTokens: &w, Compacted: usage.Compacted}
+	if !usage.Compacted {
+		out.Cache = core.CacheFromTokenCounts(usage.InputTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens)
+		out.SessionCache = usage.SessionCache
+	}
+	return out
 }

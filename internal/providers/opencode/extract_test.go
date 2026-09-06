@@ -65,6 +65,29 @@ func TestUsageFromLatestMessageJSONs(t *testing.T) {
 	}
 }
 
+func TestUsageFromLatestMessageJSONs_SplitsLatestAndSessionCache(t *testing.T) {
+	rows := []string{
+		mustJSON(map[string]any{
+			"role": "assistant", "modelID": "minimax-m3", "providerID": "opencode-go",
+			"tokens": map[string]any{"input": 50, "cache": map[string]any{"read": 450, "write": 0}},
+		}),
+		mustJSON(map[string]any{
+			"role":   "assistant",
+			"tokens": map[string]any{"input": 100, "cache": map[string]any{"read": 800, "write": 100}},
+		}),
+	}
+	got := UsageFromLatestMessageJSONs(rows)
+	if got == nil || got.ContextTokens != 500 {
+		t.Fatalf("latest occupancy %+v", got)
+	}
+	if got.Cache == nil || got.Cache.FreshInputTokens != 50 || got.Cache.ReadTokens != 450 || got.Cache.CreationTokens != 0 {
+		t.Fatalf("latest cache %+v", got.Cache)
+	}
+	if got.SessionCache == nil || got.SessionCache.FreshInputTokens != 150 || got.SessionCache.ReadTokens != 1250 || got.SessionCache.CreationTokens != 100 {
+		t.Fatalf("session cache %+v", got.SessionCache)
+	}
+}
+
 func mustJSON(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {

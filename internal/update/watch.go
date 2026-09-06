@@ -1,6 +1,6 @@
 /**
- * Idle $limit refresh: one collect every WatchRefreshInterval while the
- * Agent Usage pane is closed, then fan the snapshot out to open panes.
+ * Idle $limit and $cache refresh: one provider collect plus session-cache
+ * fan-out every WatchRefreshInterval while the Agent Usage pane is closed.
  *
  * A lock file keeps a single watcher. A second start exits immediately.
  * Ticks are skipped while the pane heartbeat is fresh so the 15s pane
@@ -162,8 +162,10 @@ func RunWatch(cwd *string, now func() time.Time, sleep func(time.Duration), stop
 		release: releaseWatchLock,
 		touch:   touchWatchLock,
 		tick: func() {
-			nowMs := now().UnixMilli()
+			tickNow := now()
+			nowMs := tickNow.UnixMilli()
 			PublishCollectedLimits(collectWatchProviders(cwd, nowMs), nowMs)
+			PublishOpenPaneCaches(tickNow)
 		},
 	}.run()
 }

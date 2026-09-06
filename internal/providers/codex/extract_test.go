@@ -104,3 +104,30 @@ func TestExtractLatestUsage_SkipZero(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+func TestExtractLatestUsage_CachedInputTokens(t *testing.T) {
+	got := ExtractLatestUsageFromLines([]string{tokenCountLine(14_523, 353_400, false)})
+	if got == nil || got.Cache == nil {
+		t.Fatalf("got %+v", got)
+	}
+	if got.Cache.FreshInputTokens != 500 || got.Cache.ReadTokens != 500 {
+		t.Fatalf("cache %+v", got.Cache)
+	}
+}
+
+func TestExtractLatestUsage_NoCachedFieldHasNoCache(t *testing.T) {
+	b, _ := json.Marshal(map[string]any{
+		"type": "event_msg",
+		"payload": map[string]any{
+			"type": "token_count",
+			"info": map[string]any{
+				"last_token_usage":     map[string]any{"input_tokens": 12_000, "total_tokens": 12_000},
+				"model_context_window": 200_000,
+			},
+		},
+	})
+	got := ExtractLatestUsageFromLines([]string{string(b)})
+	if got == nil || got.ContextTokens != 12_000 || got.Cache != nil {
+		t.Fatalf("got %+v", got)
+	}
+}

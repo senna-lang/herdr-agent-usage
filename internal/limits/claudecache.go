@@ -22,13 +22,16 @@ type RateLimitsInput struct {
 		UsedPercentage float64
 		ResetsAt       int64
 	}
+	PromptCachePresent   bool
+	PromptCacheExpiresAt *int64
 }
 
 // ClaudeLimitsCacheFile is the on-disk statusLine cache payload.
 type ClaudeLimitsCacheFile struct {
-	FiveHour    *LimitWindow `json:"fiveHour,omitempty"`
-	SevenDay    *LimitWindow `json:"sevenDay,omitempty"`
-	FetchedAtMs int64        `json:"fetchedAtMs"`
+	FiveHour             *LimitWindow `json:"fiveHour,omitempty"`
+	SevenDay             *LimitWindow `json:"sevenDay,omitempty"`
+	FetchedAtMs          int64        `json:"fetchedAtMs"`
+	PromptCacheExpiresAt *int64       `json:"promptCacheExpiresAt,omitempty"`
 }
 
 // CollectClaudeLimitsOptions overrides paths for tests.
@@ -56,24 +59,36 @@ func WriteClaudeLimitsCache(rateLimits RateLimitsInput, nowMs int64, path string
 	if path == "" {
 		path = ResolveClaudeLimitsCachePath()
 	}
-	payload := ClaudeLimitsCacheFile{FetchedAtMs: nowMs}
-	if rateLimits.FiveHour != nil {
-		wm := 300
-		r := rateLimits.FiveHour.ResetsAt
-		payload.FiveHour = &LimitWindow{
-			UsedPercentage: rateLimits.FiveHour.UsedPercentage,
-			ResetsAt:       &r,
-			WindowMinutes:  &wm,
+	existing := readClaudeLimitsCacheFile(path)
+	payload := ClaudeLimitsCacheFile{}
+	if existing != nil {
+		payload = *existing
+	}
+	if rateLimits.FiveHour != nil || rateLimits.SevenDay != nil {
+		payload.FetchedAtMs = nowMs
+		payload.FiveHour = nil
+		payload.SevenDay = nil
+		if rateLimits.FiveHour != nil {
+			wm := 300
+			r := rateLimits.FiveHour.ResetsAt
+			payload.FiveHour = &LimitWindow{
+				UsedPercentage: rateLimits.FiveHour.UsedPercentage,
+				ResetsAt:       &r,
+				WindowMinutes:  &wm,
+			}
+		}
+		if rateLimits.SevenDay != nil {
+			wm := 10080
+			r := rateLimits.SevenDay.ResetsAt
+			payload.SevenDay = &LimitWindow{
+				UsedPercentage: rateLimits.SevenDay.UsedPercentage,
+				ResetsAt:       &r,
+				WindowMinutes:  &wm,
+			}
 		}
 	}
-	if rateLimits.SevenDay != nil {
-		wm := 10080
-		r := rateLimits.SevenDay.ResetsAt
-		payload.SevenDay = &LimitWindow{
-			UsedPercentage: rateLimits.SevenDay.UsedPercentage,
-			ResetsAt:       &r,
-			WindowMinutes:  &wm,
-		}
+	if rateLimits.PromptCachePresent {
+		payload.PromptCacheExpiresAt = rateLimits.PromptCacheExpiresAt
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -85,14 +100,35 @@ func WriteClaudeLimitsCache(rateLimits RateLimitsInput, nowMs int64, path string
 	return os.WriteFile(path, append(b, '\n'), 0o644)
 }
 
-// WriteClaudeLimitsCacheGuarded writes the cache only when at least one window
-// is present, so an empty statusLine payload (e.g. `{}`) cannot overwrite a
-// previously valid cache. Returns whether a write happened.
+// WriteClaudeLimitsCacheGuarded writes the cache when at least one window or a
+// prompt_cache object is present, so an empty statusLine payload (e.g. `{}`)
+// cannot overwrite a previously valid cache. Returns whether a write happened.
 func WriteClaudeLimitsCacheGuarded(rateLimits RateLimitsInput, nowMs int64, path string) (bool, error) {
-	if rateLimits.FiveHour == nil && rateLimits.SevenDay == nil {
+	if rateLimits.FiveHour == nil && rateLimits.SevenDay == nil && !rateLimits.PromptCachePresent {
 		return false, nil
 	}
 	return true, WriteClaudeLimitsCache(rateLimits, nowMs, path)
+}
+
+func readClaudeLimitsCacheFile(path string) *ClaudeLimitsCacheFile {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var parsed ClaudeLimitsCacheFile
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil
+	}
+	return &parsed
+}
+
+// ReadPromptCacheExpiresAt returns the recorded Claude prompt_cache expiry.
+func ReadPromptCacheExpiresAt(path string) *int64 {
+	parsed := readClaudeLimitsCacheFile(path)
+	if parsed == nil {
+		return nil
+	}
+	return parsed.PromptCacheExpiresAt
 }
 
 func collectFromStatusLineCache(nowMs int64, path string) *ProviderLimits {

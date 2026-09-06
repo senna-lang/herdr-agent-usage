@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 )
 
 func assistantLine(isSidechain bool, model string, usage map[string]int) string {
@@ -200,5 +202,64 @@ func TestExtractLatestUsageFromLines_BoundaryWithoutOlderUsage(t *testing.T) {
 	got := ExtractLatestUsageFromLines([]string{compactBoundaryLine(13820)})
 	if got == nil || got.InputTokens != 13820 || got.Model != "" || !got.Compacted {
 		t.Fatalf("got %+v, want model-less compacted postTokens", got)
+	}
+}
+
+func TestExtractLatestUsageFromLines_AccumulatesSessionCache(t *testing.T) {
+	lines := []string{
+		assistantLine(false, "", map[string]int{
+			"input_tokens": 100, "cache_read_input_tokens": 800,
+			"cache_creation_input_tokens": 100, "output_tokens": 1,
+		}),
+		assistantLine(false, "", map[string]int{
+			"input_tokens": 50, "cache_read_input_tokens": 450,
+			"cache_creation_input_tokens": 0, "output_tokens": 1,
+		}),
+	}
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || got.CacheReadInputTokens != 450 {
+		t.Fatalf("latest occupancy %+v", got)
+	}
+	if got.SessionCache == nil {
+		t.Fatal("expected session cache")
+	}
+	if got.SessionCache.FreshInputTokens != 150 || got.SessionCache.ReadTokens != 1250 || got.SessionCache.CreationTokens != 100 {
+		t.Fatalf("session cache %+v", got.SessionCache)
+	}
+	want := core.CacheFromTokenCounts(150, 1250, 100)
+	if want == nil || got.SessionCache.HitPercent != want.HitPercent {
+		t.Fatalf("hit=%v want %v", got.SessionCache.HitPercent, want.HitPercent)
+	}
+}
+
+func TestExtractLatestUsageFromLines_CompactResetsSessionCache(t *testing.T) {
+	lines := []string{
+		assistantLine(false, "", map[string]int{
+			"input_tokens": 5, "cache_read_input_tokens": 116000, "output_tokens": 9,
+		}),
+		compactBoundaryLine(13820),
+		assistantLine(false, "", map[string]int{
+			"input_tokens": 20, "cache_read_input_tokens": 180, "output_tokens": 7,
+		}),
+	}
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || got.Compacted || got.CacheReadInputTokens != 180 {
+		t.Fatalf("got %+v", got)
+	}
+	if got.SessionCache == nil || got.SessionCache.FreshInputTokens != 20 || got.SessionCache.ReadTokens != 180 {
+		t.Fatalf("post-compact cache %+v", got.SessionCache)
+	}
+}
+
+func TestExtractLatestUsageFromLines_CompactedHasNoCache(t *testing.T) {
+	lines := []string{
+		assistantLine(false, "claude-sonnet-5", map[string]int{
+			"input_tokens": 5, "cache_read_input_tokens": 116000, "output_tokens": 9,
+		}),
+		compactBoundaryLine(13820),
+	}
+	got := ExtractLatestUsageFromLines(lines)
+	if got == nil || !got.Compacted || got.SessionCache != nil {
+		t.Fatalf("compacted must not publish pre-compact cache: %+v", got)
 	}
 }

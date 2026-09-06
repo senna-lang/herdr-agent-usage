@@ -29,6 +29,19 @@ func TestParsePluginConfigTOML_Defaults(t *testing.T) {
 	}
 }
 
+func TestParsePluginConfigTOML_CacheDisplay(t *testing.T) {
+	if !DefaultPluginConfig.CacheDisplay {
+		t.Fatal("cache display must default to enabled")
+	}
+	raw := DefaultPluginConfigTOML(DefaultPluginConfig)
+	if !contains(raw, "cache_display = true") {
+		t.Fatalf("seed missing cache display default:\n%s", raw)
+	}
+	if ParsePluginConfigTOML("[ui]\ncache_display = false").CacheDisplay {
+		t.Fatal("cache display setting ignored")
+	}
+}
+
 func TestParsePluginConfigTOML_Custom(t *testing.T) {
 	cfg := ParsePluginConfigTOML(`
 [notify]

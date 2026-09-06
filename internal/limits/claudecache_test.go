@@ -170,6 +170,37 @@ func TestWriteClaudeLimitsCacheGuarded_SkipsEmpty(t *testing.T) {
 	}
 }
 
+func TestWriteClaudeLimitsCacheGuarded_StoresPromptCacheExpiry(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "cache.json")
+	expires := int64(1_700_003_600)
+	input := fiveHourInput(42)
+	input.PromptCachePresent = true
+	input.PromptCacheExpiresAt = &expires
+	if wrote, err := WriteClaudeLimitsCacheGuarded(input, 1_000, cachePath); err != nil || !wrote {
+		t.Fatalf("wrote=%v err=%v", wrote, err)
+	}
+	got := ReadPromptCacheExpiresAt(cachePath)
+	if got == nil || *got != expires {
+		t.Fatalf("expires=%v", got)
+	}
+
+	cold := RateLimitsInput{PromptCachePresent: true}
+	if wrote, err := WriteClaudeLimitsCacheGuarded(cold, 2_000, cachePath); err != nil || !wrote {
+		t.Fatalf("cold write: wrote=%v err=%v", wrote, err)
+	}
+	if ReadPromptCacheExpiresAt(cachePath) != nil {
+		t.Fatal("cold prefix must clear recorded expiry")
+	}
+	limits := CollectClaudeLimits(3_000, CollectClaudeLimitsOptions{
+		StatusLineCachePath: cachePath,
+		ClaudeJSONPath:      filepath.Join(dir, "missing.json"),
+	})
+	if limits.Primary == nil || limits.Primary.UsedPercentage != 42 {
+		t.Fatalf("windows must survive a prompt_cache-only write: %+v", limits.Primary)
+	}
+}
+
 func TestWriteClaudeLimitsCacheGuarded_SeparateProfilePaths(t *testing.T) {
 	dir := t.TempDir()
 	pathA := filepath.Join(dir, "a", "cache.json")

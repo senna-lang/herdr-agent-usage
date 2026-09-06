@@ -11,7 +11,6 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
 	"github.com/senna-lang/herdr-agent-usage/internal/herdrcli"
 	"github.com/senna-lang/herdr-agent-usage/internal/limits"
-	"github.com/senna-lang/herdr-agent-usage/internal/provider"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
@@ -196,6 +195,32 @@ func writeMetadataTokenWith(writer metadataTokenWriter, current map[string]strin
 	}
 }
 
+// writeCacheHitTokens writes the hit-rate string onto exactly one of
+// $cache_high / $cache_mid / $cache_low and clears the others. Herdr colors
+// those tokens from config.toml. The unstyled $cache token is cleared so a
+// leftover layout row cannot keep a previous ANSI value.
+func writeCacheHitTokens(current map[string]string, paneID, cacheText string, hit float64, force, retainExistingOnEmpty bool) {
+	writeCacheHitTokensWith(herdrMetadataTokenWriter, current, paneID, cacheText, hit, force, retainExistingOnEmpty)
+}
+
+func writeCacheHitTokensWith(writer metadataTokenWriter, current map[string]string, paneID, cacheText string, hit float64, force, retainExistingOnEmpty bool) {
+	if retainExistingOnEmpty && cacheText == "" {
+		return
+	}
+	active := ""
+	if cacheText != "" {
+		active = string(core.CacheHitBandFor(hit))
+	}
+	for _, name := range core.CacheHitTokenNames {
+		value := ""
+		if name == active {
+			value = cacheText
+		}
+		writeMetadataTokenWith(writer, current, paneID, name, value, force)
+	}
+	writeMetadataTokenWith(writer, current, paneID, "cache", "", force)
+}
+
 // RunUpdate resolves usage for HERDR_PANE_ID and refreshes its sidebar tokens,
 // including while the agent is working. force bypasses unchanged-value checks.
 func RunUpdate(force bool) {
@@ -259,6 +284,7 @@ func RunUpdateForPane(paneID string, force bool) {
 		writeMetadataToken(pane.Tokens, paneID, "limit", "", force, retainExistingOnEmpty)
 		writeMetadataToken(pane.Tokens, paneID, "provider", formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot), force, retainExistingOnEmpty)
 		writeMetadataToken(pane.Tokens, paneID, "context", "", force, retainExistingOnEmpty)
+		writeCacheHitTokens(pane.Tokens, paneID, "", 0, force, retainExistingOnEmpty)
 		return
 	}
 
@@ -327,48 +353,16 @@ func RunUpdateForPane(paneID string, force bool) {
 	// Context tokens: claude is read from its resolved profile's own transcript
 	// root (bypassing the registry's default-root lookup) so a non-default
 	// account's context display doesn't fall back to ~/.claude/projects.
-	var usage *core.ContextUsage
-	switch *pane.Agent {
-	case "claude":
-		if profile, ok := findClaudeProfile(claudeProfiles, providerID); ok && sid != nil {
-			if transcript := claude.ResolveUsageForSessionIn(profile.ProjectsRoot, *sid); transcript != nil {
-				u := claude.ToContextUsage(*transcript)
-				usage = &u
-			}
-		}
-	case "codex":
-		if profile, ok := findCodexProfile(codexProfiles, providerID); ok {
-			if extracted := codex.ResolveUsageForCodexIn(profile.Home, sid, cwd); extracted != nil {
-				u := core.ContextUsage{ContextTokens: extracted.ContextTokens}
-				if extracted.WindowTokens != nil {
-					u.WindowTokens = extracted.WindowTokens
-				}
-				usage = &u
-			}
-		}
-	case "grok":
-		if profile, ok := findGrokProfile(grokProfiles, providerID); ok {
-			if profile.Implicit {
-				usage = p.ResolveUsage(provider.UsageResolveInput{Session: pane.AgentSession, Cwd: cwd, PaneID: &paneID})
-			} else {
-				usage = grok.ResolveUsageForGrokIn(profile.Home, sid, cwd)
-			}
-		}
-	case "opencode":
-		if profile, ok := findOpenCodeProfile(openCodeProfiles, providerID); ok {
-			if profile.Implicit {
-				usage = p.ResolveUsage(provider.UsageResolveInput{Session: pane.AgentSession, Cwd: cwd, PaneID: &paneID})
-			} else {
-				usage = opencode.ResolveUsageForOpenCodeIn(profile.DataDir, sid, cwd)
-			}
-		}
-	default:
-		usage = p.ResolveUsage(provider.UsageResolveInput{
-			Session: pane.AgentSession,
-			Cwd:     cwd,
-			PaneID:  &paneID,
-		})
-	}
+	usage := resolvePaneUsage(
+		paneID,
+		pane,
+		p,
+		providerID,
+		claudeProfiles,
+		codexProfiles,
+		grokProfiles,
+		openCodeProfiles,
+	)
 
 	contextPrefix := ""
 	if accountText != "" {
@@ -377,6 +371,7 @@ func RunUpdateForPane(paneID string, force bool) {
 
 	if usage == nil {
 		writeMetadataToken(pane.Tokens, paneID, "context", contextPrefix, force, retainExistingOnEmpty)
+		writeCacheHitTokens(pane.Tokens, paneID, "", 0, force, retainExistingOnEmpty)
 		return
 	}
 
@@ -386,4 +381,23 @@ func RunUpdateForPane(paneID string, force bool) {
 	maxCols = reserveColumnsFor(maxCols, contextPrefix)
 	statusText := core.FormatUsageStatus(*usage, core.FormatUsageOptions{MaxColumns: maxCols})
 	writeMetadataToken(pane.Tokens, paneID, "context", combineLimitAndContext(contextPrefix, statusText), force, retainExistingOnEmpty)
+	if !limits.ResolvedCacheDisplay() {
+		// Explicit opt-out clears prior cache metadata, including working panes.
+		writeCacheHitTokens(pane.Tokens, paneID, "", 0, force, false)
+		return
+	}
+	cacheText := ""
+	hit := 0.0
+	if cache := core.SidebarCache(*usage); cache != nil {
+		cacheText = core.FormatCacheStatus(*cache, time.Now().Unix())
+		hit = cache.HitPercent
+	}
+	writeCacheHitTokens(pane.Tokens, paneID, cacheText, hit, force, retainExistingOnEmpty)
+}
+
+func attachClaudePromptCacheTTL(usage *core.ContextUsage, limitsCachePath string) {
+	if usage == nil || usage.Cache == nil {
+		return
+	}
+	usage.Cache.ExpiresAtUnix = limits.ReadPromptCacheExpiresAt(limitsCachePath)
 }

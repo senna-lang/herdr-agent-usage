@@ -6,15 +6,19 @@ package omp
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/core"
 )
 
 type assistantUsage struct {
-	Input       *float64 `json:"input"`
-	Output      *float64 `json:"output"`
-	CacheRead   *float64 `json:"cacheRead"`
-	CacheWrite  *float64 `json:"cacheWrite"`
-	TotalTokens *float64 `json:"totalTokens"`
-	Cost        *struct {
+	Input        *float64           `json:"input"`
+	Output       *float64           `json:"output"`
+	CacheRead    *float64           `json:"cacheRead"`
+	CacheWrite   *float64           `json:"cacheWrite"`
+	CacheWrite1h *float64           `json:"cacheWrite1h"`
+	CacheTTL     map[string]float64 `json:"cttl"`
+	TotalTokens  *float64           `json:"totalTokens"`
+	Cost         *struct {
 		Total *float64 `json:"total"`
 	} `json:"cost"`
 }
@@ -78,6 +82,18 @@ func totalTokensOf(usage *assistantUsage) int {
 		floatOrZero(usage.CacheRead) + floatOrZero(usage.CacheWrite))
 }
 
+// cacheFromMessage returns only the counters reported by one completed turn.
+func cacheFromMessage(msg *assistantMessage) *core.CacheUsage {
+	if msg == nil || msg.Usage == nil {
+		return nil
+	}
+	return core.CacheFromTokenCounts(
+		intOrZero(msg.Usage.Input),
+		intOrZero(msg.Usage.CacheRead),
+		intOrZero(msg.Usage.CacheWrite),
+	)
+}
+
 func sessionUsageFromMessage(msg *assistantMessage) *SessionUsage {
 	if msg == nil || msg.Role != "assistant" || msg.StopReason == "aborted" || msg.StopReason == "error" {
 		return nil
@@ -103,23 +119,32 @@ func sessionUsageFromMessage(msg *assistantMessage) *SessionUsage {
 		ContextTokens: contextTokens,
 		TotalTokens:   totalTokens,
 		CostUSD:       cost,
+		Cache:         cacheFromMessage(msg),
 	}
 }
 
 func extractLatestUsageLinear(lines []string) *SessionUsage {
+	var found *SessionUsage
+	acc := cacheAccum{}
 	for i := len(lines) - 1; i >= 0; i-- {
 		var entry assistantLine
 		if json.Unmarshal([]byte(lines[i]), &entry) != nil {
 			continue
 		}
 		if entry.Type == "compaction" {
+			if found != nil {
+				break
+			}
 			return nil
 		}
 		if usage := sessionUsageFromMessage(entry.Message); usage != nil {
-			return usage
+			if found == nil {
+				found = usage
+			}
+			acc.add(entry.Message)
 		}
 	}
-	return nil
+	return acc.apply(found)
 }
 
 func extractLatestBackendLinear(lines []string) string {
@@ -197,23 +222,23 @@ func ExtractLatestUsageFromLines(lines []string) *SessionUsage {
 	}
 
 	var found *SessionUsage
+	acc := cacheAccum{}
 	missing := walkActiveBranch(entries, leafID, func(entry assistantLine) bool {
 		if entry.Type == "compaction" {
-			found = nil
 			return true
 		}
 		if usage := sessionUsageFromMessage(entry.Message); usage != nil {
-			found = usage
-			return true
+			if found == nil {
+				found = usage
+			}
+			acc.add(entry.Message)
 		}
 		return false
 	})
 	if missing {
-		// A very large trailing JSONL row can push ancestors outside the
-		// bounded tail read. Preserve the old best-effort behavior then.
 		return extractLatestUsageLinear(lines)
 	}
-	return found
+	return acc.apply(found)
 }
 
 // ExtractLatestBackendFromLines returns the provider id of the latest valid
@@ -289,4 +314,77 @@ func SumUsageForProviderFromLines(lines []string, provider string, startMs, endM
 		}
 	}
 	return tokens, costUSD
+}
+
+type cacheAccum struct {
+	fresh, read, write int
+	ttlSeconds         *int64
+	lastActivity       *int64
+	anthropicActive    bool
+}
+
+func (a *cacheAccum) add(msg *assistantMessage) {
+	if msg == nil || msg.Usage == nil {
+		return
+	}
+	// OMP records uncached input separately from cache reads and writes; keep
+	// all three so the shared reuse ratio has the same denominator semantics.
+	fresh := intOrZero(msg.Usage.Input)
+	cacheRead := intOrZero(msg.Usage.CacheRead)
+	cacheWrite := intOrZero(msg.Usage.CacheWrite)
+	a.fresh += fresh
+	a.read += cacheRead
+	a.write += cacheWrite
+	if !strings.EqualFold(msg.Provider, "anthropic") || (cacheRead == 0 && cacheWrite == 0) {
+		return
+	}
+	a.anthropicActive = true
+	activity := unixSecondsFromMs(msg.Timestamp)
+	if activity <= 0 || a.lastActivity != nil {
+		return
+	}
+	// Lines are visited newest-first. Keep TTL only when the newest
+	// cache-bearing response names its cache bucket explicitly.
+	a.lastActivity = &activity
+	a.ttlSeconds = explicitCacheTTLSeconds(msg.Usage)
+}
+
+func explicitCacheTTLSeconds(usage *assistantUsage) *int64 {
+	if usage == nil {
+		return nil
+	}
+	if intOrZero(usage.CacheWrite1h) > 0 {
+		ttl := int64(60 * 60)
+		return &ttl
+	}
+	if usage.CacheTTL["ephemeral5m"] > 0 {
+		ttl := int64(5 * 60)
+		return &ttl
+	}
+	return nil
+}
+
+func (a cacheAccum) apply(usage *SessionUsage) *SessionUsage {
+	if usage == nil {
+		return nil
+	}
+	usage.SessionCache = core.CacheFromTokenCounts(a.fresh, a.read, a.write)
+	if usage.Cache == nil {
+		return usage
+	}
+	if a.anthropicActive && strings.EqualFold(usage.Provider, "anthropic") {
+		usage.Cache.TTLSeconds = a.ttlSeconds
+		usage.Cache.LastActivityUnix = a.lastActivity
+	}
+	return usage
+}
+
+func unixSecondsFromMs(ts int64) int64 {
+	if ts <= 0 {
+		return 0
+	}
+	if ts > 1_000_000_000_000 {
+		return ts / 1000
+	}
+	return ts
 }

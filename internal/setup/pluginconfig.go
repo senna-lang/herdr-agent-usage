@@ -34,6 +34,9 @@ type PluginConfig struct {
 	// remaining (default) shows headroom; used shows consumption. Notify
 	// firing still uses remaining thresholds.
 	LimitPercent core.LimitPercent
+	// CacheDisplay controls both sidebar cache tokens and the Agent Usage pane's
+	// red-band cache warning.
+	CacheDisplay bool
 	// ClaudeProfiles are the configured [[claude.profiles]] entries (unresolved).
 	// Empty means the single implicit "claude" profile is synthesized downstream.
 	ClaudeProfiles []claude.ProfileSpec
@@ -49,6 +52,7 @@ var DefaultPluginConfig = PluginConfig{
 	RemainingThresholds: append([]int(nil), DefaultRemainingThresholds...),
 	NotifyEnabled:       true,
 	LimitPercent:        core.LimitPercentRemaining,
+	CacheDisplay:        true,
 }
 
 // pluginConfigWire mirrors the on-disk TOML shape for decoding.
@@ -59,6 +63,7 @@ type pluginConfigWire struct {
 	} `toml:"notify"`
 	UI struct {
 		LimitPercent *string `toml:"limit_percent"`
+		CacheDisplay *bool   `toml:"cache_display"`
 	} `toml:"ui"`
 	Claude struct {
 		Profiles []profileWire `toml:"profiles"`
@@ -144,6 +149,8 @@ func DefaultPluginConfigTOML(config PluginConfig) string {
 		"[ui]",
 		"# remaining (default): % left / higher is safer. used: fill as you burn.",
 		`limit_percent = "` + string(core.ParseLimitPercent(string(config.LimitPercent))) + `"`,
+		"# Set false to hide cache data from both sidebar and Agent Usage.",
+		"cache_display = " + strconv.FormatBool(config.CacheDisplay),
 		"",
 		"# Multi-account Claude: uncomment and add one block per account.",
 
@@ -219,6 +226,7 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 		NotifyEnabled:       DefaultPluginConfig.NotifyEnabled,
 		RemainingThresholds: append([]int(nil), DefaultPluginConfig.RemainingThresholds...),
 		LimitPercent:        DefaultPluginConfig.LimitPercent,
+		CacheDisplay:        DefaultPluginConfig.CacheDisplay,
 	}
 
 	var wire pluginConfigWire
@@ -233,6 +241,9 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 	}
 	if wire.UI.LimitPercent != nil {
 		cfg.LimitPercent = core.ParseLimitPercent(*wire.UI.LimitPercent)
+	}
+	if wire.UI.CacheDisplay != nil {
+		cfg.CacheDisplay = *wire.UI.CacheDisplay
 	}
 
 	for _, p := range wire.Claude.Profiles {

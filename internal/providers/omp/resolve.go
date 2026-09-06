@@ -69,7 +69,7 @@ func resolveUsageForPath(path string, resolveWindow contextWindowResolver) *core
 	if usage == nil {
 		return nil
 	}
-	out := core.ContextUsage{ContextTokens: usage.ContextTokens}
+	out := core.ContextUsage{ContextTokens: usage.ContextTokens, Cache: usage.Cache, SessionCache: usage.SessionCache}
 	if window := resolveWindow(usage.Provider, usage.Model); window != nil {
 		out.WindowTokens = window
 	}
