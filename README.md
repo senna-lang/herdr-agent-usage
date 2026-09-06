@@ -8,7 +8,7 @@
 
 Monitor context usage and provider rate limits for agents running in [Herdr](https://herdr.dev).
 
-![Agent Usage pane showing Claude, Codex, OpenCode Go, and Grok subscription limits alongside a DeepSeek pay-as-you-go API spend block, with sidebar cache-hit bands and a low-cache warning](docs/assets/agent-usage-pane.png)
+![Agent Usage pane showing Claude, Codex, OpenCode Go, and Grok subscription limits alongside a DeepSeek pay-as-you-go API spend block, with sidebar cache-hit bands and a low-cache warning](docs/assets/agent-usage-pane.png?v=d9937a2)
 
 - **Per-pane context meters** — every agent pane's sidebar label shows how much of its context window the session is using (`⛁ 13% (130k)` = 130k tokens, 13% of the window), updated after each completed turn.
 - **Prompt-cache row** — session-cumulative hit rate (`cache hit 93.3%`) with remaining TTL only from a recorded expiry. ⚠️ when that TTL has already elapsed. ≥80% uses the default sidebar color; `$cache_mid` yellow ≥50%; `$cache_low` red otherwise.
