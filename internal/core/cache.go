@@ -78,7 +78,7 @@ func RemainingTTLSeconds(cache CacheUsage, nowUnix int64) *int64 {
 }
 
 // FormatCacheStatus renders the sidebar cache row from session-cumulative
-// hit rate. A recorded remaining TTL of 0 (prefix already cold) prefixes ⚠️.
+// hit rate. A recorded remaining TTL of 0 is explicitly marked as expired.
 // Unknown TTL is not a warning: missing expiry is not evidence of a miss.
 // The string is plain text; Herdr metadata tokens do not interpret ANSI.
 func FormatCacheStatus(cache CacheUsage, nowUnix int64) string {
@@ -88,7 +88,7 @@ func FormatCacheStatus(cache CacheUsage, nowUnix int64) string {
 		return hit
 	}
 	if *remaining <= 0 {
-		return "⚠️ " + hit
+		return "⚠️ " + hit + " · ttl expired"
 	}
 	return hit + " · ttl≈" + formatCacheTTL(*remaining)
 }

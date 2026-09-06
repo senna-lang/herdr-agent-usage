@@ -96,7 +96,7 @@ func TestFormatCacheStatus_HitOnlyWhenTTLUnknown(t *testing.T) {
 func TestFormatCacheStatus_ExpiredTTLWarns(t *testing.T) {
 	expires := int64(1_000)
 	got := FormatCacheStatus(CacheUsage{HitPercent: 50, ExpiresAtUnix: &expires}, 2_000)
-	if got != "⚠️ cache hit 50.0%" {
+	if got != "⚠️ cache hit 50.0% · ttl expired" {
 		t.Fatalf("got %q", got)
 	}
 }
