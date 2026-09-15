@@ -45,8 +45,10 @@ jobs:
         with:
           version: latest
 
+      # Pinned: see the matching comment in ci.yml — v1.8.0 requires Go
+      # >= 1.26.0, newer than the 1.25.13 pinned above.
       - name: Vulnerability check
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
   build:
     needs: verify
