@@ -136,6 +136,7 @@ func RunSetup(options SetupOptions) SetupReport {
 		"",
 	)
 	lines = append(lines, cursorSetupLines(root)...)
+	lines = append(lines, antigravitySetupLines(root)...)
 
 	return SetupReport{Lines: lines, PluginConfigSeeded: seeded, ToastWrote: toastWrote}
 }

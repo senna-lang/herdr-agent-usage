@@ -117,6 +117,7 @@ herdr plugin action invoke usagebar.setup
 
 | Agent | Sidebar context + limit | Limits pane | Notes |
 | --- | --- | --- | --- |
+| Antigravity CLI | Yes | Yes | Context + weekly quota from the CLI statusLine (opt-in, no config file — run `/statusline` inside `agy`; see `usagebar setup`). Two separate weekly allotments: native Gemini models and third-party models (Claude, GPT, …) routed through it |
 | Claude Code | Yes | Yes | Subscription windows from `~/.claude.json` / statusLine cache. Pay-as-you-go (API key, Bedrock, Vertex, Foundry, gateway) hides those windows and labels the backend from deployment env / settings |
 | Codex | Yes | Yes | Context + rate windows from local rollouts; custom `model_provider` panes are pay-as-you-go |
 | OpenCode | Yes | Yes | The `opencode-go` subscription keeps no usage numbers on disk, so its windows come from opencode.ai, authenticated by `OPENCODE_GO_COOKIE` or a browser session imported via the Keychain ([details](#opencode-go-official-usage)); without either it degrades to a local SQLite estimate. Other backends (e.g. DeepSeek) show token/cost spend instead of plan windows |
@@ -476,6 +477,7 @@ Everything is computed from files that the agents already keep on your machine:
 
 | Harness | Local sources read |
 | --- | --- |
+| Antigravity CLI | Snapshots under `~/.gemini/antigravity-cli/herdr-usagebar/` (or `USAGEBAR_STATE_DIR`), written from the CLI statusLine payload — the only local surface reporting context and quota usage; Antigravity's own `conversations/*.db` is not read (SQLite with protobuf-encoded columns; see [docs/antigravity-contract.md](docs/antigravity-contract.md)) |
 | Claude Code | `~/.claude.json`, statusLine cache under `~/.claude/herdr-usagebar/`, `settings.json` (deployment env) |
 | Codex | rollout files under `~/.codex/sessions/` |
 | OpenCode | `~/.local/share/opencode/opencode.db` (session usage), `~/.local/share/opencode/auth.json` (credential kind only), and — for OpenCode Go's official windows — the `opencode.ai` cookie in a local Chromium profile plus that browser's Keychain "Safe Storage" password (read-only, never persisted; see [OpenCode Go official usage](#opencode-go-official-usage)) |

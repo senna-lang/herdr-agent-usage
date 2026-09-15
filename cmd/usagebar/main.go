@@ -15,6 +15,7 @@ import (
 
 	"github.com/senna-lang/herdr-agent-usage/internal/herdrcli"
 	"github.com/senna-lang/herdr-agent-usage/internal/limits"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/antigravity"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/cursor"
 	"github.com/senna-lang/herdr-agent-usage/internal/ratelimit"
@@ -72,6 +73,9 @@ func main() {
 	case "cursor-statusline":
 		// Cursor CLI statusLine bridge (stdin JSON → context snapshot + summary stdout)
 		runCursorStatusLine()
+	case "antigravity-statusline":
+		// Antigravity CLI statusLine bridge (stdin JSON → context+quota snapshot + summary stdout)
+		runAntigravityStatusLine()
 	case "collect":
 		// debug: print JSON of collected limits once
 		runCollectJSON(args)
@@ -101,6 +105,7 @@ Usage:
                                      Check GitHub Releases for a newer plugin version
   usagebar statusline                Claude Code statusLine (stdin rate_limits)
   usagebar cursor-statusline         Cursor CLI statusLine (stdin context_window)
+  usagebar antigravity-statusline    Antigravity CLI statusLine (stdin context_window+quota)
   usagebar setup [--write-toast]     Seed plugin config / show snippets
   usagebar collect                   Debug: print collected limits as JSON
   usagebar opencode-check            Debug: report the OpenCode Go usage path
@@ -684,6 +689,30 @@ func runCursorStatusLine() {
 		os.Exit(1)
 	}
 	text, err := cursor.RunStatusLineIn(cursor.SessionsDir(stateDir), data, os.Getenv("HERDR_PANE_ID"), time.Now().UnixMilli())
+	if err != nil {
+		os.Exit(1)
+	}
+	fmt.Print(text)
+}
+
+// runAntigravityStatusLine records one Antigravity CLI statusLine payload and
+// prints the line Antigravity renders in place of its own default status
+// line (configuring a custom statusLine command fully replaces the built-in
+// one; see `agy` `/statusline help`).
+//
+// An unusable payload exits non-zero with empty stdout, matching Cursor's
+// bridge: an update carrying no usable snapshot must leave the stored one
+// untouched rather than blanking the rendered line.
+func runAntigravityStatusLine() {
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		os.Exit(1)
+	}
+	stateDir := antigravity.StateDir()
+	if stateDir == "" {
+		os.Exit(1)
+	}
+	text, err := antigravity.RunStatusLineIn(antigravity.SessionsDir(stateDir), data, os.Getenv("HERDR_PANE_ID"), time.Now().UnixMilli())
 	if err != nil {
 		os.Exit(1)
 	}

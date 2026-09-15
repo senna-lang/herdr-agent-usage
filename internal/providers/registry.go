@@ -13,6 +13,7 @@ import (
 	"slices"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/provider"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/antigravity"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/cursor"
@@ -67,6 +68,7 @@ func (r Registration) Has(cap Capability) bool {
 // the matching internal/limits table is caught by that table's own
 // exhaustiveness test (see internal/limits/provider_contract_test.go).
 var Registrations = []Registration{
+	{antigravity.Provider, []Capability{CapOwnsSubscriptionQuota}},
 	{claude.Provider, []Capability{CapOwnsSubscriptionQuota}},
 	{codex.Provider, []Capability{CapOwnsSubscriptionQuota}},
 	{cursor.Provider, []Capability{CapContextOnly}},

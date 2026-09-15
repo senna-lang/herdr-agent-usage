@@ -8,6 +8,7 @@ package limits
 import (
 	"path/filepath"
 
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/antigravity"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 )
 
@@ -42,6 +43,12 @@ type CollectOptions struct {
 	Codex    []CodexProfileCollector
 	OpenCode []OpenCodeProfileCollector
 	Grok     []GrokProfileCollector
+	// Antigravity has no per-account profile concept (one Google account per
+	// install), so unlike the profile families above it is a single
+	// injectable collector rather than a slice. Nil leaves it uncollected in
+	// a bare CollectOptions{}, matching the profile families' unconfigured
+	// stub behavior for direct test callers.
+	Antigravity LimitsCollector
 	// Attach activity after collection (injectable for tests).
 	Attach func(providers []ProviderLimits, nowMs int64) []ProviderLimits
 	// Only restricts collection to these provider ids (nil = all providers).
@@ -134,6 +141,9 @@ func DefaultCollectOptions() CollectOptions {
 		Codex:    codexCollectors,
 		Grok:     grokCollectors,
 		OpenCode: openCodeCollectors,
+		Antigravity: func(_ *string, nowMs int64) ProviderLimits {
+			return CollectAntigravityLimits(nowMs, CollectAntigravityLimitsOptions{})
+		},
 	}
 }
 
@@ -148,7 +158,13 @@ func DefaultCollectOptions() CollectOptions {
 var singleCollectorQuotaSpecs = []struct {
 	id, label string
 	field     func(CollectOptions) LimitsCollector
-}{}
+}{
+	{
+		id:    antigravity.Provider.AgentID(),
+		label: "Antigravity",
+		field: func(o CollectOptions) LimitsCollector { return o.Antigravity },
+	},
+}
 
 // CollectAllProviderLimits runs collectors in display order: each configured
 // Claude profile (config order) -> Codex -> OpenCode -> Grok, then attaches

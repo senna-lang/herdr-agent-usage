@@ -107,6 +107,7 @@ const (
 // so a newly registered quota-owning provider left out of this map fails that
 // test instead of silently returning slotNone for every limit id.
 var LimitIDSlotTables = map[string]func(limitID string) (windowSlot, int){
+	"agy":      antigravityLimitIDSlot,
 	"claude":   claudeLimitIDSlot,
 	"codex":    codexLimitIDSlot,
 	"grok":     grokLimitIDSlot,
@@ -142,6 +143,21 @@ func codexLimitIDSlot(limitID string) (windowSlot, int) {
 	case strings.HasSuffix(limitID, ":primary"):
 		return slotPrimary, 300
 	case strings.HasSuffix(limitID, ":secondary"):
+		return slotSecondary, 10080
+	}
+	return slotNone, 0
+}
+
+// antigravityLimitIDSlot maps Antigravity's two weekly quota buckets. Both
+// are the same rolling-week duration, but they are separate resource pools
+// (native Gemini vs. third-party models), not a short/mid tier of one
+// resource: gemini-weekly is the account's own native quota and is shown as
+// Primary; 3p-weekly is Secondary. See CollectAntigravityLimits.
+func antigravityLimitIDSlot(limitID string) (windowSlot, int) {
+	switch limitID {
+	case "gemini-weekly":
+		return slotPrimary, 10080
+	case "3p-weekly":
 		return slotSecondary, 10080
 	}
 	return slotNone, 0

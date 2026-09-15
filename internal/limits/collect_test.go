@@ -11,10 +11,10 @@ import (
 
 func TestCollectAllProviderLimits_OrderAndStubs(t *testing.T) {
 	got := CollectAllProviderLimits(nil, 100, CollectOptions{})
-	if len(got) != 4 {
+	if len(got) != 5 {
 		t.Fatalf("len=%d", len(got))
 	}
-	wantIDs := []string{"claude", "codex", "opencode", "grok"}
+	wantIDs := []string{"claude", "codex", "opencode", "grok", "agy"}
 	for i, id := range wantIDs {
 		if got[i].ProviderID != id {
 			t.Fatalf("[%d] id=%q want %q", i, got[i].ProviderID, id)
@@ -44,7 +44,7 @@ func TestCollectAllProviderLimits_WithCollectorsAndAttach(t *testing.T) {
 			},
 		}},
 		Attach: func(providers []ProviderLimits, nowMs int64) []ProviderLimits {
-			if nowMs != 200 || len(providers) != 4 {
+			if nowMs != 200 || len(providers) != 5 {
 				t.Fatalf("attach args")
 			}
 			providers[0].PaneActivity = &ProviderPaneActivity{WindowMinutes: 300, TotalTokens: 1}
