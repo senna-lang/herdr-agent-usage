@@ -371,9 +371,14 @@ func runLimitsPane(args []string) error {
 		cachedSnap = collectPanel(nowMs, activeOnly)
 		cachedLoaded = true
 		cachedNowMs = nowMs
-		update.TouchPaneHeartbeat(time.Now())
 		update.PublishCollectedLimits(cachedSnap.providers, nowMs)
 		update.PublishOpenPaneCaches(time.UnixMilli(nowMs))
+		// Touched last: the heartbeat is evidence this tick's publish calls
+		// above actually ran, not merely that a render loop is alive. See
+		// heartbeat.go — a heartbeat that predates the publish calls could
+		// keep looking fresh from a stale, unrestarted process that no
+		// longer runs this logic at all.
+		update.TouchPaneHeartbeat(time.Now())
 		paintFrame(formatPanel(cachedSnap, nowMs))
 	}
 	renderFull()
