@@ -22,7 +22,7 @@ approach fits the project before substantial work begins.
 
 ## Development
 
-Agent Usage requires Go 1.25 or later. The executable entry point is
+Agent Usage requires Go 1.26 or later. The executable entry point is
 `cmd/usagebar`. Shared behavior lives under `internal`, including provider
 registration in `internal/providers`, provider-specific session extraction and
 resolution in `internal/providers/<agent>`, limit collection and presentation

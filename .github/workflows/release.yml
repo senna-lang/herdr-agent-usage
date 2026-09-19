@@ -21,7 +21,7 @@ jobs:
         with:
           # Keep the release verifier on CI's current patched Go release.
           # A minor-only selector can resolve an older vulnerable patch.
-          go-version: '1.25.13'
+          go-version: '1.26.8'
 
       - name: Vet
         run: go vet ./...
@@ -45,10 +45,8 @@ jobs:
         with:
           version: latest
 
-      # Pinned: see the matching comment in ci.yml — v1.8.0 requires Go
-      # >= 1.26.0, newer than the 1.25.13 pinned above.
       - name: Vulnerability check
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   build:
     needs: verify
@@ -58,7 +56,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.25.13'
+          go-version: '1.26.8'
 
       - name: Cross-compile
         run: |
