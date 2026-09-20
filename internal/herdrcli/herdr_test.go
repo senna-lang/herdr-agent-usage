@@ -4,7 +4,11 @@
 package herdrcli
 
 import (
+	"io"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -147,5 +151,108 @@ func TestBuildPaneNaming_NilPointersDoNotPanic(t *testing.T) {
 	)
 	if gotTabID != "" || got != (PaneNaming{}) {
 		t.Fatalf("tabID=%q naming=%+v", gotTabID, got)
+	}
+}
+
+// writeFakeHerdr writes an executable stand-in for the herdr CLI.
+func writeFakeHerdr(t *testing.T, dir, script string) string {
+	t.Helper()
+	path := filepath.Join(dir, "herdr")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestHerdrBin_UsesRunnableHERDRBinPath(t *testing.T) {
+	bin := writeFakeHerdr(t, t.TempDir(), "#!/bin/sh\n")
+	t.Setenv("HERDR_BIN_PATH", bin)
+	if got := herdrBin(); got != bin {
+		t.Fatalf("got %q want %q", got, bin)
+	}
+}
+
+func TestHerdrBin_FallsBackToPATHWhenHERDRBinPathIsStale(t *testing.T) {
+	// Herdr reports a replaced or removed binary as `<path> (deleted)`, and a
+	// package manager that rotates version directories leaves the same kind of
+	// dead path behind.
+	root := t.TempDir()
+	for _, tt := range []struct {
+		name string
+		path string
+	}{
+		{name: "removed version directory", path: filepath.Join(root, "0.8.2", "herdr")},
+		{name: "removed binary in an existing directory", path: filepath.Join(root, "herdr")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HERDR_BIN_PATH", tt.path)
+			if got := herdrBin(); got != "herdr" {
+				t.Fatalf("got %q want herdr", got)
+			}
+		})
+	}
+}
+
+func TestHerdrBin_FallsBackToPATHWhenHERDRBinPathIsNotExecutable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "herdr")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HERDR_BIN_PATH", path)
+	if got := herdrBin(); got != "herdr" {
+		t.Fatalf("got %q want herdr", got)
+	}
+}
+
+func TestHerdrBin_DefaultsToPATHWhenUnset(t *testing.T) {
+	t.Setenv("HERDR_BIN_PATH", "")
+	if got := herdrBin(); got != "herdr" {
+		t.Fatalf("got %q want herdr", got)
+	}
+}
+
+func TestSpawnHerdr_RunsPATHFallbackWhenHERDRBinPathIsStale(t *testing.T) {
+	binDir := t.TempDir()
+	writeFakeHerdr(t, binDir, "#!/bin/sh\nprintf 'pane-list-ok'\n")
+	t.Setenv("PATH", binDir)
+	t.Setenv("HERDR_BIN_PATH", filepath.Join(t.TempDir(), "0.8.2", "herdr"))
+
+	got, ok := spawnHerdr("agent", "list")
+	if !ok {
+		t.Fatal("spawnHerdr failed")
+	}
+	if got != "pane-list-ok" {
+		t.Fatalf("stdout = %q", got)
+	}
+}
+
+func TestSpawnHerdr_ReportsSpawnFailureOnStderr(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("HERDR_BIN_PATH", "")
+
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr := os.Stderr
+	os.Stderr = write
+	_, ok := spawnHerdr("pane", "get", "w6:p1")
+	os.Stderr = stderr
+	if err := write.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := io.ReadAll(read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := read.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("expected the herdr call to fail")
+	}
+	if !strings.Contains(string(out), "herdr pane get failed") {
+		t.Fatalf("stderr = %q", out)
 	}
 }

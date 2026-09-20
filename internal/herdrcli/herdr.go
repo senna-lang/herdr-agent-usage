@@ -7,8 +7,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
@@ -20,25 +22,61 @@ const spawnTimeout = 3 * time.Second
 // Source is the report-metadata source id for this plugin.
 const Source = "usagebar"
 
+// herdrBin returns the herdr executable this plugin calls back through.
+//
+// Herdr exports the path of the running server binary as HERDR_BIN_PATH. That
+// path goes stale when the binary is replaced or removed on disk, which the
+// kernel reports as `<path> (deleted)`; a package manager that rotates
+// versioned directories leaves the same kind of dead path behind. A stale
+// value must not disable every callback, so it is used only when it names a
+// runnable file and otherwise falls back to `herdr` on PATH.
 func herdrBin() string {
-	if v := os.Getenv("HERDR_BIN_PATH"); v != "" {
+	v := os.Getenv("HERDR_BIN_PATH")
+	if v == "" {
+		return "herdr"
+	}
+	if isRunnableFile(v) {
 		return v
 	}
+	// Herdr captures plugin stderr, so the fallback stays visible instead of
+	// turning into a silent no-op.
+	fmt.Fprintf(os.Stderr, "usagebar: HERDR_BIN_PATH=%s is not runnable, using herdr from PATH\n", v)
 	return "herdr"
+}
+
+// isRunnableFile reports whether path names an existing regular file with an
+// executable bit set.
+func isRunnableFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	return info.Mode().Perm()&0o111 != 0
 }
 
 func spawnHerdr(args ...string) (stdout string, ok bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), spawnTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, herdrBin(), args...)
+	bin := herdrBin()
+	cmd := exec.CommandContext(ctx, bin, args...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = nil
 	cmd.Stdin = nil
 	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "usagebar: herdr %s failed: %v\n", herdrCallLabel(args), err)
 		return "", false
 	}
 	return out.String(), true
+}
+
+// herdrCallLabel names the herdr subcommand for diagnostics without echoing
+// reported token values.
+func herdrCallLabel(args []string) string {
+	if len(args) > 2 {
+		args = args[:2]
+	}
+	return strings.Join(args, " ")
 }
 
 // PaneInfo is agent / status / session / cwd for a pane.
