@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -230,18 +231,37 @@ func TestSpawnHerdr_ReportsSpawnFailureOnStderr(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("HERDR_BIN_PATH", "")
 
+	var ok bool
+	out := captureStderr(t, func() {
+		_, ok = spawnHerdr("pane", "get", "w6:p1")
+	})
+	if ok {
+		t.Fatal("expected the herdr call to fail")
+	}
+	if !strings.Contains(out, "herdr pane get failed") {
+		t.Fatalf("stderr = %q", out)
+	}
+}
+
+// captureStderr runs fn with os.Stderr redirected to a pipe and returns what fn
+// wrote. The package's tests are not parallel and already swap os.Stderr, so
+// the global redirect is safe here.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
 	read, write, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	stderr := os.Stderr
 	os.Stderr = write
-	_, ok := spawnHerdr("pane", "get", "w6:p1")
+	// Restore from a defer too, so an assertion that aborts fn cannot leak the
+	// swapped descriptor into the next test.
+	defer func() { os.Stderr = stderr }()
+	fn()
 	os.Stderr = stderr
 	if err := write.Close(); err != nil {
 		t.Fatal(err)
 	}
-
 	out, err := io.ReadAll(read)
 	if err != nil {
 		t.Fatal(err)
@@ -249,10 +269,32 @@ func TestSpawnHerdr_ReportsSpawnFailureOnStderr(t *testing.T) {
 	if err := read.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if ok {
-		t.Fatal("expected the herdr call to fail")
-	}
-	if !strings.Contains(string(out), "herdr pane get failed") {
-		t.Fatalf("stderr = %q", out)
+	return string(out)
+}
+
+// resetHerdrBinFallbackNotice clears the process-wide once so a test observes
+// the first-call notice no matter which test ran before it.
+func resetHerdrBinFallbackNotice(t *testing.T) {
+	t.Helper()
+	herdrBinFallbackNoticeOnce = sync.Once{}
+	t.Cleanup(func() { herdrBinFallbackNoticeOnce = sync.Once{} })
+}
+
+func TestHerdrBin_ReportsFallbackOncePerProcess(t *testing.T) {
+	// A single sidebar refresh makes roughly ten callbacks, all of which fall
+	// back in a stale-HERDR_BIN_PATH environment, so the notice must not repeat
+	// once per call.
+	resetHerdrBinFallbackNotice(t)
+	t.Setenv("HERDR_BIN_PATH", filepath.Join(t.TempDir(), "0.8.2", "herdr"))
+
+	out := captureStderr(t, func() {
+		for i := 0; i < 3; i++ {
+			if got := herdrBin(); got != "herdr" {
+				t.Fatalf("got %q want herdr", got)
+			}
+		}
+	})
+	if got := strings.Count(out, "is not runnable"); got != 1 {
+		t.Fatalf("fallback notices = %d, want 1; stderr = %q", got, out)
 	}
 }

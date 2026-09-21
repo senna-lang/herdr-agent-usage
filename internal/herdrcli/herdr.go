@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
@@ -21,6 +22,15 @@ const spawnTimeout = 3 * time.Second
 
 // Source is the report-metadata source id for this plugin.
 const Source = "usagebar"
+
+// herdrBinFallbackNoticeOnce gates the fallback notice to one line per
+// process. herdrBin runs on every callback and a single sidebar refresh makes
+// roughly ten calls, so an ungated notice would repeat the same line forever
+// in exactly the broken setup the fallback exists for, burying the plugin log
+// Herdr captured. HERDR_BIN_PATH cannot change within a process, so the first
+// line carries everything the repeats would. Failure notices are deliberately
+// not gated: each failure can have a different cause.
+var herdrBinFallbackNoticeOnce sync.Once
 
 // herdrBin returns the herdr executable this plugin calls back through.
 //
@@ -40,7 +50,9 @@ func herdrBin() string {
 	}
 	// Herdr captures plugin stderr, so the fallback stays visible instead of
 	// turning into a silent no-op.
-	fmt.Fprintf(os.Stderr, "usagebar: HERDR_BIN_PATH=%s is not runnable, using herdr from PATH\n", v)
+	herdrBinFallbackNoticeOnce.Do(func() {
+		fmt.Fprintf(os.Stderr, "usagebar: HERDR_BIN_PATH=%s is not runnable, using herdr from PATH\n", v)
+	})
 	return "herdr"
 }
 
