@@ -1,6 +1,8 @@
 # Built plugin binary (shell entrypoints under bin/ are tracked)
 /bin/usagebar
 *.exe
+# go build on Windows moves a running binary aside as <name>.exe~
+*.exe~
 *.test
 .DS_Store
 .shell-cwd

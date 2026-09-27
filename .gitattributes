@@ -1,0 +1,5 @@
+# Keep LF endings in every checkout, including Windows clones with
+# core.autocrlf=true: Herdr runs the bin/*.sh hooks through bash, which rejects
+# CRLF scripts, and gofmt reports CRLF Go files as unformatted.
+* text=auto eol=lf
+*.png binary
