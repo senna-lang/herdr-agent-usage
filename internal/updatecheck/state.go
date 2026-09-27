@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
 
 const (
@@ -27,7 +29,7 @@ func statePath(dir string) string { return filepath.Join(dir, stateFileName) }
 func lockPath(dir string) string { return filepath.Join(dir, lockFileName) }
 
 func readState(dir string) State {
-	raw, err := os.ReadFile(statePath(dir))
+	raw, err := fsutil.ReadFile(statePath(dir))
 	if err != nil {
 		return State{}
 	}
@@ -63,7 +65,7 @@ func writeState(dir string, state State) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, statePath(dir))
+	return fsutil.ReplaceFile(tmpName, statePath(dir))
 }
 
 // acquireLock lets simultaneous focus events coalesce to one check. A stale

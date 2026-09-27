@@ -6,10 +6,12 @@ package claude
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/testpath"
 )
 
 func TestResolveProfiles_DefaultWhenNoSpecs(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	profiles := ResolveProfiles(nil, map[string]string{}, home)
 	if len(profiles) != 1 {
 		t.Fatalf("want 1 default profile, got %d", len(profiles))
@@ -37,24 +39,24 @@ func TestResolveProfiles_DefaultWhenNoSpecs(t *testing.T) {
 }
 
 func TestResolveProfiles_DefaultHonorsEnvOverrides(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	env := map[string]string{
-		"USAGEBAR_CLAUDE_LIMITS_PATH": "/override/limits.json",
-		"USAGEBAR_STATE_DIR":          "/override/state",
-		"CLAUDE_PROJECTS_ROOT":        "/override/projects",
-		"CLAUDE_CONFIG_JSON":          "/override/.claude.json",
+		"USAGEBAR_CLAUDE_LIMITS_PATH": testpath.Abs("/override/limits.json"),
+		"USAGEBAR_STATE_DIR":          testpath.Abs("/override/state"),
+		"CLAUDE_PROJECTS_ROOT":        testpath.Abs("/override/projects"),
+		"CLAUDE_CONFIG_JSON":          testpath.Abs("/override/.claude.json"),
 	}
 	p := ResolveProfiles(nil, env, home)[0]
-	if p.LimitsCache != "/override/limits.json" {
+	if p.LimitsCache != testpath.Abs("/override/limits.json") {
 		t.Fatalf("limitsCache = %q", p.LimitsCache)
 	}
-	if p.StateDir != "/override/state" {
+	if p.StateDir != testpath.Abs("/override/state") {
 		t.Fatalf("stateDir = %q", p.StateDir)
 	}
-	if p.ProjectsRoot != "/override/projects" {
+	if p.ProjectsRoot != testpath.Abs("/override/projects") {
 		t.Fatalf("projectsRoot = %q", p.ProjectsRoot)
 	}
-	if p.JSONPath != "/override/.claude.json" {
+	if p.JSONPath != testpath.Abs("/override/.claude.json") {
 		t.Fatalf("jsonPath = %q", p.JSONPath)
 	}
 }
@@ -65,8 +67,8 @@ func TestResolveProfiles_DefaultIgnoresConfigDirEnv(t *testing.T) {
 	// in-process) but invisible to the read side (panel/sidebar, a Herdr plugin
 	// action), so deriving the default off it would make the two sides read and
 	// write different files for the same unconfigured account.
-	home := "/home/u"
-	p := ResolveProfiles(nil, map[string]string{"CLAUDE_CONFIG_DIR": "/alt/cfg"}, home)[0]
+	home := testpath.Abs("/home/u")
+	p := ResolveProfiles(nil, map[string]string{"CLAUDE_CONFIG_DIR": testpath.Abs("/alt/cfg")}, home)[0]
 	if p.ConfigDir != filepath.Join(home, ".claude") {
 		t.Fatalf("configDir must ignore CLAUDE_CONFIG_DIR, got %q", p.ConfigDir)
 	}
@@ -80,20 +82,20 @@ func TestResolveProfiles_DefaultIgnoresConfigDirEnv(t *testing.T) {
 
 func TestResolveProfiles_MultipleProfiles(t *testing.T) {
 	specs := []ProfileSpec{
-		{ID: "claude", Label: "Claude", ConfigDir: "/a"},
-		{ID: "claude-m", ConfigDir: "/b"}, // label defaults to id
+		{ID: "claude", Label: "Claude", ConfigDir: testpath.Abs("/a")},
+		{ID: "claude-m", ConfigDir: testpath.Abs("/b")}, // label defaults to id
 	}
-	profiles := ResolveProfiles(specs, map[string]string{}, "/home/u")
+	profiles := ResolveProfiles(specs, map[string]string{}, testpath.Abs("/home/u"))
 	if len(profiles) != 2 {
 		t.Fatalf("want 2, got %d", len(profiles))
 	}
 	if profiles[1].Label != "claude-m" {
 		t.Fatalf("label default = %q", profiles[1].Label)
 	}
-	if profiles[1].JSONPath != filepath.Join("/b", ".claude.json") {
+	if profiles[1].JSONPath != filepath.Join(testpath.Abs("/b"), ".claude.json") {
 		t.Fatalf("jsonPath default = %q", profiles[1].JSONPath)
 	}
-	if profiles[0].LimitsCache != filepath.Join("/a", "herdr-usagebar", "claude-limits-latest.json") {
+	if profiles[0].LimitsCache != filepath.Join(testpath.Abs("/a"), "herdr-usagebar", "claude-limits-latest.json") {
 		t.Fatalf("limitsCache = %q", profiles[0].LimitsCache)
 	}
 }
@@ -101,13 +103,13 @@ func TestResolveProfiles_MultipleProfiles(t *testing.T) {
 func TestResolveProfiles_MultiIgnoresEnvOverrides(t *testing.T) {
 	// A global override cannot be attributed to one of several profiles.
 	specs := []ProfileSpec{
-		{ID: "claude", ConfigDir: "/a"},
-		{ID: "claude-m", ConfigDir: "/b"},
+		{ID: "claude", ConfigDir: testpath.Abs("/a")},
+		{ID: "claude-m", ConfigDir: testpath.Abs("/b")},
 	}
-	env := map[string]string{"USAGEBAR_CLAUDE_LIMITS_PATH": "/override/limits.json"}
-	profiles := ResolveProfiles(specs, env, "/home/u")
+	env := map[string]string{"USAGEBAR_CLAUDE_LIMITS_PATH": testpath.Abs("/override/limits.json")}
+	profiles := ResolveProfiles(specs, env, testpath.Abs("/home/u"))
 	for _, p := range profiles {
-		if p.LimitsCache == "/override/limits.json" {
+		if p.LimitsCache == testpath.Abs("/override/limits.json") {
 			t.Fatalf("multi mode must ignore global override, got %q", p.LimitsCache)
 		}
 	}
@@ -115,12 +117,12 @@ func TestResolveProfiles_MultiIgnoresEnvOverrides(t *testing.T) {
 
 func TestResolveProfiles_RejectsDuplicates(t *testing.T) {
 	specs := []ProfileSpec{
-		{ID: "claude", ConfigDir: "/a"},
-		{ID: "claude", ConfigDir: "/c"},   // dup id
-		{ID: "claude-x", ConfigDir: "/a"}, // dup config dir
-		{ID: "claude-y", ConfigDir: "/d"},
+		{ID: "claude", ConfigDir: testpath.Abs("/a")},
+		{ID: "claude", ConfigDir: testpath.Abs("/c")},   // dup id
+		{ID: "claude-x", ConfigDir: testpath.Abs("/a")}, // dup config dir
+		{ID: "claude-y", ConfigDir: testpath.Abs("/d")},
 	}
-	profiles := ResolveProfiles(specs, map[string]string{}, "/home/u")
+	profiles := ResolveProfiles(specs, map[string]string{}, testpath.Abs("/home/u"))
 	if len(profiles) != 2 {
 		t.Fatalf("want 2 after dedupe, got %d: %+v", len(profiles), profiles)
 	}
@@ -131,11 +133,11 @@ func TestResolveProfiles_RejectsDuplicates(t *testing.T) {
 
 func TestResolveProfiles_SkipsIncompleteEntries(t *testing.T) {
 	specs := []ProfileSpec{
-		{ID: "", ConfigDir: "/a"},       // missing id
-		{ID: "claude-z", ConfigDir: ""}, // missing config dir
+		{ID: "", ConfigDir: testpath.Abs("/a")}, // missing id
+		{ID: "claude-z", ConfigDir: ""},         // missing config dir
 	}
 	// All invalid -> falls back to synthesized default.
-	profiles := ResolveProfiles(specs, map[string]string{}, "/home/u")
+	profiles := ResolveProfiles(specs, map[string]string{}, testpath.Abs("/home/u"))
 	if len(profiles) != 1 || profiles[0].ID != "claude" {
 		t.Fatalf("want fallback default, got %+v", profiles)
 	}
@@ -155,8 +157,8 @@ func TestResolveActiveProfile_LoneSynthesizedDefaultAlwaysMatches(t *testing.T) 
 	// Zero-config install: a relocated CLAUDE_CONFIG_DIR still attributes to the
 	// synthesized ~/.claude profile, which is the only place both the write and
 	// read sides agree on.
-	profiles := ResolveProfiles(nil, map[string]string{"CLAUDE_CONFIG_DIR": "/x"}, "/home/u")
-	p, ok := ResolveActiveProfile(profiles, "/totally/different", "/home/u")
+	profiles := ResolveProfiles(nil, map[string]string{"CLAUDE_CONFIG_DIR": testpath.Abs("/x")}, testpath.Abs("/home/u"))
+	p, ok := ResolveActiveProfile(profiles, testpath.Abs("/totally/different"), testpath.Abs("/home/u"))
 	if !ok || p.ID != "claude" {
 		t.Fatalf("single-profile fallback failed: ok=%v id=%q", ok, p.ID)
 	}
@@ -164,11 +166,11 @@ func TestResolveActiveProfile_LoneSynthesizedDefaultAlwaysMatches(t *testing.T) 
 
 func TestResolveActiveProfile_MultiMatchesConfigDir(t *testing.T) {
 	specs := []ProfileSpec{
-		{ID: "claude", ConfigDir: "/a"},
-		{ID: "claude-m", ConfigDir: "/b"},
+		{ID: "claude", ConfigDir: testpath.Abs("/a")},
+		{ID: "claude-m", ConfigDir: testpath.Abs("/b")},
 	}
-	profiles := ResolveProfiles(specs, map[string]string{}, "/home/u")
-	p, ok := ResolveActiveProfile(profiles, "/b", "/home/u")
+	profiles := ResolveProfiles(specs, map[string]string{}, testpath.Abs("/home/u"))
+	p, ok := ResolveActiveProfile(profiles, testpath.Abs("/b"), testpath.Abs("/home/u"))
 	if !ok || p.ID != "claude-m" {
 		t.Fatalf("want claude-m, ok=%v id=%q", ok, p.ID)
 	}
@@ -176,11 +178,11 @@ func TestResolveActiveProfile_MultiMatchesConfigDir(t *testing.T) {
 
 func TestResolveActiveProfile_MultiUnknownSkips(t *testing.T) {
 	specs := []ProfileSpec{
-		{ID: "claude", ConfigDir: "/a"},
-		{ID: "claude-m", ConfigDir: "/b"},
+		{ID: "claude", ConfigDir: testpath.Abs("/a")},
+		{ID: "claude-m", ConfigDir: testpath.Abs("/b")},
 	}
-	profiles := ResolveProfiles(specs, map[string]string{}, "/home/u")
-	if _, ok := ResolveActiveProfile(profiles, "/unknown", "/home/u"); ok {
+	profiles := ResolveProfiles(specs, map[string]string{}, testpath.Abs("/home/u"))
+	if _, ok := ResolveActiveProfile(profiles, testpath.Abs("/unknown"), testpath.Abs("/home/u")); ok {
 		t.Fatal("unknown CLAUDE_CONFIG_DIR must not match under multi-profile")
 	}
 }
@@ -189,7 +191,7 @@ func TestResolveActiveProfile_UnsetConfigDirMatchesDefaultDirProfile(t *testing.
 	// Bare `claude` sets no CLAUDE_CONFIG_DIR: the convention is to set it only
 	// for additional accounts, so an empty value means the default ~/.claude
 	// account and must match the profile declaring that dir.
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{
 		{ID: "base", ConfigDir: filepath.Join(home, ".claude")},
 		{ID: "dev", ConfigDir: filepath.Join(home, ".claude-dev")},
@@ -202,7 +204,7 @@ func TestResolveActiveProfile_UnsetConfigDirMatchesDefaultDirProfile(t *testing.
 }
 
 func TestResolveActiveProfile_UnsetConfigDirWithoutDefaultDirProfileSkips(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{
 		{ID: "dev", ConfigDir: filepath.Join(home, ".claude-dev")},
 		{ID: "work", ConfigDir: filepath.Join(home, ".claude-work")},
@@ -214,7 +216,7 @@ func TestResolveActiveProfile_UnsetConfigDirWithoutDefaultDirProfileSkips(t *tes
 }
 
 func TestResolveActiveProfile_TildeProfileMatchesAbsoluteConfigDir(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{
 		{ID: "base", ConfigDir: "~/.claude"},
 		{ID: "dev", ConfigDir: "~/.claude-dev"},
@@ -227,16 +229,16 @@ func TestResolveActiveProfile_TildeProfileMatchesAbsoluteConfigDir(t *testing.T)
 }
 
 func TestResolveActiveProfile_TrailingSlashAndDotSegmentsMatch(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{
-		{ID: "base", ConfigDir: "/home/u/.claude/"},
-		{ID: "dev", ConfigDir: "/home/u/./.claude-dev"},
+		{ID: "base", ConfigDir: testpath.Abs("/home/u/.claude/")},
+		{ID: "dev", ConfigDir: testpath.Abs("/home/u/./.claude-dev")},
 	}
 	profiles := ResolveProfiles(specs, map[string]string{}, home)
-	if p, ok := ResolveActiveProfile(profiles, "/home/u/.claude", home); !ok || p.ID != "base" {
+	if p, ok := ResolveActiveProfile(profiles, testpath.Abs("/home/u/.claude"), home); !ok || p.ID != "base" {
 		t.Fatalf("trailing slash: ok=%v id=%q", ok, p.ID)
 	}
-	if p, ok := ResolveActiveProfile(profiles, "/home/u/.claude-dev/", home); !ok || p.ID != "dev" {
+	if p, ok := ResolveActiveProfile(profiles, testpath.Abs("/home/u/.claude-dev/"), home); !ok || p.ID != "dev" {
 		t.Fatalf("dot segment: ok=%v id=%q", ok, p.ID)
 	}
 }
@@ -244,7 +246,7 @@ func TestResolveActiveProfile_TrailingSlashAndDotSegmentsMatch(t *testing.T) {
 func TestResolveActiveProfile_SingleConfiguredProfileStillRequiresMatch(t *testing.T) {
 	// One configured profile must not absorb every account: silently reporting
 	// one account's usage as another's is worse than recording nothing.
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	profiles := ResolveProfiles([]ProfileSpec{{ID: "dev", ConfigDir: "~/.claude-dev"}}, map[string]string{}, home)
 	if _, ok := ResolveActiveProfile(profiles, filepath.Join(home, ".claude-other"), home); ok {
 		t.Fatal("single configured profile must not match a foreign config dir")
@@ -255,11 +257,11 @@ func TestResolveActiveProfile_SingleConfiguredProfileStillRequiresMatch(t *testi
 }
 
 func TestIsDefaultProfile(t *testing.T) {
-	def := ResolveProfiles(nil, map[string]string{}, "/home/u")[0]
+	def := ResolveProfiles(nil, map[string]string{}, testpath.Abs("/home/u"))[0]
 	if !IsDefaultProfile(def) {
 		t.Fatal("synthesized default should be default")
 	}
-	custom := ResolveProfiles([]ProfileSpec{{ID: "claude-m", ConfigDir: "/b"}}, map[string]string{}, "/home/u")[0]
+	custom := ResolveProfiles([]ProfileSpec{{ID: "claude-m", ConfigDir: testpath.Abs("/b")}}, map[string]string{}, testpath.Abs("/home/u"))[0]
 	if IsDefaultProfile(custom) {
 		t.Fatal("custom profile is not default")
 	}
@@ -270,28 +272,28 @@ func TestResolveProfiles_DefaultDirProfileUsesSiblingJSONPath(t *testing.T) {
 	// explicit profile, alongside other accounts, must still resolve its
 	// .claude.json to the sibling ~/.claude.json -- Claude Code never writes
 	// that file inside ~/.claude/ itself.
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{
 		{ID: "claude", ConfigDir: filepath.Join(home, ".claude")},
-		{ID: "claude-secondary", ConfigDir: "/other/dir"},
+		{ID: "claude-secondary", ConfigDir: testpath.Abs("/other/dir")},
 	}
 	profiles := ResolveProfiles(specs, map[string]string{}, home)
 	if profiles[0].JSONPath != filepath.Join(home, ".claude.json") {
 		t.Fatalf("default-dir profile jsonPath = %q, want sibling ~/.claude.json", profiles[0].JSONPath)
 	}
 	// A genuinely separate config dir still defaults to <config_dir>/.claude.json.
-	if profiles[1].JSONPath != filepath.Join("/other/dir", ".claude.json") {
+	if profiles[1].JSONPath != filepath.Join(testpath.Abs("/other/dir"), ".claude.json") {
 		t.Fatalf("separate-dir profile jsonPath = %q", profiles[1].JSONPath)
 	}
 }
 
 func TestResolveProfiles_ExplicitJSONPathOverridesDefaultDirHeuristic(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{
-		{ID: "claude", ConfigDir: filepath.Join(home, ".claude"), JSONPath: "/custom/path.json"},
+		{ID: "claude", ConfigDir: filepath.Join(home, ".claude"), JSONPath: testpath.Abs("/custom/path.json")},
 	}
 	p := ResolveProfiles(specs, map[string]string{}, home)[0]
-	if p.JSONPath != "/custom/path.json" {
+	if p.JSONPath != testpath.Abs("/custom/path.json") {
 		t.Fatalf("explicit claude_json_path must win, got %q", p.JSONPath)
 	}
 }
@@ -299,7 +301,7 @@ func TestResolveProfiles_ExplicitJSONPathOverridesDefaultDirHeuristic(t *testing
 func TestResolveProfiles_ExpandsTildeInPaths(t *testing.T) {
 	// A "~" in config.toml is never expanded by a shell, so derived paths would
 	// otherwise land under a directory literally named "~".
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{
 		{ID: "dev", ConfigDir: "~/.claude-dev", JSONPath: "~/custom/dev.json"},
 	}
@@ -323,7 +325,7 @@ func TestResolveProfiles_ExpandsTildeInPaths(t *testing.T) {
 
 func TestResolveProfiles_TildeDefaultDirUsesSiblingJSONPath(t *testing.T) {
 	// The sibling-.claude.json rule must survive tilde notation too.
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{
 		{ID: "base", ConfigDir: "~/.claude"},
 		{ID: "dev", ConfigDir: "~/.claude-dev"},
@@ -338,10 +340,10 @@ func TestResolveProfiles_TildeDefaultDirUsesSiblingJSONPath(t *testing.T) {
 }
 
 func TestResolveProfiles_DedupesTildeAndAbsoluteSameDir(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{
 		{ID: "base", ConfigDir: "~/.claude"},
-		{ID: "base-again", ConfigDir: "/home/u/.claude/"},
+		{ID: "base-again", ConfigDir: testpath.Abs("/home/u/.claude/")},
 	}
 	profiles := ResolveProfiles(specs, map[string]string{}, home)
 	if len(profiles) != 1 || profiles[0].ID != "base" {
@@ -354,7 +356,7 @@ func TestResolveProfiles_RejectsRelativeConfigDir(t *testing.T) {
 	// the read side (cwd = Herdr) disagree, so a relative config_dir is
 	// rejected outright (not kept and compared relatively). The only spec is
 	// invalid, so this falls back to the non-implicit synthesized default.
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	profiles := ResolveProfiles([]ProfileSpec{{ID: "rel", ConfigDir: "./.claude-rel"}}, map[string]string{}, home)
 	if len(profiles) != 1 || profiles[0].ID != DefaultProfileID || profiles[0].Implicit {
 		t.Fatalf("want non-implicit fallback default, got %+v", profiles[0])
@@ -366,7 +368,7 @@ func TestResolveActiveProfile_RelativeConfigDirNeverMatches(t *testing.T) {
 	// CLAUDE_CONFIG_DIR are textually identical relative strings, the spec
 	// never became a profile and the fallback default must not match a
 	// relative env value either.
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	profiles := ResolveProfiles([]ProfileSpec{{ID: "rel", ConfigDir: "./.claude-rel"}}, map[string]string{}, home)
 	if _, ok := ResolveActiveProfile(profiles, "./.claude-rel", home); ok {
 		t.Fatal("relative CLAUDE_CONFIG_DIR must never match")
@@ -377,7 +379,7 @@ func TestResolveActiveProfile_AllSpecsInvalidFallbackRequiresMatch(t *testing.T)
 	// Every configured entry is malformed (empty id here). ResolveProfiles
 	// falls back to the default profile, but -- unlike true zero-config --
 	// that fallback must not silently absorb an unrelated account's usage.
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{{ID: "", ConfigDir: "~/.claude-dev"}}
 	profiles := ResolveProfiles(specs, map[string]string{}, home)
 	if len(profiles) != 1 || profiles[0].Implicit {
@@ -393,12 +395,12 @@ func TestResolveActiveProfile_AllSpecsInvalidFallbackRequiresMatch(t *testing.T)
 }
 
 func TestValidProfileSpecCount(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{
 		{ID: "base", ConfigDir: "~/.claude"},
-		{ID: "base-again", ConfigDir: "/home/u/.claude/"}, // duplicate dir
-		{ID: "rel", ConfigDir: "./.claude-rel"},           // relative
-		{ID: "", ConfigDir: "/home/u/.claude-noid"},       // missing id
+		{ID: "base-again", ConfigDir: testpath.Abs("/home/u/.claude/")}, // duplicate dir
+		{ID: "rel", ConfigDir: "./.claude-rel"},                         // relative
+		{ID: "", ConfigDir: testpath.Abs("/home/u/.claude-noid")},       // missing id
 	}
 	if n := ValidProfileSpecCount(specs, home); n != 1 {
 		t.Fatalf("ValidProfileSpecCount = %d, want 1", n)

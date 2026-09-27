@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
+	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
 
 // QuotaWindow is one weekly allotment observation from the statusLine's
@@ -105,7 +106,7 @@ func WriteSnapshot(sessionsDir string, snap Snapshot) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, snapshotPath(sessionsDir, snap.SessionID))
+	return fsutil.ReplaceFile(tmpPath, snapshotPath(sessionsDir, snap.SessionID))
 }
 
 // ReadSnapshot loads one session's snapshot. A missing or unreadable file and
@@ -118,7 +119,7 @@ func ReadSnapshot(sessionsDir, sessionID string) (Snapshot, error) {
 
 func readSnapshotFile(path string) (Snapshot, error) {
 	var snap Snapshot
-	raw, err := os.ReadFile(path)
+	raw, err := fsutil.ReadFile(path)
 	if err != nil {
 		return snap, err
 	}

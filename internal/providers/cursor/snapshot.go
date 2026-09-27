@@ -17,6 +17,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
 
 // Snapshot is one statusLine observation of a Cursor session's context.
@@ -73,7 +75,7 @@ func WriteSnapshot(sessionsDir string, snap Snapshot) error {
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tempName, snapshotPath(sessionsDir, snap.SessionID))
+	return fsutil.ReplaceFile(tempName, snapshotPath(sessionsDir, snap.SessionID))
 }
 
 // ReadSnapshot loads one session's snapshot. A missing or unreadable file and
@@ -85,7 +87,7 @@ func ReadSnapshot(sessionsDir, sessionID string) (Snapshot, error) {
 
 func readSnapshotFile(path string) (Snapshot, error) {
 	var snap Snapshot
-	raw, err := os.ReadFile(path)
+	raw, err := fsutil.ReadFile(path)
 	if err != nil {
 		return snap, err
 	}

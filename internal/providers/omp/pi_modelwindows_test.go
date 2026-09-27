@@ -37,6 +37,7 @@ func TestPiContextWindowForInfersAgentDirFromSession(t *testing.T) {
 	t.Setenv("PI_CODING_AGENT_DIR", "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	agentDir := filepath.Join(t.TempDir(), "custom-agent")
 	session := filepath.Join(agentDir, "sessions", "--repo--", "session.jsonl")
 	writePiModelFile(t, filepath.Join(agentDir, "models-store.json"), `{

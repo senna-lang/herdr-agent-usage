@@ -6,10 +6,12 @@ package codex
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/testpath"
 )
 
 func TestResolveProfiles_DefaultWhenNoSpecs(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	profiles := ResolveProfiles(nil, map[string]string{}, home)
 	if len(profiles) != 1 {
 		t.Fatalf("want 1 default profile, got %d", len(profiles))
@@ -31,8 +33,8 @@ func TestResolveProfiles_DefaultIgnoresHomeEnv(t *testing.T) {
 	// CODEX_HOME: that var is set on the Codex process (aliases) and is
 	// invisible to the Herdr plugin action, so deriving the default off it
 	// would make an unconfigured extra account overwrite the default row.
-	home := "/home/u"
-	p := ResolveProfiles(nil, map[string]string{"CODEX_HOME": "/alt/codex"}, home)[0]
+	home := testpath.Abs("/home/u")
+	p := ResolveProfiles(nil, map[string]string{"CODEX_HOME": testpath.Abs("/alt/codex")}, home)[0]
 	if p.Home != filepath.Join(home, ".codex") {
 		t.Fatalf("home must ignore CODEX_HOME, got %q", p.Home)
 	}
@@ -40,17 +42,17 @@ func TestResolveProfiles_DefaultIgnoresHomeEnv(t *testing.T) {
 
 func TestResolveProfiles_MultipleProfiles(t *testing.T) {
 	specs := []ProfileSpec{
-		{ID: "codex", Label: "personal", CodexHome: "/a"},
-		{ID: "dev", CodexHome: "/b"}, // label defaults to id
+		{ID: "codex", Label: "personal", CodexHome: testpath.Abs("/a")},
+		{ID: "dev", CodexHome: testpath.Abs("/b")}, // label defaults to id
 	}
-	profiles := ResolveProfiles(specs, map[string]string{}, "/home/u")
+	profiles := ResolveProfiles(specs, map[string]string{}, testpath.Abs("/home/u"))
 	if len(profiles) != 2 {
 		t.Fatalf("want 2, got %d", len(profiles))
 	}
-	if profiles[0].Label != "personal" || profiles[0].Home != "/a" {
+	if profiles[0].Label != "personal" || profiles[0].Home != testpath.Abs("/a") {
 		t.Fatalf("first = %+v", profiles[0])
 	}
-	if profiles[1].Label != "dev" || profiles[1].Home != "/b" {
+	if profiles[1].Label != "dev" || profiles[1].Home != testpath.Abs("/b") {
 		t.Fatalf("second = %+v", profiles[1])
 	}
 	if profiles[0].Implicit || profiles[1].Implicit {
@@ -60,12 +62,12 @@ func TestResolveProfiles_MultipleProfiles(t *testing.T) {
 
 func TestResolveProfiles_RejectsDuplicates(t *testing.T) {
 	specs := []ProfileSpec{
-		{ID: "codex", CodexHome: "/a"},
-		{ID: "codex", CodexHome: "/c"}, // dup id
-		{ID: "dev", CodexHome: "/a"},   // dup home
-		{ID: "tester", CodexHome: "/d"},
+		{ID: "codex", CodexHome: testpath.Abs("/a")},
+		{ID: "codex", CodexHome: testpath.Abs("/c")}, // dup id
+		{ID: "dev", CodexHome: testpath.Abs("/a")},   // dup home
+		{ID: "tester", CodexHome: testpath.Abs("/d")},
 	}
-	profiles := ResolveProfiles(specs, map[string]string{}, "/home/u")
+	profiles := ResolveProfiles(specs, map[string]string{}, testpath.Abs("/home/u"))
 	if len(profiles) != 2 {
 		t.Fatalf("want 2 after dedupe, got %d: %+v", len(profiles), profiles)
 	}
@@ -76,10 +78,10 @@ func TestResolveProfiles_RejectsDuplicates(t *testing.T) {
 
 func TestResolveProfiles_SkipsIncompleteEntries(t *testing.T) {
 	specs := []ProfileSpec{
-		{ID: "", CodexHome: "/a"},
+		{ID: "", CodexHome: testpath.Abs("/a")},
 		{ID: "dev", CodexHome: ""},
 	}
-	profiles := ResolveProfiles(specs, map[string]string{}, "/home/u")
+	profiles := ResolveProfiles(specs, map[string]string{}, testpath.Abs("/home/u"))
 	if len(profiles) != 1 || profiles[0].ID != "codex" || profiles[0].Implicit {
 		t.Fatalf("want non-implicit fallback default, got %+v", profiles)
 	}
@@ -96,8 +98,8 @@ func TestIsCodexProviderID(t *testing.T) {
 }
 
 func TestResolveActiveProfile_LoneSynthesizedDefaultAlwaysMatches(t *testing.T) {
-	profiles := ResolveProfiles(nil, map[string]string{"CODEX_HOME": "/x"}, "/home/u")
-	p, ok := ResolveActiveProfile(profiles, "/totally/different", "/home/u")
+	profiles := ResolveProfiles(nil, map[string]string{"CODEX_HOME": testpath.Abs("/x")}, testpath.Abs("/home/u"))
+	p, ok := ResolveActiveProfile(profiles, testpath.Abs("/totally/different"), testpath.Abs("/home/u"))
 	if !ok || p.ID != "codex" {
 		t.Fatalf("single-profile fallback failed: ok=%v id=%q", ok, p.ID)
 	}
@@ -105,11 +107,11 @@ func TestResolveActiveProfile_LoneSynthesizedDefaultAlwaysMatches(t *testing.T) 
 
 func TestResolveActiveProfile_MultiMatchesHome(t *testing.T) {
 	specs := []ProfileSpec{
-		{ID: "codex", CodexHome: "/a"},
-		{ID: "dev", CodexHome: "/b"},
+		{ID: "codex", CodexHome: testpath.Abs("/a")},
+		{ID: "dev", CodexHome: testpath.Abs("/b")},
 	}
-	profiles := ResolveProfiles(specs, map[string]string{}, "/home/u")
-	p, ok := ResolveActiveProfile(profiles, "/b", "/home/u")
+	profiles := ResolveProfiles(specs, map[string]string{}, testpath.Abs("/home/u"))
+	p, ok := ResolveActiveProfile(profiles, testpath.Abs("/b"), testpath.Abs("/home/u"))
 	if !ok || p.ID != "dev" {
 		t.Fatalf("want dev, ok=%v id=%q", ok, p.ID)
 	}
@@ -117,17 +119,17 @@ func TestResolveActiveProfile_MultiMatchesHome(t *testing.T) {
 
 func TestResolveActiveProfile_MultiUnknownSkips(t *testing.T) {
 	specs := []ProfileSpec{
-		{ID: "codex", CodexHome: "/a"},
-		{ID: "dev", CodexHome: "/b"},
+		{ID: "codex", CodexHome: testpath.Abs("/a")},
+		{ID: "dev", CodexHome: testpath.Abs("/b")},
 	}
-	profiles := ResolveProfiles(specs, map[string]string{}, "/home/u")
-	if _, ok := ResolveActiveProfile(profiles, "/unknown", "/home/u"); ok {
+	profiles := ResolveProfiles(specs, map[string]string{}, testpath.Abs("/home/u"))
+	if _, ok := ResolveActiveProfile(profiles, testpath.Abs("/unknown"), testpath.Abs("/home/u")); ok {
 		t.Fatal("unknown CODEX_HOME must not match under multi-profile")
 	}
 }
 
 func TestResolveActiveProfile_UnsetHomeMatchesDefaultDirProfile(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{
 		{ID: "base", CodexHome: filepath.Join(home, ".codex")},
 		{ID: "dev", CodexHome: filepath.Join(home, ".codex-dev")},
@@ -140,7 +142,7 @@ func TestResolveActiveProfile_UnsetHomeMatchesDefaultDirProfile(t *testing.T) {
 }
 
 func TestResolveActiveProfile_UnsetHomeWithoutDefaultDirProfileSkips(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{
 		{ID: "dev", CodexHome: filepath.Join(home, ".codex-dev")},
 		{ID: "tester", CodexHome: filepath.Join(home, ".codex-tester")},
@@ -152,7 +154,7 @@ func TestResolveActiveProfile_UnsetHomeWithoutDefaultDirProfileSkips(t *testing.
 }
 
 func TestResolveActiveProfile_TildeProfileMatchesAbsoluteHome(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{
 		{ID: "base", CodexHome: "~/.codex"},
 		{ID: "dev", CodexHome: "~/.codex-dev"},
@@ -165,7 +167,7 @@ func TestResolveActiveProfile_TildeProfileMatchesAbsoluteHome(t *testing.T) {
 }
 
 func TestResolveActiveProfile_SingleConfiguredProfileStillRequiresMatch(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	profiles := ResolveProfiles([]ProfileSpec{{ID: "dev", CodexHome: "~/.codex-dev"}}, map[string]string{}, home)
 	if _, ok := ResolveActiveProfile(profiles, filepath.Join(home, ".codex-other"), home); ok {
 		t.Fatal("single configured profile must not match a foreign home")
@@ -176,18 +178,18 @@ func TestResolveActiveProfile_SingleConfiguredProfileStillRequiresMatch(t *testi
 }
 
 func TestIsDefaultProfile(t *testing.T) {
-	def := ResolveProfiles(nil, map[string]string{}, "/home/u")[0]
+	def := ResolveProfiles(nil, map[string]string{}, testpath.Abs("/home/u"))[0]
 	if !IsDefaultProfile(def) {
 		t.Fatal("synthesized default should be default")
 	}
-	custom := ResolveProfiles([]ProfileSpec{{ID: "dev", CodexHome: "/b"}}, map[string]string{}, "/home/u")[0]
+	custom := ResolveProfiles([]ProfileSpec{{ID: "dev", CodexHome: testpath.Abs("/b")}}, map[string]string{}, testpath.Abs("/home/u"))[0]
 	if IsDefaultProfile(custom) {
 		t.Fatal("custom profile is not default")
 	}
 }
 
 func TestResolveProfiles_ExpandsTildeInHome(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	p := ResolveProfiles([]ProfileSpec{{ID: "dev", CodexHome: "~/.codex-dev"}}, map[string]string{}, home)[0]
 	if p.Home != filepath.Join(home, ".codex-dev") {
 		t.Fatalf("home = %q", p.Home)
@@ -195,10 +197,10 @@ func TestResolveProfiles_ExpandsTildeInHome(t *testing.T) {
 }
 
 func TestResolveProfiles_DedupesTildeAndAbsoluteSameHome(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{
 		{ID: "base", CodexHome: "~/.codex"},
-		{ID: "base-again", CodexHome: "/home/u/.codex/"},
+		{ID: "base-again", CodexHome: testpath.Abs("/home/u/.codex/")},
 	}
 	profiles := ResolveProfiles(specs, map[string]string{}, home)
 	if len(profiles) != 1 || profiles[0].ID != "base" {
@@ -207,7 +209,7 @@ func TestResolveProfiles_DedupesTildeAndAbsoluteSameHome(t *testing.T) {
 }
 
 func TestResolveProfiles_RejectsRelativeHome(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	profiles := ResolveProfiles([]ProfileSpec{{ID: "rel", CodexHome: "./.codex-rel"}}, map[string]string{}, home)
 	if len(profiles) != 1 || profiles[0].ID != DefaultProfileID || profiles[0].Implicit {
 		t.Fatalf("want non-implicit fallback default, got %+v", profiles[0])
@@ -215,7 +217,7 @@ func TestResolveProfiles_RejectsRelativeHome(t *testing.T) {
 }
 
 func TestResolveActiveProfile_RelativeHomeNeverMatches(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	profiles := ResolveProfiles([]ProfileSpec{{ID: "rel", CodexHome: "./.codex-rel"}}, map[string]string{}, home)
 	if _, ok := ResolveActiveProfile(profiles, "./.codex-rel", home); ok {
 		t.Fatal("relative CODEX_HOME must never match")
@@ -223,7 +225,7 @@ func TestResolveActiveProfile_RelativeHomeNeverMatches(t *testing.T) {
 }
 
 func TestResolveActiveProfile_AllSpecsInvalidFallbackRequiresMatch(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{{ID: "", CodexHome: "~/.codex-dev"}}
 	profiles := ResolveProfiles(specs, map[string]string{}, home)
 	if len(profiles) != 1 || profiles[0].Implicit {
@@ -238,12 +240,12 @@ func TestResolveActiveProfile_AllSpecsInvalidFallbackRequiresMatch(t *testing.T)
 }
 
 func TestValidProfileSpecCount(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	specs := []ProfileSpec{
 		{ID: "base", CodexHome: "~/.codex"},
-		{ID: "base-again", CodexHome: "/home/u/.codex/"},
+		{ID: "base-again", CodexHome: testpath.Abs("/home/u/.codex/")},
 		{ID: "rel", CodexHome: "./.codex-rel"},
-		{ID: "", CodexHome: "/home/u/.codex-noid"},
+		{ID: "", CodexHome: testpath.Abs("/home/u/.codex-noid")},
 	}
 	if n := ValidProfileSpecCount(specs, home); n != 1 {
 		t.Fatalf("ValidProfileSpecCount = %d, want 1", n)

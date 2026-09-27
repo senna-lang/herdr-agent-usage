@@ -168,10 +168,10 @@ func TestDefaultCollectOptions_MultiProfileGroupsEveryProfileUnderClaude(t *test
 	toml := "[[claude.profiles]]\n" +
 		"id = \"claude\"\n" +
 		"label = \"My Work Account\"\n" +
-		"config_dir = \"" + dirLabeled + "\"\n\n" +
+		"config_dir = '" + dirLabeled + "'\n\n" +
 		"[[claude.profiles]]\n" +
 		"id = \"claude-secondary\"\n" +
-		"config_dir = \"" + dirUnlabeled + "\"\n"
+		"config_dir = '" + dirUnlabeled + "'\n"
 	if err := os.WriteFile(filepath.Join(pluginConfigDir, "config.toml"), []byte(toml), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -211,6 +211,7 @@ func TestDefaultCollectOptions_SingleProfileNotGrouped(t *testing.T) {
 	// Isolate from the real machine's ~/.claude.json (age/content varies by
 	// machine and would otherwise make this test's Note assertion flaky).
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	// No [[claude.profiles]] configured -> single synthesized default; grouping
 	// only kicks in once there are 2+ profiles to disambiguate.
 	opts := DefaultCollectOptions()
@@ -278,15 +279,16 @@ func TestDefaultCollectOptions_MultiProfileGroupsEveryProfileUnderCodex(t *testi
 	pluginConfigDir := t.TempDir()
 	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", pluginConfigDir)
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	dirPersonal := t.TempDir()
 	dirDev := t.TempDir()
 	toml := "[[codex.profiles]]\n" +
 		"id = \"codex\"\n" +
 		"label = \"personal\"\n" +
-		"codex_home = \"" + dirPersonal + "\"\n\n" +
+		"codex_home = '" + dirPersonal + "'\n\n" +
 		"[[codex.profiles]]\n" +
 		"id = \"dev\"\n" +
-		"codex_home = \"" + dirDev + "\"\n"
+		"codex_home = '" + dirDev + "'\n"
 	if err := os.WriteFile(filepath.Join(pluginConfigDir, "config.toml"), []byte(toml), 0o644); err != nil {
 		t.Fatal(err)
 	}

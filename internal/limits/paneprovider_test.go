@@ -169,10 +169,10 @@ func TestTokensForPaneDefault_DispatchesToResolvedProfileRoot(t *testing.T) {
 
 	cfg := "[[claude.profiles]]\n" +
 		"id = \"claude\"\n" +
-		"config_dir = \"" + configDirA + "\"\n\n" +
+		"config_dir = '" + configDirA + "'\n\n" +
 		"[[claude.profiles]]\n" +
 		"id = \"claude-secondary\"\n" +
-		"config_dir = \"" + configDirB + "\"\n"
+		"config_dir = '" + configDirB + "'\n"
 	if err := os.WriteFile(filepath.Join(pluginConfigDir, "config.toml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -368,10 +368,10 @@ func TestTokensForPaneDefault_OpenCodeProfileReadsOnlyItsDatabase(t *testing.T) 
 
 	config := "[[opencode.profiles]]\n" +
 		"id = \"opencode-personal\"\n" +
-		"data_dir = \"" + dataDirA + "\"\n\n" +
+		"data_dir = '" + dataDirA + "'\n\n" +
 		"[[opencode.profiles]]\n" +
 		"id = \"opencode-work\"\n" +
-		"data_dir = \"" + dataDirB + "\"\n"
+		"data_dir = '" + dataDirB + "'\n"
 	if err := os.WriteFile(filepath.Join(pluginConfigDir, "config.toml"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -407,10 +407,10 @@ func TestTokensForPaneDefault_GrokProfileReadsOnlyItsHome(t *testing.T) {
 
 	config := "[[grok.profiles]]\n" +
 		"id = \"grok-personal\"\n" +
-		"grok_home = \"" + homeA + "\"\n\n" +
+		"grok_home = '" + homeA + "'\n\n" +
 		"[[grok.profiles]]\n" +
 		"id = \"grok-work\"\n" +
-		"grok_home = \"" + homeB + "\"\n"
+		"grok_home = '" + homeB + "'\n"
 	if err := os.WriteFile(filepath.Join(pluginConfigDir, "config.toml"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}

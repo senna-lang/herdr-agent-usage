@@ -77,6 +77,7 @@ func withTempClaudeConfig(t *testing.T) (configDir, jsonPath string) {
 	t.Setenv("CLAUDE_CONFIG_JSON", jsonPath)
 	// Avoid a real statusLine cache promoting PAYG → subscription mid-test.
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	return configDir, jsonPath
 }
 
@@ -91,8 +92,8 @@ func withClaudeProfileConfig(t *testing.T, id, configDir, jsonPath string) {
 	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", pluginConfigDir)
 	toml := "[[claude.profiles]]\n" +
 		"id = \"" + id + "\"\n" +
-		"config_dir = \"" + configDir + "\"\n" +
-		"claude_json_path = \"" + jsonPath + "\"\n"
+		"config_dir = '" + configDir + "'\n" +
+		"claude_json_path = '" + jsonPath + "'\n"
 	writeFile(t, filepath.Join(pluginConfigDir, "config.toml"), toml)
 }
 
@@ -316,6 +317,7 @@ base_url = "http://localhost:11434/v1"
 func TestIO_MultipleClaudeProfiles_IndependentBilling(t *testing.T) {
 	clearClaudeDeployEnv(t)
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 
 	configDirA := t.TempDir()
 	jsonPathA := filepath.Join(t.TempDir(), "claude-a.json")
@@ -326,12 +328,12 @@ func TestIO_MultipleClaudeProfiles_IndependentBilling(t *testing.T) {
 	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", pluginConfigDir)
 	toml := "[[claude.profiles]]\n" +
 		"id = \"claude\"\n" +
-		"config_dir = \"" + configDirA + "\"\n" +
-		"claude_json_path = \"" + jsonPathA + "\"\n\n" +
+		"config_dir = '" + configDirA + "'\n" +
+		"claude_json_path = '" + jsonPathA + "'\n\n" +
 		"[[claude.profiles]]\n" +
 		"id = \"claude-secondary\"\n" +
-		"config_dir = \"" + configDirB + "\"\n" +
-		"claude_json_path = \"" + jsonPathB + "\"\n"
+		"config_dir = '" + configDirB + "'\n" +
+		"claude_json_path = '" + jsonPathB + "'\n"
 	writeFile(t, filepath.Join(pluginConfigDir, "config.toml"), toml)
 
 	// Profile A: Bedrock deployment env -> pay-as-you-go.

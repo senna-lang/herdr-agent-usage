@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
 
 func historyBaseDir() string {
@@ -29,7 +31,7 @@ func historyFilePath() string {
 
 // LoadUsageHistory loads persisted samples (or empty).
 func LoadUsageHistory() UsageHistory {
-	raw, err := os.ReadFile(historyFilePath())
+	raw, err := fsutil.ReadFile(historyFilePath())
 	if err != nil {
 		return UsageHistory{}
 	}
@@ -52,5 +54,5 @@ func SaveUsageHistory(history UsageHistory) {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return
 	}
-	_ = os.Rename(tmp, path)
+	_ = fsutil.ReplaceFile(tmp, path)
 }

@@ -13,7 +13,8 @@ package claude
 
 import (
 	"path/filepath"
-	"strings"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/pathutil"
 )
 
 // DefaultProfileID is the provider id used for the single implicit profile.
@@ -88,9 +89,7 @@ func normalizePath(path, home string) string {
 	if path == "" {
 		return ""
 	}
-	if home != "" && (path == "~" || strings.HasPrefix(path, "~/")) {
-		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
-	}
+	path = pathutil.ExpandHome(path, home)
 	return filepath.Clean(path)
 }
 

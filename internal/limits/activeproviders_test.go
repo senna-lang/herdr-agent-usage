@@ -98,11 +98,11 @@ func TestActiveProviderSet_ClaudePaneActivatesAllConfiguredProfiles(t *testing.T
 	toml := `
 [[claude.profiles]]
 id = "claude"
-config_dir = "` + t.TempDir() + `"
+config_dir = '` + t.TempDir() + `'
 
 [[claude.profiles]]
 id = "claude-secondary"
-config_dir = "` + t.TempDir() + `"
+config_dir = '` + t.TempDir() + `'
 `
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(toml), 0o644); err != nil {
 		t.Fatal(err)
@@ -121,11 +121,11 @@ func TestActiveProviderSet_CodexPaneActivatesAllConfiguredProfiles(t *testing.T)
 	toml := `
 [[codex.profiles]]
 id = "codex"
-codex_home = "` + t.TempDir() + `"
+codex_home = '` + t.TempDir() + `'
 
 [[codex.profiles]]
 id = "dev"
-codex_home = "` + t.TempDir() + `"
+codex_home = '` + t.TempDir() + `'
 `
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(toml), 0o644); err != nil {
 		t.Fatal(err)

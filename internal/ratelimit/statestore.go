@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
 
 const (
@@ -141,7 +143,7 @@ type ClaudeNotifyState struct {
 }
 
 func readClaudeStateIn(dir string) ClaudeNotifyState {
-	raw, err := os.ReadFile(stateFilePathIn(dir))
+	raw, err := fsutil.ReadFile(stateFilePathIn(dir))
 	if err != nil {
 		return ClaudeNotifyState{}
 	}
@@ -172,7 +174,7 @@ func writeClaudeStateIn(dir string, state ClaudeNotifyState) {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return
 	}
-	_ = os.Rename(tmp, path)
+	_ = fsutil.ReplaceFile(tmp, path)
 }
 
 // WithLockedState runs read→update→write under lock for Claude statusLine state.
@@ -198,7 +200,7 @@ func WithLockedStateIn(dir string, update func(current ClaudeNotifyState) Claude
 type ProviderNotifyStateMap map[string]*WindowState
 
 func readProviderState() ProviderNotifyStateMap {
-	raw, err := os.ReadFile(providerStateFilePath())
+	raw, err := fsutil.ReadFile(providerStateFilePath())
 	if err != nil {
 		return ProviderNotifyStateMap{}
 	}
@@ -227,7 +229,7 @@ func writeProviderState(state ProviderNotifyStateMap) {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return
 	}
-	_ = os.Rename(tmp, path)
+	_ = fsutil.ReplaceFile(tmp, path)
 }
 
 // WithLockedProviderState runs provider-primary notify under the same lock.

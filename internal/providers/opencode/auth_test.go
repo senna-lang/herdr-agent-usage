@@ -25,6 +25,7 @@ func useOpenCodeAuth(t *testing.T, authJSON string) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	if authJSON == "" {
 		return
 	}

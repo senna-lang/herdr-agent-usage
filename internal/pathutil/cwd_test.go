@@ -6,6 +6,7 @@ package pathutil
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -22,6 +23,11 @@ func TestEqualTrailingSlash(t *testing.T) {
 }
 
 func TestEqualPrivatePrefix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// The /private alias is a macOS filesystem layout; Windows absolutizes
+		// these rooted paths onto the current drive, where no alias exists.
+		t.Skip("macOS /private aliasing does not exist on Windows")
+	}
 	a := "/var/folders/xy/tmp"
 	b := "/private/var/folders/xy/tmp"
 	if !Equal(a, b) {

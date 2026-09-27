@@ -31,9 +31,7 @@ if [ "$1" = pane ] && [ "$2" = report-metadata ]; then
   printf '%s\n' "$*" >> "$REVIEW_METADATA_LOG"
 fi
 `
-	if err := os.WriteFile(filepath.Join(binDir, "herdr"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeHerdrShim(t, filepath.Join(binDir, "herdr"), script)
 	t.Setenv("PATH", binDir)
 	// The path Herdr exports can outlive the binary it points at: a live
 	// handoff from a version directory that the package manager later removed
@@ -43,6 +41,7 @@ fi
 	t.Setenv("REVIEW_METADATA_LOG", logPath)
 	t.Setenv("OMP_SESSIONS_ROOT", filepath.Join(root, "sessions"))
 	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root)
 
 	RunUpdate(false)
 

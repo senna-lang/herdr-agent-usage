@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
 
 func windowOf(n int) *int { return &n }
@@ -62,7 +64,7 @@ func TestWriteSnapshot_IsAtomicUnderConcurrentReaders(t *testing.T) {
 				return
 			default:
 			}
-			raw, err := os.ReadFile(filepath.Join(dir, "s1.json"))
+			raw, err := fsutil.ReadFile(filepath.Join(dir, "s1.json"))
 			if err != nil {
 				continue
 			}

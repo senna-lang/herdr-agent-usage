@@ -6,10 +6,12 @@ package grok
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/testpath"
 )
 
 func TestResolveProfiles_DefaultWhenNoSpecs(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	profiles := ResolveProfiles(nil, map[string]string{}, home)
 
 	if len(profiles) != 1 {
@@ -22,23 +24,23 @@ func TestResolveProfiles_DefaultWhenNoSpecs(t *testing.T) {
 
 func TestResolveProfiles_ConfiguredProfilesRemainDistinct(t *testing.T) {
 	profiles := ResolveProfiles([]ProfileSpec{
-		{ID: "personal", Label: "Personal", GrokHome: "/profiles/personal"},
-		{ID: "work", GrokHome: "/profiles/work"},
-	}, map[string]string{}, "/home/u")
+		{ID: "personal", Label: "Personal", GrokHome: testpath.Abs("/profiles/personal")},
+		{ID: "work", GrokHome: testpath.Abs("/profiles/work")},
+	}, map[string]string{}, testpath.Abs("/home/u"))
 
 	if len(profiles) != 2 {
 		t.Fatalf("profile count = %d, want 2", len(profiles))
 	}
-	if got := profiles[0]; got.ID != "personal" || got.Label != "Personal" || got.Home != "/profiles/personal" || got.Implicit {
+	if got := profiles[0]; got.ID != "personal" || got.Label != "Personal" || got.Home != testpath.Abs("/profiles/personal") || got.Implicit {
 		t.Fatalf("first profile = %+v", got)
 	}
-	if got := profiles[1]; got.ID != "work" || got.Label != "work" || got.Home != "/profiles/work" || got.Implicit {
+	if got := profiles[1]; got.ID != "work" || got.Label != "work" || got.Home != testpath.Abs("/profiles/work") || got.Implicit {
 		t.Fatalf("second profile = %+v", got)
 	}
 }
 
 func TestResolveProfiles_InvalidEntriesCannotCaptureAnotherHome(t *testing.T) {
-	home := "/home/u"
+	home := testpath.Abs("/home/u")
 	profiles := ResolveProfiles([]ProfileSpec{{ID: "work", GrokHome: "relative"}}, map[string]string{}, home)
 
 	if len(profiles) != 1 || profiles[0].Implicit {
@@ -51,11 +53,11 @@ func TestResolveProfiles_InvalidEntriesCannotCaptureAnotherHome(t *testing.T) {
 
 func TestResolveProfiles_RejectsDuplicateHomesAndIDs(t *testing.T) {
 	profiles := ResolveProfiles([]ProfileSpec{
-		{ID: "personal", GrokHome: "/profiles/personal"},
-		{ID: "personal", GrokHome: "/profiles/work"},
-		{ID: "work", GrokHome: "/profiles/personal"},
-		{ID: "other", GrokHome: "/profiles/other"},
-	}, map[string]string{}, "/home/u")
+		{ID: "personal", GrokHome: testpath.Abs("/profiles/personal")},
+		{ID: "personal", GrokHome: testpath.Abs("/profiles/work")},
+		{ID: "work", GrokHome: testpath.Abs("/profiles/personal")},
+		{ID: "other", GrokHome: testpath.Abs("/profiles/other")},
+	}, map[string]string{}, testpath.Abs("/home/u"))
 
 	if len(profiles) != 2 || profiles[0].ID != "personal" || profiles[1].ID != "other" {
 		t.Fatalf("profiles = %+v", profiles)
