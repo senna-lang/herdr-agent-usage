@@ -7,10 +7,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/herdrcli"
@@ -27,6 +25,10 @@ import (
 
 // version is overridden at release time via -ldflags "-X main.version=vX.Y.Z".
 var version = "0.1.0-dev"
+
+// pluginID is this plugin's id in herdr-plugin.toml, used when asking Herdr to
+// open one of the plugin's own panes.
+const pluginID = "usagebar"
 
 func main() {
 	limits.SetShowNotification(herdrcli.ShowNotification)
@@ -55,6 +57,10 @@ func main() {
 	case "limits", "panel":
 		if err := runLimitsPane(args); err != nil {
 			fmt.Fprintf(os.Stderr, "usagebar limits: %v\n", err)
+			os.Exit(1)
+		}
+	case "open-limits":
+		if !herdrcli.OpenPluginPane(pluginID, "limits") {
 			os.Exit(1)
 		}
 	case "notify":
@@ -101,8 +107,10 @@ Usage:
                                      --all shows every provider
   usagebar limits --once [--all]     Print panel once to stdout
   usagebar notify                    Check non-Claude primary rate-limit toasts
-  usagebar check-update --current-version X.Y.Z [--force] [--quiet]
+  usagebar open-limits               Open the limits panel as a split pane in Herdr
+  usagebar check-update [--current-version X.Y.Z] [--force] [--quiet]
                                      Check GitHub Releases for a newer plugin version
+                                     (version defaults to $HERDR_PLUGIN_ROOT's manifest)
   usagebar statusline                Claude Code statusLine (stdin rate_limits)
   usagebar cursor-statusline         Cursor CLI statusLine (stdin context_window)
   usagebar antigravity-statusline    Antigravity CLI statusLine (stdin context_window+quota)
@@ -118,6 +126,11 @@ Usage:
 func runUpdateCheck(args []string) {
 	quiet := hasFlag(args, "--quiet")
 	currentVersion := flagValue(args, "--current-version")
+	if currentVersion == "" {
+		// Hooks that run the binary directly (the Windows manifest entries)
+		// pass no version; Herdr's HERDR_PLUGIN_ROOT points at the manifest.
+		currentVersion = updatecheck.ManifestVersion(os.Getenv("HERDR_PLUGIN_ROOT"))
+	}
 	if currentVersion == "" {
 		currentVersion = version
 	}
@@ -391,11 +404,11 @@ func runLimitsPane(args []string) error {
 	ticker := time.NewTicker(update.PaneRefreshInterval)
 	defer ticker.Stop()
 
-	// SIGWINCH: instant layout-only repaint (debounced full refresh after drag
-	// ends). The goroutine only signals; painting stays on the main loop.
-	winch := make(chan os.Signal, 1)
-	signal.Notify(winch, syscall.SIGWINCH)
-	defer signal.Stop(winch)
+	// Terminal resize (SIGWINCH on Unix, size polling on Windows): instant
+	// layout-only repaint (debounced full refresh after drag ends). The
+	// goroutine only signals; painting stays on the main loop.
+	winch, stopResize := resizeEvents()
+	defer stopResize()
 
 	resizeQuick := make(chan struct{}, 1)
 	resizeFull := make(chan struct{}, 1)
@@ -499,7 +512,7 @@ func startIdleWatch() {
 	}
 	cmd := exec.Command(exe, "watch")
 	cmd.Env = os.Environ()
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	detachFromParent(cmd)
 	_ = cmd.Start()
 }
 

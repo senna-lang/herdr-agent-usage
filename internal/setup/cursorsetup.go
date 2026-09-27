@@ -14,8 +14,12 @@ package setup
 func CursorStatusLineSnippet(pluginRoot string) string {
 	return `  "statusLine": {
     "type": "command",
-    "command": "bash ` + pluginRoot + `/bin/run-cursor-statusline.sh"
+    "command": "` + cursorStatusLineCommand(pluginRoot) + `"
   }`
+}
+
+func cursorStatusLineCommand(pluginRoot string) string {
+	return statusLineCommand(pluginRoot, "run-cursor-statusline.sh", "cursor-statusline")
 }
 
 // cursorSetupLines renders the Cursor section of the setup report.
@@ -38,7 +42,7 @@ func cursorSetupLines(pluginRoot string) []string {
 		"",
 		"  If a statusLine command is already configured, keep it and chain:",
 		"  have your existing script pass its stdin through to",
-		"  " + pluginRoot + "/bin/run-cursor-statusline.sh and print both outputs.",
+		"  `" + cursorStatusLineCommand(pluginRoot) + "` and print both outputs.",
 		"",
 	}
 }

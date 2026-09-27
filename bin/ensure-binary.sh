@@ -27,6 +27,13 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Windows (Git Bash / MSYS) only launches the binary with its .exe suffix, and
+# `go build -o` does not add it. run-usagebar.sh resolves the same name.
+USAGEBAR_EXE="usagebar"
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) USAGEBAR_EXE="usagebar.exe" ;;
+esac
+BIN_PATH="$ROOT/bin/$USAGEBAR_EXE"
 
 REPO="senna-lang/herdr-agent-usage"
 # The manifest is the source of truth for a checkout's version: locally built
@@ -81,7 +88,7 @@ fetch_release_asset() {
 download_release_binary() {
   local asset dest tmp
   asset="$(release_asset_name)" || return 1
-  dest="$ROOT/bin/usagebar"
+  dest="$BIN_PATH"
   tmp="$dest.download"
   rm -f "$tmp"
 
@@ -103,9 +110,9 @@ download_release_binary() {
 
 build_from_source() {
   command -v go >/dev/null 2>&1 || return 1
-  echo "usagebar: building bin/usagebar (go build)..." >&2
+  echo "usagebar: building bin/$USAGEBAR_EXE (go build)..." >&2
   mkdir -p "$ROOT/bin"
-  (cd "$ROOT" && go build -o bin/usagebar ./cmd/usagebar)
+  (cd "$ROOT" && go build -o "bin/$USAGEBAR_EXE" ./cmd/usagebar)
 }
 
 # Guarantee $ROOT/bin/usagebar exists, by any available means. A source build
@@ -119,7 +126,7 @@ install_binary() {
     echo "usagebar: go build failed; trying the prebuilt release binary..." >&2
   fi
   if download_release_binary; then
-    echo "usagebar: prebuilt binary installed to bin/usagebar" >&2
+    echo "usagebar: prebuilt binary installed to bin/$USAGEBAR_EXE" >&2
     return 0
   fi
   echo "usagebar: could not build or download the usagebar binary." >&2
@@ -132,13 +139,13 @@ install_binary() {
 # True when usagebar is already resolvable the way run-usagebar.sh resolves it.
 usagebar_resolvable() {
   [[ -n "${USAGEBAR_BIN:-}" && -x "$USAGEBAR_BIN" ]] && return 0
-  [[ -x "$ROOT/bin/usagebar" ]] && return 0
+  [[ -x "$BIN_PATH" ]] && return 0
   command -v usagebar >/dev/null 2>&1
 }
 
 case "${1:-}" in
   --in-tree)
-    if [[ ! -x "$ROOT/bin/usagebar" ]]; then
+    if [[ ! -x "$BIN_PATH" ]]; then
       install_binary
     fi
     ;;

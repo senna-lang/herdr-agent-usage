@@ -4,7 +4,14 @@ version = "0.5.16"
 # [[startup]] hooks landed in Herdr 0.7.5. Sidebar tokens still require 0.7.4+.
 min_herdr_version = "0.7.5"
 description = "Sidebar context meters, provider limit windows, and rate-limit toasts for Claude, Codex, OpenCode Go, OMP, Pi coding agent, and Grok, plus context meters for Cursor"
-platforms = ["macos", "linux"]
+platforms = ["macos", "linux", "windows"]
+
+# Runtime commands run the plugin binary directly rather than through a bash
+# wrapper. Herdr starts them without a shell, with the plugin root as working
+# directory, so "bin/usagebar" names the binary the [[build]] hook installed;
+# on Windows the process launcher appends .exe. Going through bash would not be
+# portable: on Windows a bare `bash` resolves to WSL (System32 is searched
+# before PATH), which runs a Linux binary against the WSL home directory.
 
 # Runs on every `herdr plugin install` (including reinstall/update — there is
 # no separate update command). Install replaces the whole managed directory
@@ -15,62 +22,70 @@ platforms = ["macos", "linux"]
 # install is left untouched.
 # See https://github.com/senna-lang/herdr-agent-usage/issues/48
 [[build]]
+platforms = ["macos", "linux"]
 command = ["bash", "bin/ensure-binary.sh", "--in-tree"]
+
+# Windows builds from source with the Go toolchain on PATH (no bash, see
+# above); `go build -o` does not append .exe, so the name is explicit.
+[[build]]
+platforms = ["windows"]
+command = ["go", "build", "-o", "bin/usagebar.exe", "./cmd/usagebar"]
 
 # Restores $title/$provider/$limit/$cache/$context after server start and live
 # handoff. Metadata tokens are ephemeral across a cold restart; event
 # hooks only see the focused pane.
 [[startup]]
-command = ["bash", "bin/run-startup.sh"]
+command = ["bin/usagebar", "startup"]
 
 [[events]]
 on = "pane.agent_status_changed"
-command = ["bash", "bin/run-status.sh"]
+command = ["bin/usagebar", "status"]
 
 [[events]]
 on = "pane.agent_status_changed"
-command = ["bash", "bin/run-notify.sh"]
+command = ["bin/usagebar", "notify"]
 
 [[events]]
 on = "pane.focused"
-command = ["bash", "bin/run-status.sh"]
+command = ["bin/usagebar", "status"]
 
+# The installed version comes from this manifest via HERDR_PLUGIN_ROOT.
 [[events]]
 on = "pane.focused"
-command = ["bash", "bin/run-update-check.sh", "--auto"]
+command = ["bin/usagebar", "check-update", "--quiet"]
 
 [[actions]]
 id = "refresh"
 title = "Refresh usage status"
 contexts = ["workspace", "pane"]
-command = ["bash", "bin/run-status.sh"]
+command = ["bin/usagebar", "status"]
 
 [[actions]]
 id = "open-limits"
 title = "Open Agent Usage pane"
 contexts = ["workspace", "pane"]
-command = ["bash", "bin/open-limits-pane.sh"]
+command = ["bin/usagebar", "open-limits"]
 
 [[actions]]
 id = "setup"
 title = "Setup Agent Usage (show config snippets)"
 contexts = ["workspace", "pane"]
-command = ["bash", "bin/run-setup.sh"]
+command = ["bin/usagebar", "setup"]
 
 [[actions]]
 id = "enable-toast"
 title = "Enable Herdr toast delivery (safe append)"
 contexts = ["workspace", "pane"]
-command = ["bash", "bin/run-setup.sh", "--write-toast"]
+command = ["bin/usagebar", "setup", "--write-toast"]
 
 [[actions]]
 id = "check-updates"
 title = "Check for Agent Usage updates"
 contexts = ["workspace", "pane"]
-command = ["bash", "bin/run-update-check.sh"]
+command = ["bin/usagebar", "check-update", "--force"]
 
 [[panes]]
 id = "limits"
 title = "Agent Usage"
 placement = "split"
-command = ["bash", "bin/run-limits-pane.sh"]
+command = ["bin/usagebar", "limits"]

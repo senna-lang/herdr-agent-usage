@@ -155,18 +155,19 @@ func TestBuildPaneNaming_NilPointersDoNotPanic(t *testing.T) {
 	}
 }
 
-// writeFakeHerdr writes an executable stand-in for the herdr CLI.
-func writeFakeHerdr(t *testing.T, dir, script string) string {
+// writeFakeHerdr writes an executable stand-in for the herdr CLI that prints
+// stdout. Its name and script format follow the platform (see fakeHerdrName).
+func writeFakeHerdr(t *testing.T, dir, stdout string) string {
 	t.Helper()
-	path := filepath.Join(dir, "herdr")
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+	path := filepath.Join(dir, fakeHerdrName)
+	if err := os.WriteFile(path, []byte(fakeHerdrScript(stdout)), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return path
 }
 
 func TestHerdrBin_UsesRunnableHERDRBinPath(t *testing.T) {
-	bin := writeFakeHerdr(t, t.TempDir(), "#!/bin/sh\n")
+	bin := writeFakeHerdr(t, t.TempDir(), "")
 	t.Setenv("HERDR_BIN_PATH", bin)
 	if got := herdrBin(); got != bin {
 		t.Fatalf("got %q want %q", got, bin)
@@ -214,7 +215,7 @@ func TestHerdrBin_DefaultsToPATHWhenUnset(t *testing.T) {
 
 func TestSpawnHerdr_RunsPATHFallbackWhenHERDRBinPathIsStale(t *testing.T) {
 	binDir := t.TempDir()
-	writeFakeHerdr(t, binDir, "#!/bin/sh\nprintf 'pane-list-ok'\n")
+	writeFakeHerdr(t, binDir, "pane-list-ok")
 	t.Setenv("PATH", binDir)
 	t.Setenv("HERDR_BIN_PATH", filepath.Join(t.TempDir(), "0.8.2", "herdr"))
 
@@ -225,6 +226,32 @@ func TestSpawnHerdr_RunsPATHFallbackWhenHERDRBinPathIsStale(t *testing.T) {
 	if got != "pane-list-ok" {
 		t.Fatalf("stdout = %q", got)
 	}
+}
+
+// The Go open-limits entrypoint replaces bin/open-limits-pane.sh on hosts
+// without a usable bash, so it must ask herdr for exactly the same pane.
+func TestPluginPaneOpenArgs_MatchLimitsPaneEntrypoint(t *testing.T) {
+	got := strings.Join(pluginPaneOpenArgs("usagebar", "limits"), " ")
+	if got != openLimitsPaneArgs {
+		t.Fatalf("args = %q, want %q", got, openLimitsPaneArgs)
+	}
+}
+
+func TestOpenPluginPane_ReportsHerdrOutcome(t *testing.T) {
+	binDir := t.TempDir()
+	writeFakeHerdr(t, binDir, "")
+	t.Setenv("PATH", binDir)
+	t.Setenv("HERDR_BIN_PATH", "")
+	if !OpenPluginPane("usagebar", "limits") {
+		t.Fatal("OpenPluginPane = false with a succeeding herdr")
+	}
+
+	t.Setenv("PATH", t.TempDir())
+	captureStderr(t, func() {
+		if OpenPluginPane("usagebar", "limits") {
+			t.Fatal("OpenPluginPane = true with no herdr on PATH")
+		}
+	})
 }
 
 func TestSpawnHerdr_ReportsSpawnFailureOnStderr(t *testing.T) {

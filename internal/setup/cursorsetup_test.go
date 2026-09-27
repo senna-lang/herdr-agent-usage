@@ -17,7 +17,7 @@ func TestCursorSetupLines_DocumentsEveryConfigLocation(t *testing.T) {
 		"~/.cursor/cli-config.json",
 		"$CURSOR_CONFIG_DIR/cli-config.json",
 		"$XDG_CONFIG_HOME/cursor/cli-config.json",
-		"/plugin/bin/run-cursor-statusline.sh",
+		cursorStatusLineCommand("/plugin"),
 		"chain",
 	} {
 		if !strings.Contains(joined, want) {
@@ -28,7 +28,7 @@ func TestCursorSetupLines_DocumentsEveryConfigLocation(t *testing.T) {
 
 func TestCursorStatusLineSnippet_IsValidConfigFragment(t *testing.T) {
 	snippet := CursorStatusLineSnippet("/plugin")
-	for _, want := range []string{`"statusLine"`, `"type": "command"`, `/plugin/bin/run-cursor-statusline.sh`} {
+	for _, want := range []string{`"statusLine"`, `"type": "command"`, cursorStatusLineCommand("/plugin")} {
 		if !strings.Contains(snippet, want) {
 			t.Errorf("snippet is missing %q", want)
 		}
@@ -86,7 +86,7 @@ func TestRunSetup_LeavesCursorConfigUntouched(t *testing.T) {
 		t.Errorf("setup created files in Cursor's config dir: %v", names)
 	}
 
-	if !strings.Contains(strings.Join(report.Lines, "\n"), "run-cursor-statusline.sh") {
+	if !strings.Contains(strings.Join(report.Lines, "\n"), cursorStatusLineCommand("/plugin")) {
 		t.Error("setup report does not mention the Cursor statusLine entry")
 	}
 }

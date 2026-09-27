@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -84,6 +85,13 @@ func writeHerdrShim(t *testing.T, path, logPath string) {
 }
 
 func TestHerdrBinPathResolution_ParityWithLimitsPaneEntrypoint(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// The fixtures model Unix executability (mode bits, #!/bin/sh shims,
+		// symlinks). Windows decides executability by PATHEXT extension, which
+		// herdr_test.go covers through herdrBin and spawnHerdr directly, and
+		// creating symlinks there needs Developer Mode or elevation.
+		t.Skip("parity fixtures model Unix executability; Windows resolution is covered in herdr_test.go")
+	}
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skipf("bash is required to exercise the plugin entrypoint: %v", err)

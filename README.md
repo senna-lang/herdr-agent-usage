@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)
 ![herdr 0.7.5+](https://img.shields.io/badge/herdr-0.7.5%2B-6E56CF)
-![platforms: linux | macOS](https://img.shields.io/badge/platforms-linux%20%7C%20macOS-lightgrey)
+![platforms: linux | macOS | Windows](https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
 
 Monitor context usage and provider rate limits for agents running in [Herdr](https://herdr.dev).
 
@@ -20,7 +20,7 @@ Monitor context usage and provider rate limits for agents running in [Herdr](htt
 ## Requirements
 
 - **Herdr ≥ 0.7.5**
-- **macOS or Linux**
+- **macOS, Linux, or Windows** (Windows builds from source, so it needs the Go toolchain on `PATH`; see [Windows](#windows))
 - Agent integrations for reliable session matching (recommended):
 
 ```bash
@@ -47,7 +47,16 @@ herdr plugin action invoke usagebar.enable-toast
 herdr server reload-config
 ```
 
-`herdr plugin install` provisions the `usagebar` binary automatically as part of install/update (via the manifest's `[[build]]` hook): it builds with the local Go toolchain (≥ 1.25) when available, and otherwise downloads a prebuilt binary from [GitHub Releases](https://github.com/senna-lang/herdr-agent-usage/releases) (macOS / Linux, arm64 / amd64). `usagebar.setup` repeats this resolution as a fallback for installs predating the build hook. To build manually instead, run `make build` in the plugin root.
+`herdr plugin install` provisions the `usagebar` binary automatically as part of install/update (via the manifest's `[[build]]` hook): on macOS and Linux it builds with the local Go toolchain (≥ 1.25) when available, and otherwise downloads a prebuilt binary from [GitHub Releases](https://github.com/senna-lang/herdr-agent-usage/releases) (macOS / Linux, arm64 / amd64). On Windows it builds `bin\usagebar.exe` with the Go toolchain. Every hook, action, and pane then runs that binary directly (`bin/usagebar <subcommand>`), so an install whose build step failed reports errors until you reinstall or build manually. To build manually, run `make build` in the plugin root (on Windows, from Git Bash). `herdr plugin link` (a local checkout) does not run the build hook, so run `make build` after linking.
+
+### Windows
+
+- **Build:** the build hook runs `go build`, so install [Go](https://go.dev/dl/) first. No prebuilt Windows binary is published yet.
+- **No bash at runtime:** Herdr runs the plugin binary directly. On Windows a bare `bash` resolves to WSL (`C:\Windows\System32` is searched before `PATH`), which would run a Linux binary against the WSL home directory instead of your Windows one.
+- **Paths:** agent data is read from the same locations under `%USERPROFILE%` (`.claude`, `.codex`, …). Herdr's config and the plugin config live under `%APPDATA%\herdr`.
+- **TOML paths:** write Windows paths in `config.toml` as literal strings or with forward slashes, for example `config_dir = 'C:\Users\me\.claude-work'` or `"C:/Users/me/.claude-work"`. In a double-quoted TOML string, backslashes are escapes, so the file fails to parse and its settings are ignored.
+- **statusLine commands** (Claude, Cursor, Antigravity) call `bin/usagebar.exe` directly; `usagebar.setup` prints the exact commands.
+- **OpenCode Go:** the browser-session import reads the macOS Keychain, so on Windows set `OPENCODE_GO_COOKIE` instead ([details](#opencode-go-official-usage)).
 
 ## Let an LLM set it up
 
@@ -182,6 +191,7 @@ limit data.
 ```bash
 herdr plugin config-dir usagebar
 # → ~/.config/herdr/plugins/config/usagebar/config.toml
+#   (Windows: %APPDATA%\herdr\plugins\config\usagebar\config.toml)
 ```
 
 Created on first `usagebar.setup` (or when missing):
@@ -416,7 +426,9 @@ For Claude 5h / 7d windows and toasts, pipe the status line through this plugin.
 }
 ```
 
-After install, resolve the path with `herdr plugin list` (plugin root under Herdr’s config). `usagebar.setup` prints a ready-to-paste command when `HERDR_PLUGIN_ROOT` is available.
+On Windows, call the binary directly instead: `"command": "C:/path/to/herdr-agent-usage/bin/usagebar.exe statusline"` (forward slashes keep the JSON string valid; see [Windows](#windows)).
+
+After install, resolve the path with `herdr plugin list` (plugin root under Herdr’s config). `usagebar.setup` prints a ready-to-paste command for the current platform when `HERDR_PLUGIN_ROOT` is available.
 
 ## Rate-limit alerts
 
@@ -579,7 +591,7 @@ No telemetry, no analytics, or usage/session data is sent. State written by the 
 
 - **Not a billing dashboard.** Local transcripts / rollouts / signals (and optional OpenCode web / Grok.com credits) can differ from official consoles (other machines, server-side windows).
 - **Herdr core config is not rewritten on install.** Use `usagebar.setup` / `usagebar.enable-toast` or edit by hand.
-- **macOS / Linux** only.
+- **Windows builds from source.** No prebuilt Windows binary is published, and OpenCode Go's browser-session import is macOS-only (use `OPENCODE_GO_COOKIE`). See [Windows](#windows).
 
 ## Contributing
 

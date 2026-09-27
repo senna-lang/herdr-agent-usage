@@ -12,7 +12,7 @@ package setup
 // AntigravityStatusLineSnippet is the `/statusline` command enabling
 // Antigravity context and quota usage, given the plugin root.
 func AntigravityStatusLineSnippet(pluginRoot string) string {
-	return `/statusline bash ` + pluginRoot + `/bin/run-antigravity-statusline.sh`
+	return `/statusline ` + statusLineCommand(pluginRoot, "run-antigravity-statusline.sh", "antigravity-statusline")
 }
 
 // antigravitySetupLines renders the Antigravity section of the setup report.

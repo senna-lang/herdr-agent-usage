@@ -106,16 +106,13 @@ type openCodeProfileWire struct {
 }
 
 // ResolvePluginConfigDir resolves the config directory.
-// HERDR_PLUGIN_CONFIG_DIR → else ~/.config/herdr/plugins/config/usagebar
+// HERDR_PLUGIN_CONFIG_DIR → else plugins/config/usagebar under herdrConfigDir
+// (~/.config/herdr, or %APPDATA%\herdr on Windows).
 func ResolvePluginConfigDir(env map[string]string) string {
 	if fromEnv := env["HERDR_PLUGIN_CONFIG_DIR"]; fromEnv != "" {
 		return fromEnv
 	}
-	if xdg := env["XDG_CONFIG_HOME"]; xdg != "" {
-		return filepath.Join(xdg, "herdr", "plugins", "config", "usagebar")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "herdr", "plugins", "config", "usagebar")
+	return filepath.Join(herdrConfigDir(env), "plugins", "config", "usagebar")
 }
 
 // PluginConfigPath is config.toml under the plugin config dir.

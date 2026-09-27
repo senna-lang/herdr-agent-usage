@@ -65,10 +65,11 @@ End state:
 
 - Confirm `herdr` is on `PATH` and works (`herdr --help` or `herdr plugin list`).  
 - Herdr **≥ 0.7.5** is required.
-- OS: macOS or Linux.  
-- **Go toolchain ≥ 1.25** (`go version`) recommended. `usagebar.setup`
-  resolves the binary automatically on first run: it builds with Go when
-  available, else downloads a prebuilt binary from GitHub Releases. If
+- OS: macOS, Linux, or Windows.  
+- **Go toolchain ≥ 1.25** (`go version`) recommended; **required on
+  Windows**, where no prebuilt binary is published. `herdr plugin install`
+  builds the binary with Go when available, else (macOS/Linux) downloads a
+  prebuilt binary from GitHub Releases. If
   neither Go nor a working download path exists, stop and ask the user
   to install Go.  
 - Recommended (ask if missing, do not force):
@@ -238,6 +239,7 @@ If the user declines keybindings, skip this step.
 Only if the user uses Claude Code and wants 5h/7d rate windows + Claude
 toasts via statusLine, offer to help. Do not change Claude settings without
 asking. The command should point at this plugin’s `bin/run-statusline.sh`
+(on Windows: `bin/usagebar.exe statusline`, with forward slashes in the path)
 (resolve path from `herdr plugin list` / plugin root). Prefer chaining with
 an existing statusLine rather than replacing it.
 

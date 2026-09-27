@@ -9,6 +9,7 @@ package setup
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -104,7 +105,7 @@ func RunSetup(options SetupOptions) SetupReport {
 		"Herdr config: "+herdrConfigPath,
 		"  "+toastStatusText,
 		"",
-		"── Paste into ~/.config/herdr/config.toml ──",
+		"── Paste into "+herdrConfigPath+" ──",
 		"",
 		"# Sidebar context + provider limit rows (Herdr 0.7.4+)",
 		"# If [ui.sidebar.agents] already exists, merge these rows; do not add a duplicate table.",
@@ -126,13 +127,17 @@ func RunSetup(options SetupOptions) SetupReport {
 			"",
 		)
 	}
-	root := env["HERDR_PLUGIN_ROOT"]
+	// The snippets below embed root in a shell command line, and the Claude
+	// and Cursor ones also in a JSON string. Forward slashes keep a Windows
+	// root such as C:\Users\me\... valid in both (shells and JSON would treat
+	// the backslashes as escapes); on Unix ToSlash is a no-op.
+	root := filepath.ToSlash(env["HERDR_PLUGIN_ROOT"])
 	if root == "" {
 		root = "/path/to/herdr-agent-usage"
 	}
 	lines = append(lines,
 		"Claude statusLine (optional, for CC rate windows):",
-		`  "command": "bash `+root+`/bin/run-statusline.sh"`,
+		`  "command": "`+statusLineCommand(root, "run-statusline.sh", "statusline")+`"`,
 		"",
 	)
 	lines = append(lines, cursorSetupLines(root)...)

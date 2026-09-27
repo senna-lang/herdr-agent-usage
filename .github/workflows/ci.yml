@@ -1,4 +1,4 @@
-# Runs on every push/PR: vet/build/test (linux, macOS), golangci-lint, and
+# Runs on every push/PR: vet/build/test (linux, macOS, Windows), golangci-lint, and
 # govulncheck. Separate from release.yml, which only builds and publishes
 # tagged binaries.
 #
@@ -20,8 +20,13 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # Git Bash on Windows: the steps use bash syntax, and the plugin's Herdr
+    # hooks and the tests' herdr shims run through bash there too.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
 

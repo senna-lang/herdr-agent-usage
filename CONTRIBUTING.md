@@ -49,8 +49,9 @@ go test ./...
 go build ./...
 ```
 
-CI runs these checks on both Linux and macOS and also runs golangci-lint and
-govulncheck.
+CI runs these checks on Linux, macOS, and Windows and also runs golangci-lint
+and govulncheck. On Windows, run them from Git Bash: a few tests drive the
+plugin's bash entrypoints and skip when bash is unavailable.
 
 ### Commit messages
 

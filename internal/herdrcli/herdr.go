@@ -56,16 +56,6 @@ func herdrBin() string {
 	return "herdr"
 }
 
-// isRunnableFile reports whether path names an existing regular file with an
-// executable bit set.
-func isRunnableFile(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
-		return false
-	}
-	return info.Mode().Perm()&0o111 != 0
-}
-
 func spawnHerdr(args ...string) (stdout string, ok bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), spawnTimeout)
 	defer cancel()
@@ -400,6 +390,25 @@ func SetMetadataToken(paneID, source, name, value string) bool {
 func ClearMetadataToken(paneID, source, name string) bool {
 	_, ok := spawnHerdr("pane", "report-metadata", paneID, "--source", source, "--clear-token", name)
 	return ok
+}
+
+// OpenPluginPane opens a plugin-owned pane as an unfocused split to the right
+// of the current pane, the placement the plugin's open-limits action uses.
+// It goes through herdrBin, so a stale HERDR_BIN_PATH falls back to PATH.
+func OpenPluginPane(pluginID, entrypoint string) bool {
+	_, ok := spawnHerdr(pluginPaneOpenArgs(pluginID, entrypoint)...)
+	return ok
+}
+
+func pluginPaneOpenArgs(pluginID, entrypoint string) []string {
+	return []string{
+		"plugin", "pane", "open",
+		"--plugin", pluginID,
+		"--entrypoint", entrypoint,
+		"--placement", "split",
+		"--direction", "right",
+		"--no-focus",
+	}
 }
 
 // ShowNotification runs herdr notification show; returns whether shown.

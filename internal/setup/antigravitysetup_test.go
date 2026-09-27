@@ -11,7 +11,7 @@ import (
 func TestAntigravitySetupLines_MentionsSlashCommandAndBridge(t *testing.T) {
 	joined := strings.Join(antigravitySetupLines("/plugin"), "\n")
 	for _, want := range []string{
-		"/statusline bash /plugin/bin/run-antigravity-statusline.sh",
+		"/statusline " + statusLineCommand("/plugin", "run-antigravity-statusline.sh", "antigravity-statusline"),
 		"/statusline delete",
 	} {
 		if !strings.Contains(joined, want) {
@@ -22,7 +22,7 @@ func TestAntigravitySetupLines_MentionsSlashCommandAndBridge(t *testing.T) {
 
 func TestAntigravityStatusLineSnippet(t *testing.T) {
 	got := AntigravityStatusLineSnippet("/plugin")
-	want := "/statusline bash /plugin/bin/run-antigravity-statusline.sh"
+	want := "/statusline " + statusLineCommand("/plugin", "run-antigravity-statusline.sh", "antigravity-statusline")
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

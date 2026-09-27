@@ -18,16 +18,14 @@ type ToastDeliveryStatus struct {
 	RawSnippet string
 }
 
-// ResolveHerdrConfigPath returns ~/.config/herdr/config.toml (or overrides).
+// ResolveHerdrConfigPath returns Herdr's config.toml: HERDR_CONFIG when set,
+// otherwise config.toml under herdrConfigDir (~/.config/herdr, or
+// %APPDATA%\herdr on Windows).
 func ResolveHerdrConfigPath(env map[string]string) string {
 	if fromEnv := env["HERDR_CONFIG"]; fromEnv != "" {
 		return fromEnv
 	}
-	if xdg := env["XDG_CONFIG_HOME"]; xdg != "" {
-		return filepath.Join(xdg, "herdr", "config.toml")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "herdr", "config.toml")
+	return filepath.Join(herdrConfigDir(env), "config.toml")
 }
 
 // ToastConfigSnippet is the recommended toast block to append.
