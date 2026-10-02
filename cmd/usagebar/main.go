@@ -107,7 +107,9 @@ Usage:
   usagebar cursor-statusline         Cursor CLI statusLine (stdin context_window)
   usagebar antigravity-statusline    Antigravity CLI statusLine (stdin context_window+quota)
   usagebar setup [--write-toast]     Seed plugin config / show snippets
-  usagebar collect                   Debug: print collected limits as JSON
+  usagebar collect [--all] [--quotas-only]
+                                     Print limits as JSON; --quotas-only skips
+                                     pane activity, API spend and cache diagnostics
   usagebar opencode-check            Debug: report the OpenCode Go usage path
                                      (browser session import → opencode.ai fetch)
   usagebar version
@@ -252,7 +254,17 @@ type panelSnapshot struct {
 // that have no open agent pane in Herdr (the panel default; --all overrides).
 // When the pane query fails, all subscription providers are shown (fail-open).
 func collectPanel(nowMs int64, activeOnly bool) panelSnapshot {
-	snaps, panesOK := openPaneSnapshots()
+	return collectSnapshot(nowMs, activeOnly, true)
+}
+
+// Quota dashboards do not need activity transcripts. With all providers selected,
+// they also do not need Herdr; active-provider filtering still needs the pane list.
+func collectSnapshot(nowMs int64, activeOnly, includeActivity bool) panelSnapshot {
+	var snaps []limits.OpenPaneSnapshot
+	var panesOK bool
+	if activeOnly || includeActivity {
+		snaps, panesOK = openPaneSnapshots()
+	}
 	opts := limits.DefaultCollectOptions()
 	if activeOnly {
 		opts.Only = limits.ActiveProviderFilter(snaps, panesOK)
@@ -261,13 +273,18 @@ func collectPanel(nowMs int64, activeOnly bool) panelSnapshot {
 		billing := limits.BillingProviderFilter(snaps, panesOK, limits.DefaultBillingDeps())
 		opts.Only = limits.IntersectFilters(opts.Only, billing)
 	}
-	opts.Attach = func(providers []limits.ProviderLimits, now int64) []limits.ProviderLimits {
-		return limits.CollectAndAttachPaneActivity(providers, snaps, now)
+	if includeActivity {
+		opts.Attach = func(providers []limits.ProviderLimits, now int64) []limits.ProviderLimits {
+			return limits.CollectAndAttachPaneActivity(providers, snaps, now)
+		}
 	}
 	base := limits.CollectAllProviderLimits(resolveCwd(), nowMs, opts)
 	hist := limits.LoadUsageHistory()
 	res := limits.EnrichRunOut(base, hist, nowMs, limits.DefaultRunOutOptions)
 	limits.SaveUsageHistory(res.History)
+	if !includeActivity {
+		return panelSnapshot{providers: res.Providers}
+	}
 
 	// Pay-as-you-go blocks have no quota to run out of, so they skip the
 	// run-out enrichment entirely. Cache diagnostics stay sidebar-only except
@@ -664,7 +681,7 @@ func runOpenCodeCheck() {
 
 func runCollectJSON(args []string) {
 	nowMs := time.Now().UnixMilli()
-	snap := collectPanel(nowMs, !hasFlag(args, "--all"))
+	snap := collectSnapshot(nowMs, !hasFlag(args, "--all"), !hasFlag(args, "--quotas-only"))
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(struct {
