@@ -5,8 +5,9 @@
  * A lock file keeps a single watcher. A second start exits immediately.
  * Ticks are skipped while the pane heartbeat is fresh so the 15s pane
  * collect remains the only clock when the pane is open. The lock mtime is
- * refreshed on every tick, including skipped ones, so a live watcher is
- * never treated as stale.
+ * refreshed on every tick, including skipped ones, and throughout a slow
+ * collect, so a live watcher is never treated as stale. A watcher whose lock
+ * was reclaimed anyway exits instead of running beside its replacement.
  */
 package update
 
@@ -67,11 +68,50 @@ func touchWatchLock(now time.Time) {
 	_ = os.Chtimes(watchLockPath(), now, now)
 }
 
-func releaseWatchLock(f *os.File) {
-	if f != nil {
-		_ = f.Close()
+// ownsWatchLock is true while the lock path still names the file this
+// watcher created; a reclaim replaces it with a different file.
+func ownsWatchLock(f *os.File) bool {
+	if f == nil {
+		return false
 	}
-	_ = os.Remove(watchLockPath())
+	held, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	current, err := os.Stat(watchLockPath())
+	return err == nil && os.SameFile(held, current)
+}
+
+func releaseWatchLock(f *os.File) {
+	if f == nil {
+		return
+	}
+	if ownsWatchLock(f) {
+		_ = os.Remove(watchLockPath())
+	}
+	_ = f.Close()
+}
+
+// beatWatchLock keeps the lock fresh while a collect outlasts watchLockStale.
+func beatWatchLock(f *os.File) func() {
+	ticker := time.NewTicker(watchLockStale / 4)
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case now := <-ticker.C:
+				if ownsWatchLock(f) {
+					touchWatchLock(now)
+				}
+			}
+		}
+	}()
+	return func() {
+		ticker.Stop()
+		close(done)
+	}
 }
 
 func collectWatchProviders(cwd *string, nowMs int64) []limits.ProviderLimits {
@@ -96,6 +136,8 @@ type watchLoop struct {
 	acquire func(time.Time) (*os.File, bool)
 	release func(*os.File)
 	touch   func(time.Time)
+	owns    func(*os.File) bool
+	beat    func(*os.File) func()
 }
 
 func (w watchLoop) run() {
@@ -109,17 +151,27 @@ func (w watchLoop) run() {
 	if w.release != nil {
 		defer w.release(lock)
 	}
-	runTick := func() {
+	// runTick reports false once another watcher has reclaimed the lock.
+	runTick := func() bool {
+		if w.owns != nil && !w.owns(lock) {
+			return false
+		}
 		now := w.now()
 		if w.touch != nil {
 			w.touch(now)
 		}
 		if w.skip != nil && w.skip(now) {
-			return
+			return true
+		}
+		if w.beat != nil {
+			defer w.beat(lock)()
 		}
 		w.tick()
+		return true
 	}
-	runTick()
+	if !runTick() {
+		return
+	}
 	for {
 		if stopped(w.stop) {
 			return
@@ -128,7 +180,9 @@ func (w watchLoop) run() {
 		if stopped(w.stop) {
 			return
 		}
-		runTick()
+		if !runTick() {
+			return
+		}
 	}
 }
 
@@ -161,6 +215,8 @@ func RunWatch(cwd *string, now func() time.Time, sleep func(time.Duration), stop
 		acquire: tryAcquireWatchLock,
 		release: releaseWatchLock,
 		touch:   touchWatchLock,
+		owns:    ownsWatchLock,
+		beat:    beatWatchLock,
 		tick: func() {
 			tickNow := now()
 			nowMs := tickNow.UnixMilli()
