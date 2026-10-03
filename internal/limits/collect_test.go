@@ -11,10 +11,16 @@ import (
 
 func TestCollectAllProviderLimits_OrderAndStubs(t *testing.T) {
 	got := CollectAllProviderLimits(nil, 100, CollectOptions{})
-	if len(got) != 5 {
-		t.Fatalf("len=%d", len(got))
+	// Walked, not copied: display order is the profile families followed by
+	// every single-collector quota spec, so a newly registered quota-owning
+	// provider appears here without this test being edited.
+	wantIDs := []string{"claude", "codex", "opencode", "grok"}
+	for _, spec := range singleCollectorQuotaSpecs {
+		wantIDs = append(wantIDs, spec.id)
 	}
-	wantIDs := []string{"claude", "codex", "opencode", "grok", "agy"}
+	if len(got) != len(wantIDs) {
+		t.Fatalf("len=%d want %d", len(got), len(wantIDs))
+	}
 	for i, id := range wantIDs {
 		if got[i].ProviderID != id {
 			t.Fatalf("[%d] id=%q want %q", i, got[i].ProviderID, id)
@@ -44,8 +50,10 @@ func TestCollectAllProviderLimits_WithCollectorsAndAttach(t *testing.T) {
 			},
 		}},
 		Attach: func(providers []ProviderLimits, nowMs int64) []ProviderLimits {
-			if nowMs != 200 || len(providers) != 5 {
-				t.Fatalf("attach args")
+			// Derived for the same reason as the display-order test above.
+			want := 4 + len(singleCollectorQuotaSpecs)
+			if nowMs != 200 || len(providers) != want {
+				t.Fatalf("attach args: len=%d want %d", len(providers), want)
 			}
 			providers[0].PaneActivity = &ProviderPaneActivity{WindowMinutes: 300, TotalTokens: 1}
 			return providers

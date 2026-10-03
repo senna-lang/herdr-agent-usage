@@ -125,6 +125,7 @@ herdr plugin action invoke usagebar.setup
 | Hermes Agent | Yes | No | Exact session lookup in the active profile's read-only `state.db`; reports anchored context, cumulative prompt-cache rate, backend identity, and session token/cost burn. No rolling quota is inferred. See [docs/hermes-contract.md](docs/hermes-contract.md) |
 | Grok | Yes | Yes | Context from `signals.json`; SuperGrok credits when auth is present. Custom models (`~/.grok/config.toml` `[model.*]` with `base_url`) are pay-as-you-go and labelled from the endpoint host (openai, ollama, …) |
 | OMP (Oh My Pi) | Yes | Yes | Session jsonl plus its credential metadata. Subscription routes: OpenCode Go, Grok OAuth, Anthropic OAuth → Claude, and OpenAI Codex OAuth → Codex. API-key backends show backend-scoped session burn |
+| Kilo Code | Yes | Yes | Context from the session store's `step-finish` parts; Kilo Pass monthly credit window from the account's own allowance, authenticated with the gateway login in `auth.json`. Kilo publishes no 5h/7d bucket, so those stay empty. Without a Kilo Pass the account pays from a shared credit balance, which Kilo reports without a limit — that shows as a balance note, never a fabricated percentage. A Kilo pane running on OpenCode Go routes to that account's windows. See [docs/kilo-contract.md](docs/kilo-contract.md) |
 | Pi coding agent | Yes | Yes | Session jsonl plus `~/.pi/agent/auth.json`; context windows come from Pi's `models-store.json` / `models.json`, and session trees plus compaction boundaries are respected. Uses the same recognized OAuth/subscription routes and pay-as-you-go rules as OMP |
 
 Percentages in the limits pane default to **remaining** (`% left`). Higher is safer.
@@ -486,6 +487,7 @@ Everything is computed from files that the agents already keep on your machine:
 | Grok | `~/.grok/sessions/**/signals.json`, `~/.grok/auth.json` (credentials for the credits fetch), `~/.grok/config.toml` (custom-model base URLs) |
 | OMP | `~/.omp/agent/sessions/**/*.jsonl`, `~/.omp/agent/models.db` (context window lookup), `~/.omp/agent/agent.db` (credential kind, and the `usage_history` windows OMP records for the accounts it drives) |
 | Pi coding agent | `~/.pi/agent/sessions/**/*.jsonl`, `~/.pi/agent/models-store.json` and `~/.pi/agent/models.json` (or the matching `PI_CODING_AGENT_DIR`), `~/.pi/agent/auth.json` (credential kind only) |
+| Kilo Code | `~/.local/share/kilo/kilo.db` (opened read-only: session usage, backend, credential kind), `~/.local/share/kilo/auth.json` (gateway login for the allowance fetch; the refresh token is never read), `~/.cache/kilo/models.json` (context window). Respects `KILO_DB`, `KILO_DATA_DIR`, `KILO_MODELS_PATH` |
 
 Pay-as-you-go detection is not tied to any one harness: it reads the same
 per-harness files above (the backend a session used is already recorded there —
@@ -551,6 +553,11 @@ the matching quota collector. Today the supported subscription routes are:
 | OMP / Pi | `xai-oauth` | Grok |
 | OMP / Pi | `anthropic` + OAuth | Claude |
 | OMP / Pi | `openai` / `openai-codex` + OAuth | Codex |
+| Kilo Code | `kilo` (gateway login) | Kilo |
+| Kilo Code | `opencode-go` | OpenCode Go |
+| Kilo Code | `xai-oauth` | Grok |
+| Kilo Code | `anthropic` + OAuth | Claude |
+| Kilo Code | `openai` / `openai-codex` + OAuth | Codex |
 
 The same provider id with an API key is pay-as-you-go, so it is never routed
 to a subscription limit by name alone. A subscription whose collector is not
@@ -572,6 +579,7 @@ Network requests happen in the following cases:
 
 - `opencode.ai` — only when a session is available: `OPENCODE_GO_COOKIE`, or an `opencode.ai` cookie in a local Chromium profile. Results are cached for 2 minutes (10 after a failure), so a sidebar refresh does not mean a request. Disable with `USAGEBAR_DISABLE_BROWSER_COOKIES=1`
 - `grok.com` — only when `~/.grok/auth.json` exists (you ran `grok login`)
+- `api.kilo.ai` — only when `~/.local/share/kilo/auth.json` holds a Kilo Gateway device login (you ran `kilo auth login`). Two GETs per refresh: the credit balance and the Kilo Pass allowance. The host is pinned and redirects are not followed, so the login is never replayed elsewhere; `KILO_API_URL` is deliberately not honoured. Results are cached for 2 minutes (10 after a failure) and keyed to the login, so a second account never sees the first one's numbers. The gateway token is never written to disk
 - `api.github.com` — on the first pane focus and then at most once every 24 hours, to check this plugin's latest public release. The request has no credentials and sends no usage or session data.
 
 No telemetry, no analytics, or usage/session data is sent. State written by the plugin (config, notification state, update-check state, usage history) stays under `~/.config/herdr/plugins/config/usagebar/` and `~/.claude/herdr-usagebar/`.

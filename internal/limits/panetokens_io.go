@@ -14,6 +14,7 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/kilo"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 	_ "modernc.org/sqlite"
@@ -301,7 +302,7 @@ func tokensForPaneWith(profiles []claude.ClaudeProfile, codexProfiles []codex.Co
 // to report against, so the sidebar shows the pane's whole-session total
 // instead of a windowed rate.
 //
-// An OpenCode session can switch backends mid-way (e.g. opencode-go then
+// An OpenCode or Kilo session can switch backends mid-way (e.g. opencode-go then
 // deepseek); the total is scoped to the pane's current backend so it lines up
 // with the "$provider" label and excludes the subscription-gateway spend
 // already covered by that provider's limit row. Codex/Claude/Grok keep one
@@ -331,7 +332,43 @@ func PaneTotalUsage(providerID string, pane OpenPaneSnapshot, nowMs int64) (toke
 	if providerID == "pi" {
 		return piActivityForPaneBackend(pane, piPaneBackendID(pane), 0, nowMs)
 	}
+	if providerID == "kilo" {
+		return kiloActivityForPane(providerID, pane, nowMs)
+	}
 	return TokensForPaneAnyBackend(providerID, pane, 0, nowMs), 0
+}
+
+// kiloActivityForPane reports a Kilo pane's own spend on its current backend.
+//
+// Kilo can switch a session's backend mid-way, so the read is scoped to the
+// backend the pane is on now: the session row's denormalised totals are lifetime
+// figures for the whole session and would otherwise charge the earlier
+// backend's cost and tokens to the later one's label. The figures are still
+// lifetime rather than windowed — that is what this block shows — and they are
+// read only once the pane has been classified pay-as-you-go, never for a plan
+// budget.
+func kiloActivityForPane(providerID string, pane OpenPaneSnapshot, nowMs int64) (tokens float64, costUSD float64) {
+	backendID := payAsYouGoBackendID(providerID, pane)
+	if backendID == "" {
+		return 0, 0
+	}
+	rows := kilo.PaneSpend(pane.SessionID, pane.Cwd, backendID, 0, nowMs)
+	for _, usage := range DecodeAPIUsageRows(kiloSpendRows(rows), backendID) {
+		tokens += usage.Tokens
+		costUSD += usage.CostUSD
+	}
+	return tokens, costUSD
+}
+
+// kiloSpendRows re-labels Kilo's message envelopes as the row type the shared
+// pay-as-you-go decoder consumes. Kilo is an OpenCode fork and writes the same
+// envelope, so this copies two fields rather than translating anything.
+func kiloSpendRows(messages []kilo.AssistantMessage) []OpenCodeTokenRow {
+	rows := make([]OpenCodeTokenRow, len(messages))
+	for i, message := range messages {
+		rows[i] = OpenCodeTokenRow{Data: message.Data, TimeCreated: message.TimeCreated}
+	}
+	return rows
 }
 
 // TokensForPaneAnyBackend sums a pane's tokens in [startMs, endMs] across any

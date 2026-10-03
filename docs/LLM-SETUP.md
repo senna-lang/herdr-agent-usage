@@ -78,6 +78,7 @@ herdr integration install codex
 herdr integration install opencode
 herdr integration install omp
 herdr integration install pi
+herdr integration install kilo
 ```
 
 ### 2. Install the plugin

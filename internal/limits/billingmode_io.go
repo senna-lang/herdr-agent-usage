@@ -20,6 +20,7 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/kilo"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 	_ "modernc.org/sqlite"
@@ -156,6 +157,24 @@ func paneBillingModeWith(profiles []claude.ClaudeProfile, codexProfiles []codex.
 			return BillingUnknown
 		}
 		return opencodePaneBillingMode(pane)
+	case "kilo":
+		if _, ok := paneSubscriptionRoute(providerID, pane); ok {
+			// The session records a known subscription gateway. Its quota is
+			// owned by that gateway's account, not by the Kilo harness.
+			return BillingSubscription
+		}
+		if paneHasOAuthCredential(providerID, pane) {
+			// A real login whose collector is not implemented must not be turned
+			// into a fabricated spend total.
+			return BillingUnknown
+		}
+		// Any other Kilo backend draws on a credential Kilo filed itself, so
+		// the pane is pay-as-you-go there rather than on a Kilo allowance.
+		if backendID := kiloPaneBackendID(pane); backendID != "" && backendID != kilo.GatewayProviderID {
+			return BillingPayAsYouGo
+		}
+		// No backend evidence at all: fail open rather than hide the pane.
+		return BillingUnknown
 	case "omp", "pi":
 		if _, ok := paneSubscriptionRoute(providerID, pane); ok {
 			// The session records a known subscription gateway. Its quota is
@@ -314,6 +333,13 @@ func payAsYouGoBackendID(providerID string, pane OpenPaneSnapshot) string {
 		return ompPaneBackendID(pane)
 	case "pi":
 		return piPaneBackendID(pane)
+	case "kilo":
+		backendID := kiloPaneBackendID(pane)
+		if backendID == kilo.GatewayProviderID {
+			// The Kilo Gateway is a Kilo allowance, not a pay-as-you-go backend.
+			return ""
+		}
+		return backendID
 	case "codex":
 		return codexPaneBackendID(pane)
 	case "grok":
@@ -711,7 +737,21 @@ func ompPiPaneBackendID(providerID string, pane OpenPaneSnapshot) string {
 	if providerID == "pi" {
 		return piPaneBackendID(pane)
 	}
+	if providerID == "kilo" {
+		return kiloPaneBackendID(pane)
+	}
 	return ""
+}
+
+// kiloPaneBackendID returns the backend Kilo served the pane's session with.
+//
+// Kilo drives several providers from one CLI, so this is what decides whether a
+// pane draws on a Kilo allowance or on someone else's login. The pane's cwd is
+// passed through because the session is resolved by the same rules the context
+// read uses: a pane whose reported id is gone must be classified by the session
+// its context comes from, not by nothing.
+func kiloPaneBackendID(pane OpenPaneSnapshot) string {
+	return kilo.BackendForKilo(pane.SessionID, pane.Cwd)
 }
 
 func ompPiSubscriptionRoute(providerID string, pane OpenPaneSnapshot) (SubscriptionRoute, bool) {
@@ -729,6 +769,11 @@ func paneCredentialType(providerID string, pane OpenPaneSnapshot) string {
 	case "opencode":
 		backendID := opencodePaneBackendID(pane)
 		return opencode.CredentialType(backendID)
+	case "kilo":
+		// Only Kilo's own credential store is consulted, for the exact backend
+		// the session named. Probing a sibling provider's key would answer with
+		// a credential that has nothing to do with the queried account.
+		return kilo.CredentialType(kiloPaneBackendID(pane))
 	default:
 		return ""
 	}
@@ -746,6 +791,9 @@ func paneSubscriptionRoute(providerID string, pane OpenPaneSnapshot) (Subscripti
 		return ompPiSubscriptionRoute(providerID, pane)
 	case "opencode":
 		backendID := opencodePaneBackendID(pane)
+		return SubscriptionRouteForProviderAuth(backendID, paneCredentialType(providerID, pane))
+	case "kilo":
+		backendID := kiloPaneBackendID(pane)
 		return SubscriptionRouteForProviderAuth(backendID, paneCredentialType(providerID, pane))
 	default:
 		return SubscriptionRoute{}, false

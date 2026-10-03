@@ -809,3 +809,17 @@ func TestObservationAge(t *testing.T) {
 		})
 	}
 }
+
+// Kilo publishes one window for the Kilo Gateway: a monthly credit allowance.
+// There is no 5h or 7d vocabulary to map, and an id that is not Kilo's own must
+// stay unmapped rather than be guessed into a short window it does not publish.
+func TestKiloSlotForLimitID(t *testing.T) {
+	if slot, minutes := slotForLimitID("kilo", "kilo-pass:subscription:1mo"); slot != slotTertiary || minutes != 43200 {
+		t.Fatalf("monthly slot = %v/%d", slot, minutes)
+	}
+	for _, id := range []string{"kilo:5h", "kilo:7d", "subscription", "", "kilo-pass:subscription:1h"} {
+		if slot, minutes := slotForLimitID("kilo", id); slot != slotNone || minutes != 0 {
+			t.Fatalf("%q mapped to %v/%d", id, slot, minutes)
+		}
+	}
+}

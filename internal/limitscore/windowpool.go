@@ -111,6 +111,7 @@ var LimitIDSlotTables = map[string]func(limitID string) (windowSlot, int){
 	"claude":   claudeLimitIDSlot,
 	"codex":    codexLimitIDSlot,
 	"grok":     grokLimitIDSlot,
+	"kilo":     kiloLimitIDSlot,
 	"opencode": opencodeLimitIDSlot,
 }
 
@@ -159,6 +160,20 @@ func antigravityLimitIDSlot(limitID string) (windowSlot, int) {
 		return slotPrimary, 10080
 	case "3p-weekly":
 		return slotSecondary, 10080
+	}
+	return slotNone, 0
+}
+
+// kiloLimitIDSlot maps Kilo's single window vocabulary.
+//
+// Kilo publishes no 5h or 7h bucket for the Kilo Gateway: its allowance is one
+// monthly credit total, so there is exactly one recognized id and it occupies
+// the long slot. An unrecognized id is skipped rather than guessed into a
+// window Kilo does not publish.
+func kiloLimitIDSlot(limitID string) (windowSlot, int) {
+	switch limitID {
+	case "kilo-pass:subscription:1mo":
+		return slotTertiary, 43200
 	}
 	return slotNone, 0
 }
