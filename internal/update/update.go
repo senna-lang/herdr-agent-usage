@@ -241,9 +241,6 @@ func RunUpdateForPane(paneID string, force bool) {
 	}
 
 	p := providers.FindProvider(*pane.Agent)
-	if p == nil {
-		return
-	}
 
 	// A working pane can briefly have no fresh limit or context value while its
 	// collector or transcript is between complete records. Keep its last-known-
@@ -257,6 +254,18 @@ func RunUpdateForPane(paneID string, force bool) {
 	naming := herdrcli.GetPaneNaming(pane)
 	title := core.ResolveSidebarTitle(naming.PaneLabel, naming.TabLabel, naming.TabNumber, naming.WorkspaceLabel)
 	writeMetadataToken(pane.Tokens, paneID, "title", title, force, retainExistingOnEmpty)
+
+	// usagebar cannot read usage for agents without a provider, but their row
+	// still needs $title and $provider in place of Herdr's own tokens. Usage left
+	// by an earlier agent in the same pane is cleared, not shown under this one.
+	// It is cleared while working too: with no provider, nothing will refill it.
+	if p == nil {
+		writeMetadataToken(pane.Tokens, paneID, "limit", "", force, false)
+		writeMetadataToken(pane.Tokens, paneID, "provider", *pane.Agent, force, retainExistingOnEmpty)
+		writeMetadataToken(pane.Tokens, paneID, "context", "", force, false)
+		writeCacheHitTokens(pane.Tokens, paneID, "", 0, force, false)
+		return
+	}
 
 	cwd := paneCwdForUpdate(pane)
 	nowMs := time.Now().UnixMilli()

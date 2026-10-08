@@ -401,3 +401,52 @@ func TestReserveColumnsFor(t *testing.T) {
 		t.Fatal("empty prefix must not shrink the budget")
 	}
 }
+
+// Herdr can report agents usagebar has no provider for. $title stands in for
+// Herdr's own tab/pane tokens, so skipping such a pane leaves its row blank.
+func TestRunUpdateForPane_UnregisteredAgentWritesTitleAndProvider(t *testing.T) {
+	// A working pane normally keeps its last values between reads. An
+	// unregistered agent has nothing to re-read, so it must clear them too.
+	for _, status := range []string{"idle", "working"} {
+		t.Run(status, func(t *testing.T) {
+			root := t.TempDir()
+			logPath := filepath.Join(root, "metadata.log")
+			binPath := filepath.Join(root, "fake-herdr")
+			script := `#!/bin/sh
+if [ "$1" = pane ] && [ "$2" = get ]; then
+  printf '%s\n' '{"result":{"pane":{"agent":"my-agent","agent_status":"` + status + `","label":"review-pane","cwd":"/tmp","tokens":{"limit":"5h 88%","context":"10%","cache_high":"cache hit 90%"}}}}'
+  exit 0
+fi
+if [ "$1" = pane ] && [ "$2" = report-metadata ]; then
+  printf '%s\n' "$*" >> "$REVIEW_METADATA_LOG"
+fi
+`
+			if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("HERDR_BIN_PATH", binPath)
+			t.Setenv("REVIEW_METADATA_LOG", logPath)
+			t.Setenv("HOME", root)
+
+			RunUpdateForPane("p1", false)
+
+			data, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatalf("unregistered agent pane produced no metadata: %v", err)
+			}
+			// Tokens left over from a previous agent in the same pane must not sit
+			// beside the new agent's name.
+			for _, want := range []string{
+				"--token title=review-pane",
+				"--token provider=my-agent",
+				"--clear-token limit",
+				"--clear-token context",
+				"--clear-token cache_high",
+			} {
+				if !strings.Contains(string(data), want) {
+					t.Errorf("metadata missing %q: %q", want, data)
+				}
+			}
+		})
+	}
+}
