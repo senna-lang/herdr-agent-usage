@@ -116,6 +116,79 @@ func TestWatchLoop_SkipsThenTicks(t *testing.T) {
 	}
 }
 
+func TestReleaseWatchLock_KeepsReclaimedLock(t *testing.T) {
+	isolateWatch(t)
+	now := time.UnixMilli(1_700_000_000_000)
+	old, ok := tryAcquireWatchLock(now)
+	if !ok {
+		t.Fatal("first acquire must succeed")
+	}
+	later := now.Add(watchLockStale + time.Second)
+	replacement, ok := tryAcquireWatchLock(later)
+	if !ok {
+		t.Fatal("stale lock must be reclaimed")
+	}
+	defer releaseWatchLock(replacement)
+	if ownsWatchLock(old) {
+		t.Fatal("reclaimed lock must not belong to the old watcher")
+	}
+	if !ownsWatchLock(replacement) {
+		t.Fatal("replacement must own the lock")
+	}
+	releaseWatchLock(old)
+	if !WatchAlreadyRunning(later) {
+		t.Fatal("old watcher must not remove the replacement lock")
+	}
+}
+
+func TestWatchLoop_ExitsAfterLockIsReclaimed(t *testing.T) {
+	ticks := 0
+	owned := true
+	watchLoop{
+		now:     func() time.Time { return time.UnixMilli(1) },
+		sleep:   func(time.Duration) { owned = false },
+		tick:    func() { ticks++ },
+		acquire: func(time.Time) (*os.File, bool) { return nil, true },
+		release: func(*os.File) {},
+		touch:   func(time.Time) {},
+		owns:    func(*os.File) bool { return owned },
+	}.run()
+	if ticks != 1 {
+		t.Fatalf("ticks=%d", ticks)
+	}
+}
+
+func TestWatchLoop_BeatsOnlyAroundCollect(t *testing.T) {
+	beats, stops := 0, 0
+	skips := 0
+	stop := make(chan struct{})
+	watchLoop{
+		now:   func() time.Time { return time.UnixMilli(1) },
+		sleep: func(time.Duration) {},
+		stop:  stop,
+		skip: func(time.Time) bool {
+			skips++
+			return skips == 1
+		},
+		tick: func() {
+			if beats != 1 || stops != 0 {
+				t.Fatalf("collect ran outside the heartbeat: beats=%d stops=%d", beats, stops)
+			}
+			close(stop)
+		},
+		acquire: func(time.Time) (*os.File, bool) { return nil, true },
+		release: func(*os.File) {},
+		touch:   func(time.Time) {},
+		beat: func(*os.File) func() {
+			beats++
+			return func() { stops++ }
+		},
+	}.run()
+	if beats != 1 || stops != 1 {
+		t.Fatalf("beats=%d stops=%d", beats, stops)
+	}
+}
+
 func alreadyStopped() <-chan struct{} {
 	ch := make(chan struct{})
 	close(ch)
