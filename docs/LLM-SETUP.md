@@ -85,8 +85,12 @@ herdr integration install kilo
 
 First inspect the current state with `herdr plugin list`:
 
-- If `usagebar` is already installed from `senna-lang/herdr-agent-usage`,
-  skip reinstall and go to step 3.  
+- If `usagebar` is already installed from `senna-lang/herdr-agent-usage` and
+  the user did not ask to update, skip reinstall and go to step 3.
+- If they asked to update a GitHub-managed install: on Herdr 0.9.4+ run
+  `herdr plugin update usagebar --yes`; on older Herdr reinstall with
+  `herdr plugin install senna-lang/herdr-agent-usage --yes`. Locally linked
+  trees are not updated by `plugin update` — rebuild those with `make build`.
 - **Plugin-id collision:** if a *different* plugin already claims the id
   `usagebar` (e.g. a locally linked dev tree or a self-made compatible
   plugin), installing would conflict. Tell the user what you found, get
@@ -271,7 +275,8 @@ Summarize in plain language:
 ## Reference
 
 - Plugin id: `usagebar`  
-- Install: `herdr plugin install senna-lang/herdr-agent-usage --yes`  
+- Install: `herdr plugin install senna-lang/herdr-agent-usage --yes`
+- Update (Herdr 0.9.4+): `herdr plugin update usagebar --yes`
 - Docs: repository `README.md`  
 - Safe toast enable: `herdr plugin action invoke usagebar.enable-toast`  
   (appends only when `[ui.toast]` is missing; never overwrites)

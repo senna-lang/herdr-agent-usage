@@ -360,7 +360,9 @@ func deref(s *string) string {
 	return *s
 }
 
-// GetSidebarWidthColumns returns layout area.x for the pane (sidebar width).
+// GetSidebarWidthColumns returns layout area.x as the sidebar width. That holds
+// where Herdr lays the terminal area out right of the sidebar (0.8.x); Herdr
+// 0.9.3 returns x = 0, reported here as unknown (nil).
 func GetSidebarWidthColumns(paneID string) *int {
 	stdout, ok := spawnHerdr("pane", "layout", "--pane", paneID)
 	if !ok || stdout == "" {

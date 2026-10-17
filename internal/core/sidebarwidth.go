@@ -6,8 +6,10 @@
  * 2. config.toml's ui.sidebar_width (caller supplies the parsed value)
  * 3. Herdr's default of 26
  *
- * When the user resizes the sidebar the configured value can drift from the
- * actual width, so we prefer the live width whenever possible.
+ * area.x is the sidebar width only where Herdr lays the terminal area out to
+ * the right of the sidebar (0.8.x source), so it follows a resized sidebar
+ * there. Herdr 0.9.3 returns area.x = 0, which the caller treats as unknown,
+ * so config or the default applies. It is not a documented width contract.
  *
  * File I/O for reading config is intentionally out of this pure package surface.
  */
@@ -64,7 +66,8 @@ func ParseSidebarWidthFromToml(toml string) *int {
 }
 
 // ResolveSidebarWidth uses the live width when available, otherwise falls back
-// to configWidth or DefaultSidebarWidth. configWidth <= 0 means "unset".
+// to configWidth or DefaultSidebarWidth. configWidth <= 0 means "unset". The
+// live width is a best-effort hint that Herdr 0.9+ no longer provides.
 func ResolveSidebarWidth(liveWidth *int, configWidth int) int {
 	if liveWidth != nil && *liveWidth > 0 {
 		return *liveWidth

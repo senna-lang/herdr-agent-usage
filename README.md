@@ -47,7 +47,23 @@ herdr plugin action invoke usagebar.enable-toast
 herdr server reload-config
 ```
 
-`herdr plugin install` provisions the `usagebar` binary automatically as part of install/update (via the manifest's `[[build]]` hook): it builds with the local Go toolchain (≥ 1.25) when available, and otherwise downloads a prebuilt binary from [GitHub Releases](https://github.com/senna-lang/herdr-agent-usage/releases) (macOS / Linux, arm64 / amd64). `usagebar.setup` repeats this resolution as a fallback for installs predating the build hook. To build manually instead, run `make build` in the plugin root.
+`herdr plugin install` provisions the `usagebar` binary via the manifest's `[[build]]` hook: it builds with the local Go toolchain (≥ 1.25) when available, and otherwise downloads a prebuilt binary from [GitHub Releases](https://github.com/senna-lang/herdr-agent-usage/releases) (macOS / Linux, arm64 / amd64). `usagebar.setup` repeats this resolution as a fallback for installs predating the build hook. To build manually instead, run `make build` in the plugin root.
+
+## Update
+
+On Herdr 0.9.4+:
+
+```bash
+herdr plugin update usagebar --yes
+```
+
+That refetches the GitHub-managed checkout and runs `[[build]]` again. Running plugin panes keep their original files; new invocations pick up the update without a config reload. Startup hooks run at the next server start. Locally linked plugins are left alone — rebuild those with `make build`.
+
+On Herdr older than 0.9.4 there is no separate update command:
+
+```bash
+herdr plugin install senna-lang/herdr-agent-usage --yes
+```
 
 ## Let an LLM set it up
 
@@ -177,7 +193,10 @@ and has no separator setting, so the harness and billing identity are not
 shown side by side. This makes the standard display `title`,
 `provider · limit`, then context. Run `herdr server reload-config` after
 editing. The limit disappears automatically when the matching provider has no
-limit data.
+limit data. `$context` is shortened to fit the sidebar. Where Herdr reports the
+live sidebar width (0.8.x) that width is used, so a drag-resized sidebar is
+followed; on Herdr 0.9+ it is not reported, so `[ui] sidebar_width` from your
+Herdr config (default 26 columns) is used instead.
 
 ### Plugin config
 
@@ -603,7 +622,7 @@ No telemetry, no analytics, or usage/session data is sent. State written by the 
 
 - **Not a billing dashboard.** Local transcripts / rollouts / signals (and optional OpenCode web / Grok.com credits) can differ from official consoles (other machines, server-side windows).
 - **Herdr core config is not rewritten on install.** Use `usagebar.setup` / `usagebar.enable-toast` or edit by hand.
-- **macOS / Linux** only.
+- **macOS / Linux** only. On Herdr 0.9+, `$context` length follows the configured `ui.sidebar_width`, not a drag-resized or per-client sidebar.
 
 ## Contributing
 
