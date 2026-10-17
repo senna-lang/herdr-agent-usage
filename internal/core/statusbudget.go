@@ -1,8 +1,8 @@
 /**
  * Estimates the cell count available for context usage in a sidebar row.
  *
- * Herdr does not expose the runtime sidebar width via API, so callers resolve
- * the configured sidebar_width before passing it here.
+ * Herdr has no documented runtime sidebar-width API, so callers pass the live
+ * layout width when Herdr reports one and otherwise the configured sidebar_width.
  */
 package core
 

@@ -4,11 +4,11 @@
 #
 #   --in-tree  Guarantee THIS checkout carries bin/usagebar. Used by the
 #              herdr-plugin.toml [[build]] hook, which runs on every
-#              `herdr plugin install` — including reinstall/update, the only
-#              way to update — against a fresh checkout that never carries the
-#              gitignored binary. $USAGEBAR_BIN and a usagebar on PATH
-#              deliberately do NOT satisfy this mode: they come from the
-#              install-time shell, which need not match the Herdr server
+#              `herdr plugin install`, and on `herdr plugin update` for
+#              GitHub-managed installs (Herdr 0.9.4+), against a fresh checkout
+#              that never carries the gitignored binary. $USAGEBAR_BIN and a
+#              usagebar on PATH deliberately do NOT satisfy this mode: they come
+#              from the install-time shell, which need not match the Herdr server
 #              environment that later runs the event hooks. Treating them as
 #              satisfying would reintroduce issue #48 silently.
 #
