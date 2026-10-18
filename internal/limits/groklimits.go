@@ -1,6 +1,6 @@
 /**
- * Grok (xAI SuperGrok) limit collection — pure auth/billing parse + identity fallback.
- * Network web billing / agent stdio RPC can be injected later.
+ * Grok (xAI SuperGrok) limit collection: auth parsing, the web billing and
+ * opt-in agent stdio billing sources, and the identity / borrowed-window fallback.
  */
 package limits
 
@@ -157,16 +157,54 @@ type CollectGrokLimitsOptions struct {
 	AuthPath        string
 	FetchWebBilling func(key string) *LimitWindow // returns primary window from web
 	FetchPlanTier   func(key string) *string
-	// TryBillingRPC overrides the default grok agent stdio x.ai/billing probe.
+	// TryBillingRPC replaces the agent stdio x.ai/billing probe. When set, no grok
+	// process is launched, and a nil answer is reported as a failed probe.
 	TryBillingRPC func(nowMs int64, email *string) *ProviderLimits
 }
 
-// TryGrokBillingRPC runs `grok agent stdio` x.ai/billing (often unavailable).
+// grokRPCEnv opts in to the agent stdio billing probe. Only the exact value
+// "1" enables it: launching the vendor CLI is a side effect the user must
+// choose deliberately, so unset, empty, and every other value keep it off.
+const grokRPCEnv = "USAGEBAR_ENABLE_GROK_RPC"
+
+// Brief diagnostic reasons for a probe that produced no windows. Each names the
+// one step that stopped, so the identity-only note says what was actually tried.
+const (
+	grokRPCDisabledReason    = "agent stdio RPC disabled; set USAGEBAR_ENABLE_GROK_RPC=1 to probe"
+	grokRPCUnavailableReason = "grok executable unavailable"
+	grokRPCFailedReason      = "agent stdio x.ai/billing probe failed"
+)
+
+// TryGrokBillingRPC runs `grok agent stdio` x.ai/billing when the probe is
+// opted in via USAGEBAR_ENABLE_GROK_RPC=1. Otherwise it returns nil and starts
+// no process.
 func TryGrokBillingRPC(nowMs int64, email *string) *ProviderLimits {
-	grokBin := os.Getenv("GROK_BIN")
-	if grokBin == "" {
-		grokBin = "grok"
+	probed, _ := tryGrokBillingRPC(nowMs, email)
+	return probed
+}
+
+// tryGrokBillingRPC is TryGrokBillingRPC with a diagnosis. The reason is empty
+// on success; otherwise it says whether the probe was disabled, the grok
+// executable could not be found, or the probe ran without a usable reply.
+func tryGrokBillingRPC(nowMs int64, email *string) (*ProviderLimits, string) {
+	// The opt-in gate runs before any lookup or command construction, so a
+	// disabled probe never touches the executable path or spawns a process.
+	if os.Getenv(grokRPCEnv) != "1" {
+		return nil, grokRPCDisabledReason
 	}
+	// Resolve the executable once and launch that exact path, so the reason
+	// reported for a missing binary is the one the launch itself would hit.
+	name := os.Getenv("GROK_BIN")
+	if name == "" {
+		name = "grok"
+	}
+	binary, err := exec.LookPath(name)
+	if err != nil {
+		return nil, grokRPCUnavailableReason
+	}
+	// Two line-delimited JSON-RPC requests: an initialize that declares file and
+	// terminal capabilities as false, then x.ai/billing. Nothing else is ever
+	// requested from the CLI.
 	initMsg := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
@@ -191,15 +229,20 @@ func TryGrokBillingRPC(nowMs int64, email *string) *ProviderLimits {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, grokBin, "agent", "stdio")
-	cmd.Stdin = bytes.NewReader([]byte(input))
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
+	cmd := exec.CommandContext(ctx, binary, "agent", "stdio")
+	cmd.Stdin = strings.NewReader(input)
+	var stdoutBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = nil
-	if err := cmd.Run(); err != nil && stdout.Len() == 0 {
-		return nil
+	runErr := cmd.Run()
+	stdout := stdoutBuf.Bytes()
+	// A non-zero exit still counts when it left a reply on stdout.
+	if runErr != nil && len(stdout) == 0 {
+		return nil, grokRPCFailedReason
 	}
-	for _, line := range strings.Split(stdout.String(), "\n") {
+	// The x.ai/billing reply is the first line whose request id is 2.
+	var result map[string]any
+	for _, line := range strings.Split(string(stdout), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -212,10 +255,18 @@ func TryGrokBillingRPC(nowMs int64, email *string) *ProviderLimits {
 			continue
 		}
 		if msg.ID != nil && *msg.ID == 2 && msg.Result != nil {
-			return ProviderLimitsFromBillingResult(msg.Result, nowMs, email)
+			result = msg.Result
+			break
 		}
 	}
-	return nil
+	if result == nil {
+		return nil, grokRPCFailedReason
+	}
+	probed := ProviderLimitsFromBillingResult(result, nowMs, email)
+	if probed == nil {
+		return nil, grokRPCFailedReason
+	}
+	return probed, ""
 }
 
 // CollectGrokLimits reads auth and applies identity / web billing.
@@ -298,13 +349,21 @@ func CollectGrokLimits(nowMs int64, opts CollectGrokLimitsOptions) ProviderLimit
 		}
 	}
 
-	tryRPC := opts.TryBillingRPC
-	if tryRPC == nil {
-		tryRPC = TryGrokBillingRPC
+	// An injected probe replaces the real launch entirely, so its nil answer has
+	// no finer diagnosis and reports the generic failure.
+	var probed *ProviderLimits
+	var probeReason string
+	if opts.TryBillingRPC != nil {
+		probed = opts.TryBillingRPC(nowMs, auth.Email)
+		if probed == nil {
+			probeReason = grokRPCFailedReason
+		}
+	} else {
+		probed, probeReason = tryGrokBillingRPC(nowMs, auth.Email)
 	}
-	if fromRPC := tryRPC(nowMs, auth.Email); fromRPC != nil {
-		fromRPC.PlanType = plan
-		return *fromRPC
+	if probed != nil {
+		probed.PlanType = plan
+		return *probed
 	}
 
 	if b := borrowGrokWindows(auth.Email, plan, nowMs); b != nil {
@@ -314,7 +373,7 @@ func CollectGrokLimits(nowMs int64, opts CollectGrokLimitsOptions) ProviderLimit
 	if auth.Email != nil {
 		email = *auth.Email
 	}
-	note := email + " · rate meters unavailable (web billing failed; x.ai/billing not on agent stdio)"
+	note := email + " · rate meters unavailable (web billing failed; " + probeReason + ")"
 	return ProviderLimits{
 		ProviderID: "grok", Label: "Grok", PlanType: plan,
 		Source: "grok auth.json (identity only)", FetchedAtMs: nowMs, Note: &note,

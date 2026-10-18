@@ -307,6 +307,35 @@ grok_home = "~/.grok-work"     # start Grok with GROK_HOME=~/.grok-work
   exactly one configured home contains its session; unknown or duplicate
   matches are left unassigned.
 
+### Grok billing RPC (opt-in)
+
+Grok quota collection tries the authenticated Web billing API first. If that
+cannot supply a meter, the `grok agent stdio` / `x.ai/billing` fallback is now
+**disabled by default**. Only the exact environment value
+`USAGEBAR_ENABLE_GROK_RPC=1` enables it; unset, empty, `0`, and other values
+leave it disabled.
+
+To retain the previous process-based fallback, set this in the environment
+inherited by Herdr's plugin processes:
+
+```sh
+export USAGEBAR_ENABLE_GROK_RPC=1
+```
+
+Restart Herdr from that environment if it is already running. When enabled,
+`GROK_BIN` still selects the executable (otherwise `grok` is resolved from
+`PATH`). The probe has a four-second timeout and sends only `initialize` and
+`x.ai/billing`, with filesystem and terminal capabilities disabled; it sends
+no generation prompt. The external CLI's own startup behavior is outside the
+plugin's control.
+
+**Migration:** installations that previously obtained quota only through agent
+stdio must opt in to keep those details. With RPC disabled, Web billing and
+account-matched observations from another agent still work, and per-pane
+context meters are unchanged. If neither quota source is available, meters
+show `—`, not zero usage. The no-meter note distinguishes disabled RPC, an
+unavailable executable, and a probe that failed to return usable billing data.
+
 ### Multiple OpenCode accounts
 
 Add one `[[opencode.profiles]]` block per OpenCode data directory. Each
@@ -357,14 +386,14 @@ position = "bottom-left"
 **OpenCode Go is the only supported subscription with no local source of usage
 truth, which is why it — and only it — needs the Keychain step below.**
 
-Every other provider's harness writes the server's own limit numbers to disk,
-so this plugin just reads them back:
+The other subscription collectors can use the following sources, including
+account-matched observations recorded by another agent:
 
-| provider | local source of truth |
+| provider | usage sources |
 | --- | --- |
 | Claude | `~/.claude.json` `cachedUsageUtilization` (+ statusLine cache), or another agent's observation of the same account |
 | Codex | `rate_limits` inside `event_msg` / `token_count` in the rollout jsonl, or another agent's observation of the same account |
-| Grok | agent stdio / `x.ai` billing, or another agent's observation of the same account |
+| Grok | authenticated Web billing, optional [agent stdio billing RPC](#grok-billing-rpc-opt-in), or another agent's observation of the same account |
 | **OpenCode Go** | **none of its own** (an observation by another agent still counts) |
 
 `opencode.db` has no usage table at all, its `account` table is empty (auth is
@@ -509,7 +538,7 @@ and the interactive panel retain the full activity data.
 
 ## Data handling
 
-Everything is computed from files that the agents already keep on your machine:
+Local usage is read from files that the agents already keep on your machine:
 
 | Harness | Local sources read |
 | --- | --- |
@@ -526,9 +555,11 @@ Everything is computed from files that the agents already keep on your machine:
 Pay-as-you-go detection is not tied to any one harness: it reads the same
 per-harness files above (the backend a session used is already recorded there —
 OpenCode's `providerID`, Codex's `model_provider`, Claude's deployment env,
-Grok's `config.toml`, OMP/Pi `message.provider`). No extra data sources; the
-only network calls are the authenticated provider usage fetches (Grok credits,
-OpenCode Go usage), and each one is skipped when its credential is absent.
+Grok's `config.toml`, OMP/Pi `message.provider`). Direct network calls are the
+authenticated provider usage fetches (Grok credits, OpenCode Go usage), skipped
+when their credentials are absent. The optional [Grok billing RPC](#grok-billing-rpc-opt-in)
+also launches the vendor CLI; its own startup behavior is outside the plugin's
+control.
 
 ### Where a window comes from
 

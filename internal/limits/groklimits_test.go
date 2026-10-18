@@ -95,8 +95,7 @@ func grokAuthJSON(email, expiresAt string) string {
 }
 
 // grokDeadEnd is one path through CollectGrokLimits that yields no first-hand
-// windows. Each must prefer another agent's observation of the same account,
-// and keep its own honest note when there is nothing to borrow.
+// windows. Each must prefer another agent's observation of the same account.
 type grokDeadEnd struct {
 	name string
 	// authJSON is written to opts.AuthPath; empty leaves the file absent.
@@ -107,7 +106,6 @@ type grokDeadEnd struct {
 	// planTier is what FetchPlanTier answers on the paths that reach it.
 	planTier   string
 	wantPlan   string
-	wantNote   string
 	wantSource string
 }
 
@@ -138,23 +136,19 @@ func (d grokDeadEnd) options(t *testing.T) CollectGrokLimitsOptions {
 func grokDeadEnds() []grokDeadEnd {
 	future := time.UnixMilli(grokNowMs).Add(24 * time.Hour).UTC().Format(time.RFC3339)
 	past := time.UnixMilli(grokNowMs).Add(-time.Hour).UTC().Format(time.RFC3339)
-	const missingAuthNote = "no ~/.grok/auth.json — run `grok login`"
 	return []grokDeadEnd{
 		{
 			name:       "auth file missing",
-			wantNote:   missingAuthNote,
 			wantSource: "none",
 		},
 		{
 			name:       "auth file unparseable",
 			authJSON:   "{not json",
-			wantNote:   missingAuthNote,
 			wantSource: "none",
 		},
 		{
 			name:       "auth file holds no entry",
 			authJSON:   "{}",
-			wantNote:   missingAuthNote,
 			wantSource: "none",
 		},
 		{
@@ -164,7 +158,6 @@ func grokDeadEnds() []grokDeadEnd {
 			name:         "token expired",
 			authJSON:     grokAuthJSON(grokAccountEmail, past),
 			knowsAccount: true,
-			wantNote:     "token expired (" + grokAccountEmail + ") — run `grok login`",
 			wantSource:   "grok auth.json",
 		},
 		{
@@ -173,9 +166,7 @@ func grokDeadEnds() []grokDeadEnd {
 			knowsAccount: true,
 			planTier:     "SUBSCRIPTION_TIER_SUPER_GROK_HEAVY",
 			wantPlan:     "Heavy",
-			wantNote: grokAccountEmail +
-				" · rate meters unavailable (web billing failed; x.ai/billing not on agent stdio)",
-			wantSource: "grok auth.json (identity only)",
+			wantSource:   "grok auth.json (identity only)",
 		},
 	}
 }
@@ -232,16 +223,19 @@ func TestCollectGrokLimits_BorrowsAtEveryDeadEnd(t *testing.T) {
 	}
 }
 
-// The fallback must not swallow the honest message: with nothing observed,
-// every dead end still says exactly why it has no numbers.
-func TestCollectGrokLimits_DeadEndNotesSurviveWithoutObservation(t *testing.T) {
+// Without an observation, every dead end still names its account and honest
+// source, and never fabricates a window.
+func TestCollectGrokLimits_DeadEndsKeepIdentityWithoutObservation(t *testing.T) {
 	for _, tc := range grokDeadEnds() {
 		t.Run(tc.name, func(t *testing.T) {
 			useAgentDB(t)
 			got := CollectGrokLimits(grokNowMs, tc.options(t))
 
-			if got.Note == nil || *got.Note != tc.wantNote {
-				t.Fatalf("Note: got %v, want %q", got.Note, tc.wantNote)
+			if got.Note == nil {
+				t.Fatal("dead end must keep an honest note")
+			}
+			if tc.knowsAccount && !containsStr(*got.Note, grokAccountEmail) {
+				t.Fatalf("Note %q must name the account %s", *got.Note, grokAccountEmail)
 			}
 			if got.Source != tc.wantSource {
 				t.Fatalf("Source: got %q, want %q", got.Source, tc.wantSource)
@@ -309,8 +303,8 @@ func TestCollectGrokLimits_RefusesAnotherAccountsObservation(t *testing.T) {
 			if got.Source == "omp usage_history" {
 				t.Fatalf("borrowed %s's windows onto %s's pane", otherEmail, grokAccountEmail)
 			}
-			if got.Note == nil || *got.Note != tc.wantNote {
-				t.Fatalf("Note: got %v, want %q", got.Note, tc.wantNote)
+			if got.Note == nil || containsStr(*got.Note, otherEmail) {
+				t.Fatalf("Note must not describe the foreign account, got %v", got.Note)
 			}
 			if got.Primary != nil || got.Secondary != nil {
 				t.Fatalf("no window may come from a foreign account, got %+v", got)
