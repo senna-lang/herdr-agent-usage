@@ -9,6 +9,8 @@ package limits
 import (
 	"fmt"
 	"math"
+	"strings"
+	"sync/atomic"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
 )
@@ -73,7 +75,7 @@ func formatCompactTokens(tokens float64) string {
 // unstable. Collection freshness is handled by the provider adapters.
 // Context usage remains in its own $context row. percent selects remaining
 // (default) vs used presentation; the tag has no left/used suffix.
-func FormatSidebarLimit(provider ProviderLimits, _ int64, percent core.LimitPercent) string {
+func FormatSidebarLimit(provider ProviderLimits, nowMs int64, percent core.LimitPercent) string {
 
 	candidates := []struct {
 		window   *LimitWindow
@@ -113,6 +115,146 @@ func FormatSidebarLimit(provider ProviderLimits, _ int64, percent core.LimitPerc
 	if shortest == nil {
 		return ""
 	}
+	switch sidebarWindowsMode.Load() {
+	case "all":
+		if text := formatAllWindows(candidates, percent); text != "" {
+			return text
+		}
+	case "compact":
+		if text := formatCompactWindows(candidates, percent, nowMs); text != "" {
+			return text
+		}
+	}
 	return fmt.Sprintf("%s %d%%", windowTag(shortest.window, shortest.fallback), percent.DisplayPercent(remainingOf(shortest.window.UsedPercentage)))
 
+}
+
+// sidebarWindowsMode selects the $limit presentation: "" (shortest window),
+// "all" (every window, tagged) or "compact" (every window, percentages only).
+// main sets it from [ui] sidebar_windows so the default stays unchanged.
+var sidebarWindowsMode atomic.Value
+
+// SetSidebarWindows selects the $limit presentation mode. Unknown values fall
+// back to the default shortest-window row.
+func SetSidebarWindows(mode string) {
+	switch mode {
+	case "all", "compact":
+		sidebarWindowsMode.Store(mode)
+	default:
+		sidebarWindowsMode.Store("")
+	}
+}
+
+// SidebarWindowBand is one window's contribution to a per-number coloured
+// row: its slot tag, the text (including the trailing separator unless it is
+// the last present window), and the colour band that text belongs to.
+type SidebarWindowBand struct {
+	Tag  string
+	Text string
+	Band core.LimitBand
+}
+
+// SidebarWindowTags is the fixed slot order a per-number row renders in.
+var SidebarWindowTags = []string{"5h", "7d", "30d"}
+
+func sidebarWindowPick(tag string, p ProviderLimits) *LimitWindow {
+	switch tag {
+	case "5h":
+		return p.Primary
+	case "7d":
+		return p.Secondary
+	default:
+		return p.Tertiary
+	}
+}
+
+// FormatSidebarWindowBands splits every present window into its own banded
+// token so a layout can colour each number separately. Text carries no
+// separator: Herdr already joins row items with "·", so adding one would
+// double it.
+func FormatSidebarWindowBands(p ProviderLimits, percent core.LimitPercent, nowMs int64) []SidebarWindowBand {
+	bands := make([]SidebarWindowBand, 0, len(SidebarWindowTags))
+	for _, tag := range SidebarWindowTags {
+		window := sidebarWindowPick(tag, p)
+		if window == nil {
+			continue
+		}
+		remaining := 100 - window.UsedPercentage
+		if remaining < 0 {
+			remaining = 0
+		}
+		bands = append(bands, SidebarWindowBand{
+			Tag:  tag,
+			Text: sidebarWindowText(window, percent, nowMs),
+			Band: core.LimitBandFor(remaining),
+		})
+	}
+	return bands
+}
+
+// MinRemainingPercent returns the tightest headroom across the provider's
+// present windows, or -1 when it has none. It answers "how close is this pane
+// to a wall" rather than "how is the current window doing", so the sidebar
+// colour warns about the 30d window even while 5h is comfortable.
+func MinRemainingPercent(provider ProviderLimits) float64 {
+	minRemaining := -1.0
+	for _, window := range []*LimitWindow{provider.Primary, provider.Secondary, provider.Tertiary} {
+		if window == nil {
+			continue
+		}
+		remaining := 100 - window.UsedPercentage
+		if remaining < 0 {
+			remaining = 0
+		}
+		if minRemaining < 0 || remaining < minRemaining {
+			minRemaining = remaining
+		}
+	}
+	return minRemaining
+}
+
+// formatAllWindows renders every present window in slot order.
+func formatAllWindows(candidates []struct {
+	window   *LimitWindow
+	fallback string
+}, percent core.LimitPercent) string {
+	parts := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.window == nil {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s %d%%",
+			windowTag(candidate.window, candidate.fallback),
+			percent.DisplayPercent(remainingOf(candidate.window.UsedPercentage))))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// formatCompactWindows renders every present window as bare percentages, e.g.
+// "96% · 97% · 37%". Window order is the slot order, so the numbers mean
+// 5h/7d/30d.
+func formatCompactWindows(candidates []struct {
+	window   *LimitWindow
+	fallback string
+}, percent core.LimitPercent, nowMs int64) string {
+	parts := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.window == nil {
+			continue
+		}
+		parts = append(parts, sidebarWindowText(candidate.window, percent, nowMs))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// sidebarWindowText renders one window as "<percent> <countdown>", dropping the
+// countdown when the reset time is unknown.
+func sidebarWindowText(window *LimitWindow, percent core.LimitPercent, nowMs int64) string {
+	text := fmt.Sprintf("%d%%", percent.DisplayPercent(remainingOf(window.UsedPercentage)))
+	if window.ResetsAt != nil {
+		if countdown := core.FormatSidebarCountdown(*window.ResetsAt - nowMs/1000); countdown != "" {
+			text += " " + countdown
+		}
+	}
+	return text
 }
