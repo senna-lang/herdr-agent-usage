@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -149,6 +150,93 @@ func fetchOpenCodeText(client *http.Client, url, cookie string, method string, b
 	return string(data), nil
 }
 
+// openCodeMicroCentsWindow converts one console meter into a window.
+type openCodeConsoleMeter struct {
+	ResetsAt        string `json:"resetsAt"`
+	LimitMicroCents string `json:"limitMicroCents"`
+	UsedMicroCents  string `json:"usedMicroCents"`
+}
+
+func consoleMeterWindow(m openCodeConsoleMeter, nowMs int64) *OpenCodeGoWebWindow {
+	limit, err := strconv.ParseFloat(m.LimitMicroCents, 64)
+	if err != nil || limit <= 0 {
+		return nil
+	}
+	usedMicro, err := strconv.ParseFloat(m.UsedMicroCents, 64)
+	if err != nil {
+		return nil
+	}
+	used := usedMicro / limit * 100
+	if used < 0 {
+		used = 0
+	}
+	if used > 100 {
+		used = 100
+	}
+	resetInSec := 0
+	if m.ResetsAt != "" {
+		if ts, err := time.Parse(time.RFC3339, m.ResetsAt); err == nil {
+			if d := ts.UnixMilli() - nowMs; d > 0 {
+				resetInSec = int(d / 1000)
+			}
+		}
+	}
+	return &OpenCodeGoWebWindow{UsedPercentage: used, ResetInSec: resetInSec}
+}
+
+// fetchOpenCodeConsoleUsage reads the live console API
+// (opencode.ai/console/api/go/status), which replaced the workspace page the
+// legacy scraper below targets. Requires only the session cookie plus the
+// account's first org id.
+func fetchOpenCodeConsoleUsage(client *http.Client, cookie string, nowMs int64) *OpenCodeGoWebSnapshot {
+	orgText, err := fetchOpenCodeText(client, "https://opencode.ai/console/api/orgs", cookie, http.MethodGet, nil, map[string]string{
+		"Accept": "application/json",
+	})
+	if err != nil {
+		return nil
+	}
+	var orgs []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(orgText), &orgs); err != nil || len(orgs) == 0 || orgs[0].ID == "" {
+		return nil
+	}
+	orgID := orgs[0].ID
+
+	statusText, err := fetchOpenCodeText(client, "https://opencode.ai/console/api/go/status", cookie, http.MethodGet, nil, map[string]string{
+		"Accept":   "application/json",
+		"X-Org-Id": orgID,
+	})
+	if err != nil {
+		return nil
+	}
+	return ParseOpenCodeConsoleStatus(statusText, orgID, nowMs)
+}
+
+// ParseOpenCodeConsoleStatus turns one console go-status body into a snapshot.
+// Micro-cent amounts arrive as JSON strings, and any window may be absent.
+func ParseOpenCodeConsoleStatus(statusText, orgID string, nowMs int64) *OpenCodeGoWebSnapshot {
+	var status struct {
+		Access struct {
+			Meters map[string]openCodeConsoleMeter `json:"meters"`
+		} `json:"access"`
+	}
+	if err := json.Unmarshal([]byte(statusText), &status); err != nil {
+		return nil
+	}
+	rolling := consoleMeterWindow(status.Access.Meters["fiveHour"], nowMs)
+	if rolling == nil {
+		return nil
+	}
+	return &OpenCodeGoWebSnapshot{
+		Rolling:     *rolling,
+		Weekly:      consoleMeterWindow(status.Access.Meters["week"], nowMs),
+		Monthly:     consoleMeterWindow(status.Access.Meters["month"], nowMs),
+		WorkspaceID: orgID,
+		Source:      "opencode.ai console",
+	}
+}
+
 // FetchOpenCodeGoWebUsage tries cookie-backed official usage from opencode.ai.
 func FetchOpenCodeGoWebUsage(cookie string, nowMs int64) *OpenCodeGoWebSnapshot {
 	_ = nowMs
@@ -159,6 +247,10 @@ func FetchOpenCodeGoWebUsage(cookie string, nowMs int64) *OpenCodeGoWebSnapshot 
 		return nil
 	}
 	client := &http.Client{Timeout: 20 * time.Second}
+
+	if snap := fetchOpenCodeConsoleUsage(client, cookie, nowMs); snap != nil {
+		return snap
+	}
 
 	workspacesURL := "https://opencode.ai/_server?id=" + OpenCodeWorkspacesServerID
 	workspacesText, err := fetchOpenCodeText(client, workspacesURL, cookie, http.MethodGet, nil, map[string]string{
