@@ -222,6 +222,57 @@ func writeCacheHitTokensWith(writer metadataTokenWriter, current map[string]stri
 	writeMetadataTokenWith(writer, current, paneID, "cache", "", force)
 }
 
+// limitBandSource returns the headroom that picks the $limit colour band, or
+// -1 when the row is not a subscription percentage (pay-as-you-go burn, or no
+// limits collected yet).
+func limitBandSource(providerLimits *limits.ProviderLimits, hasSessionBilling bool) float64 {
+	if providerLimits == nil || hasSessionBilling {
+		return -1
+	}
+	return limits.MinRemainingPercent(*providerLimits)
+}
+
+// writeLimitBandTokens writes limitText onto exactly one of $limit_high /
+// $limit_mid / $limit_low and clears the others, the same exclusive shape the
+// cache row uses. Herdr colours those tokens from config.toml; a plain $limit
+// row stays untouched so existing layouts keep working.
+func writeLimitBandTokens(current map[string]string, paneID, limitText string, remainingPercent float64, force, retainExistingOnEmpty bool) {
+	if retainExistingOnEmpty && limitText == "" {
+		return
+	}
+	active := ""
+	if limitText != "" && remainingPercent >= 0 {
+		active = string(core.LimitBandFor(remainingPercent))
+	}
+	for _, name := range core.LimitTokenNames {
+		value := ""
+		if name == active {
+			value = limitText
+		}
+		writeMetadataToken(current, paneID, name, value, force, retainExistingOnEmpty)
+	}
+}
+
+// writeWindowBandTokens writes one banded token per window so a layout can
+// colour each number separately: $limit_5h_high / _mid / _low, and the same for
+// 7d and 30d. Absent windows are cleared rather than left stale.
+func writeWindowBandTokens(current map[string]string, paneID string, bands []limits.SidebarWindowBand) {
+	byTag := make(map[string]limits.SidebarWindowBand, len(bands))
+	for _, band := range bands {
+		byTag[band.Tag] = band
+	}
+	for _, tag := range limits.SidebarWindowTags {
+		band, present := byTag[tag]
+		for _, suffix := range []string{"high", "mid", "low"} {
+			value := ""
+			if present && band.Band.Suffix() == suffix {
+				value = band.Text
+			}
+			writeMetadataToken(current, paneID, "limit_"+tag+"_"+suffix, value, false, false)
+		}
+	}
+}
+
 // RunUpdate resolves usage for HERDR_PANE_ID and refreshes its sidebar tokens,
 // including while the agent is working. force bypasses unchanged-value checks.
 func RunUpdate(force bool) {
@@ -312,6 +363,16 @@ func RunUpdateForPane(paneID string, force bool) {
 		if billing, ok := limits.SessionBillingForPane(snapshot); ok {
 			totalTokens, totalCostUSD = float64(billing.Tokens), billing.CostUSD
 			hasSessionBilling = true
+		} else {
+			// No session-billing evidence either: fail open (BillingUnknown is
+			// documented to show, not hide) and fall back to the subscription
+			// collector rather than blanking the row.
+			collectOptions := limits.DefaultCollectOptions()
+			collectOptions.Only = map[string]bool{limitsProviderID: true}
+			collected := limits.CollectAllProviderLimits(cwd, nowMs, collectOptions)
+			if len(collected) > 0 {
+				providerLimits = &collected[0]
+			}
 		}
 	default:
 		collectOptions := limits.DefaultCollectOptions()
@@ -363,6 +424,14 @@ func RunUpdateForPane(paneID string, force bool) {
 		}
 	}
 	writeMetadataToken(pane.Tokens, paneID, "limit", limitToken, force, retainExistingOnEmpty)
+	writeLimitBandTokens(pane.Tokens, paneID, limitToken, limitBandSource(providerLimits, hasSessionBilling), force, retainExistingOnEmpty)
+	// Per-window bands: each number carries its own colour, so a 37% month is
+	// red while a comfortable 5h stays default. Cleared for pay-as-you-go rows.
+	var windowBands []limits.SidebarWindowBand
+	if providerLimits != nil && !hasSessionBilling {
+		windowBands = limits.FormatSidebarWindowBands(*providerLimits, limits.ResolvedLimitPercent(), nowMs)
+	}
+	writeWindowBandTokens(pane.Tokens, paneID, windowBands)
 
 	// Stands in for Herdr's `agent` token so a pay-as-you-go pane names the
 	// backend it is actually billing ("deepseek") instead of the harness.
