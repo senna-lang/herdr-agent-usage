@@ -414,7 +414,7 @@ func TestRunUpdateForPane_UnregisteredAgentWritesTitleAndProvider(t *testing.T) 
 			binPath := filepath.Join(root, "fake-herdr")
 			script := `#!/bin/sh
 if [ "$1" = pane ] && [ "$2" = get ]; then
-  printf '%s\n' '{"result":{"pane":{"agent":"my-agent","agent_status":"` + status + `","label":"review-pane","cwd":"/tmp","tokens":{"limit":"5h 88%","context":"10%","cache_high":"cache hit 90%"}}}}'
+  printf '%s\n' '{"result":{"pane":{"agent":"my-agent","agent_status":"` + status + `","label":"review-pane","cwd":"/tmp","tokens":{"limit":"5h 88%","context":"10%","cache_high":"cache hit 90%","limit_high":"5h 88%","limit_5h_low":"8% 3h","context_meter":"⛁ 10%"}}}}'
   exit 0
 fi
 if [ "$1" = pane ] && [ "$2" = report-metadata ]; then
@@ -440,7 +440,10 @@ fi
 				"--token title=review-pane",
 				"--token provider=my-agent",
 				"--clear-token limit",
+				"--clear-token limit_high",
+				"--clear-token limit_5h_low",
 				"--clear-token context",
+				"--clear-token context_meter",
 				"--clear-token cache_high",
 			} {
 				if !strings.Contains(string(data), want) {

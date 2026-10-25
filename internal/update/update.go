@@ -237,26 +237,47 @@ func limitBandSource(providerLimits *limits.ProviderLimits, hasSessionBilling bo
 // cache row uses. Herdr colours those tokens from config.toml; a plain $limit
 // row stays untouched so existing layouts keep working.
 func writeLimitBandTokens(current map[string]string, paneID, limitText string, remainingPercent float64, force, retainExistingOnEmpty bool) {
+	writeLimitBandTokensWith(herdrMetadataTokenWriter, current, paneID, limitText, remainingPercent, force, retainExistingOnEmpty)
+}
+
+func writeLimitBandTokensWith(writer metadataTokenWriter, current map[string]string, paneID, limitText string, remainingPercent float64, force, retainExistingOnEmpty bool) {
 	if retainExistingOnEmpty && limitText == "" {
 		return
 	}
 	active := ""
-	if limitText != "" && remainingPercent >= 0 {
-		active = string(core.LimitBandFor(remainingPercent))
+	if limitText != "" {
+		if remainingPercent < 0 {
+			// A row that is not a percentage (pay-as-you-go burn, account label)
+			// has no headroom to band on. The recommended layout renders only the
+			// band tokens, so keep the text visible in the default-coloured band.
+			active = string(core.LimitHigh)
+		} else {
+			active = string(core.LimitBandFor(remainingPercent))
+		}
 	}
+	// Past the retain guard a real replacement row exists, so inactive bands are
+	// cleared unconditionally (like the cache-band writer): a working pane
+	// moving high→mid must not keep showing both bands.
 	for _, name := range core.LimitTokenNames {
 		value := ""
 		if name == active {
 			value = limitText
 		}
-		writeMetadataToken(current, paneID, name, value, force, retainExistingOnEmpty)
+		writeMetadataTokenWith(writer, current, paneID, name, value, force)
 	}
 }
 
 // writeWindowBandTokens writes one banded token per window so a layout can
 // colour each number separately: $limit_5h_high / _mid / _low, and the same for
 // 7d and 30d. Absent windows are cleared rather than left stale.
-func writeWindowBandTokens(current map[string]string, paneID string, bands []limits.SidebarWindowBand) {
+func writeWindowBandTokens(current map[string]string, paneID string, bands []limits.SidebarWindowBand, retainExistingOnEmpty bool) {
+	writeWindowBandTokensWith(herdrMetadataTokenWriter, current, paneID, bands, retainExistingOnEmpty)
+}
+
+func writeWindowBandTokensWith(writer metadataTokenWriter, current map[string]string, paneID string, bands []limits.SidebarWindowBand, retainExistingOnEmpty bool) {
+	if retainExistingOnEmpty && len(bands) == 0 {
+		return
+	}
 	byTag := make(map[string]limits.SidebarWindowBand, len(bands))
 	for _, band := range bands {
 		byTag[band.Tag] = band
@@ -268,7 +289,7 @@ func writeWindowBandTokens(current map[string]string, paneID string, bands []lim
 			if present && band.Band.Suffix() == suffix {
 				value = band.Text
 			}
-			writeMetadataToken(current, paneID, "limit_"+tag+"_"+suffix, value, false, false)
+			writeMetadataTokenWith(writer, current, paneID, "limit_"+tag+"_"+suffix, value, false)
 		}
 	}
 }
@@ -312,8 +333,11 @@ func RunUpdateForPane(paneID string, force bool) {
 	// It is cleared while working too: with no provider, nothing will refill it.
 	if p == nil {
 		writeMetadataToken(pane.Tokens, paneID, "limit", "", force, false)
+		writeLimitBandTokens(pane.Tokens, paneID, "", -1, force, false)
+		writeWindowBandTokens(pane.Tokens, paneID, nil, false)
 		writeMetadataToken(pane.Tokens, paneID, "provider", *pane.Agent, force, retainExistingOnEmpty)
 		writeMetadataToken(pane.Tokens, paneID, "context", "", force, false)
+		writeMetadataToken(pane.Tokens, paneID, "context_meter", "", force, false)
 		writeCacheHitTokens(pane.Tokens, paneID, "", 0, force, false)
 		return
 	}
@@ -343,8 +367,11 @@ func RunUpdateForPane(paneID string, force bool) {
 		// Cannot tell which account this pane belongs to: clear rather than
 		// guess into the wrong account's limits/tokens.
 		writeMetadataToken(pane.Tokens, paneID, "limit", "", force, retainExistingOnEmpty)
+		writeLimitBandTokens(pane.Tokens, paneID, "", -1, force, retainExistingOnEmpty)
+		writeWindowBandTokens(pane.Tokens, paneID, nil, retainExistingOnEmpty)
 		writeMetadataToken(pane.Tokens, paneID, "provider", formatSidebarProvider(*pane.Agent, p.AgentID(), snapshot), force, retainExistingOnEmpty)
 		writeMetadataToken(pane.Tokens, paneID, "context", "", force, retainExistingOnEmpty)
+		writeMetadataToken(pane.Tokens, paneID, "context_meter", "", force, retainExistingOnEmpty)
 		writeCacheHitTokens(pane.Tokens, paneID, "", 0, force, retainExistingOnEmpty)
 		return
 	}
@@ -431,7 +458,7 @@ func RunUpdateForPane(paneID string, force bool) {
 	if providerLimits != nil && !hasSessionBilling {
 		windowBands = limits.FormatSidebarWindowBands(*providerLimits, limits.ResolvedLimitPercent(), nowMs)
 	}
-	writeWindowBandTokens(pane.Tokens, paneID, windowBands)
+	writeWindowBandTokens(pane.Tokens, paneID, windowBands, retainExistingOnEmpty)
 
 	// Stands in for Herdr's `agent` token so a pay-as-you-go pane names the
 	// backend it is actually billing ("deepseek") instead of the harness.
@@ -458,6 +485,9 @@ func RunUpdateForPane(paneID string, force bool) {
 
 	if usage == nil {
 		writeMetadataToken(pane.Tokens, paneID, "context", contextPrefix, force, retainExistingOnEmpty)
+		// No meter this pass: keep the internal token's policy aligned with
+		// $context so the periodic publisher never rebuilds on a stale meter.
+		writeMetadataToken(pane.Tokens, paneID, "context_meter", "", force, retainExistingOnEmpty)
 		writeCacheHitTokens(pane.Tokens, paneID, "", 0, force, retainExistingOnEmpty)
 		return
 	}
@@ -468,6 +498,11 @@ func RunUpdateForPane(paneID string, force bool) {
 	maxCols = reserveColumnsFor(maxCols, contextPrefix)
 	statusText := core.FormatUsageStatus(*usage, core.FormatUsageOptions{MaxColumns: maxCols})
 	writeMetadataToken(pane.Tokens, paneID, "context", combineLimitAndContext(contextPrefix, statusText), force, retainExistingOnEmpty)
+	// The multi-profile periodic publisher rewrites only the limit prefix of
+	// $context. Publishing the raw meter here saves that consumer from parsing
+	// the row, whose first " · " is no longer the prefix boundary once
+	// multi-window limit text carries its own separators.
+	writeMetadataToken(pane.Tokens, paneID, "context_meter", statusText, force, retainExistingOnEmpty)
 	if !limits.ResolvedCacheDisplay() {
 		// Explicit opt-out clears prior cache metadata, including working panes.
 		writeCacheHitTokens(pane.Tokens, paneID, "", 0, force, false)
