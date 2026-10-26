@@ -124,7 +124,8 @@ herdr plugin action invoke usagebar.setup
 | --- | --- |
 | **Sidebar `$context` row** | Per-pane context usage: `⛁ 13% (130k)` when the window size is known, or the token count alone |
 | **Sidebar `$cache_*` row** | Session-cumulative prompt-cache hit rate (`cache hit 93.3%`), plus remaining TTL only from a recorded expiry. ⚠️ when that TTL has already elapsed. Exactly one of `$cache_high` / `$cache_mid` / `$cache_low` is set. High uses the default sidebar color; mid/low are yellow/red in `config.toml` |
-| **Sidebar `$limit` row** | Shortest provider limit window (`5h 72%` remaining), refreshed with the Agent Usage pane (15s) or every 60s while that pane is closed. Pay-as-you-go panes show what that pane spent on its backend (`Σ 425k $0.04`, scoped to the pane's session and backend) instead |
+| **Sidebar `$limit` row** | Provider limit window, refreshed with the Agent Usage pane (15s) or every 60s while that pane is closed. `[ui] sidebar_windows` picks the shape: `shortest` (default, `5h 72%`), `all` (`5h 72% · 7d 90% · 30d 41%`), or `compact` (`72% 3h · 90% 3d · 41% 12d`). Pay-as-you-go panes show what that pane spent on its backend (`Σ 425k $0.04`, scoped to the pane's session and backend) instead |
+| **Sidebar limit colour bands** | Exactly one of `$limit_high` / `$limit_mid` / `$limit_low` is set, chosen by the tightest window: ≥50% left uses the default colour, 50%→25% yellow, <25% red. For per-number colours, `$limit_5h_*`, `$limit_7d_*`, and `$limit_30d_*` carry one window each |
 | **Sidebar `$provider` row** | Subscription provider (`opencode-go`, `grok`, `claude`, …) on a subscription pane, or the backend actually billed on a pay-as-you-go pane (`deepseek`). The adjacent burn total is scoped to that same backend in the pane's session |
 | **Agent Usage pane** | One block per billing provider, independent of harness. Subscription providers show plan windows and cross-harness pane activity. Pay-as-you-go backends show one merged 24h / 7d / 30d block, model breakdown, and pane share even when multiple harnesses use the same backend. Prompt-cache data stays sidebar-only, except red-band panes (<50% session hit rate), which produce a `⚠ low cache performance` warning |
 | **Toasts** (optional) | Remaining-limit warnings at configured thresholds (default 50 / 20 / 10 / 5 % left) |
@@ -148,6 +149,36 @@ Percentages in the limits pane default to **remaining** (`% left`). Higher is sa
 Set `[ui] limit_percent = "used"` to show consumption instead; the bar fills as
 the window burns, but colour still tracks remaining headroom. Set `[ui] cache_display = false`
 to hide cache data from both the sidebar and Agent Usage pane.
+
+`[ui] sidebar_windows` controls how much the `$limit` row shows:
+
+| Value | Row |
+| --- | --- |
+| `shortest` (default) | `5h 72%` — the numerically tightest window |
+| `all` | `5h 72% · 7d 90% · 30d 41%` — every window, tagged |
+| `compact` | `72% 3h · 90% 3d · 41% 12d` — every window with its reset countdown |
+
+Countdowns use days once the reset is a day or more, else hours, else minutes,
+and are omitted when the provider reports no reset time.
+
+Colour is per token, from Herdr config. For a single colour driven by the
+tightest window:
+
+```toml
+["$limit_high", { token = "$limit_mid", fg = "#e0af68" }, { token = "$limit_low", fg = "#f7768e" }],
+```
+
+For one colour per number, use the per-window tokens (`$limit_5h_*`,
+`$limit_7d_*`, `$limit_30d_*`) in the same exclusive shape:
+
+```toml
+["$limit_5h_high", { token = "$limit_5h_mid", fg = "#e0af68" }, { token = "$limit_5h_low", fg = "#f7768e" },
+ "$limit_7d_high", { token = "$limit_7d_mid", fg = "#e0af68" }, { token = "$limit_7d_low", fg = "#f7768e" },
+ "$limit_30d_high", { token = "$limit_30d_mid", fg = "#e0af68" }, { token = "$limit_30d_low", fg = "#f7768e" }],
+```
+
+Herdr joins the tokens of one row with `·`, so the token text carries no
+separator of its own.
 
 
 ## Agent Usage pane
@@ -174,7 +205,9 @@ context text remains unchanged:
 row_gap = 0
 rows = [
   ["state_icon", "$title"],
-  ["$provider", "$limit"],
+  ["$provider", "$limit_5h_high", { token = "$limit_5h_mid", fg = "#e0af68" }, { token = "$limit_5h_low", fg = "#f7768e" },
+                 "$limit_7d_high", { token = "$limit_7d_mid", fg = "#e0af68" }, { token = "$limit_7d_low", fg = "#f7768e" },
+                 "$limit_30d_high", { token = "$limit_30d_mid", fg = "#e0af68" }, { token = "$limit_30d_low", fg = "#f7768e" }],
   ["$cache_high", { token = "$cache_mid", fg = "#e0af68" }, { token = "$cache_low", fg = "#f7768e" }],
   ["$context"],
 ]

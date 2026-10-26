@@ -30,7 +30,7 @@ func TestRunUpdate_MetadataClearingPolicy(t *testing.T) {
 			binPath := filepath.Join(root, "fake-herdr")
 			script := `#!/bin/sh
 if [ "$1" = pane ] && [ "$2" = get ]; then
-  printf '{"result":{"pane":{"agent":"omp","agent_status":"%s","label":"review-pane","cwd":"/tmp","tokens":{"limit":"last-good-limit","context":"last-good-context"}}}}\n' "$PANE_STATUS"
+  printf '{"result":{"pane":{"agent":"omp","agent_status":"%s","label":"review-pane","cwd":"/tmp","tokens":{"limit":"last-good-limit","context":"last-good-context","limit_high":"last-good-high","limit_5h_high":"94%% 3h","context_meter":"⛁ 14%% (136k)"}}}}\n' "$PANE_STATUS"
   exit 0
 fi
 if [ "$1" = pane ] && [ "$2" = report-metadata ]; then
@@ -53,9 +53,18 @@ fi
 			if err != nil {
 				t.Fatalf("metadata calls = none: %v", err)
 			}
-			cleared := strings.Contains(string(data), "--clear-token limit") && strings.Contains(string(data), "--clear-token context")
+			log := string(data)
+			cleared := strings.Contains(log, "--clear-token limit") && strings.Contains(log, "--clear-token context")
 			if cleared != tt.shouldClear {
 				t.Fatalf("cleared=%t, want %t; metadata calls = %q", cleared, tt.shouldClear, data)
+			}
+			// The colour-band family and the context meter follow the same
+			// policy as the legacy tokens they mirror.
+			for _, token := range []string{"limit_high", "limit_5h_high", "context_meter"} {
+				has := strings.Contains(log, "--clear-token "+token)
+				if has != tt.shouldClear {
+					t.Fatalf("%s cleared=%t, want %t; metadata calls = %q", token, has, tt.shouldClear, data)
+				}
 			}
 		})
 	}
