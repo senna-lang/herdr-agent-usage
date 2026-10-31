@@ -13,10 +13,13 @@ What this plugin reads from Devin CLI, and what it deliberately does not.
 | Overrides | `DEVIN_DATA_DIR` relocates the whole data directory |
 
 Devin CLI keeps every session in one SQLite database it owns, and on an
-active machine it grows to tens of gigabytes. The adapter therefore never
-scans it: a pane resolves through the `message_nodes.session_id` index, and
-the windowed activity total narrows sessions by `sessions.last_activity_at`
-before opening any message tree.
+active machine it grows to tens of gigabytes. The adapter therefore only
+ever resolves through indexed single rows — `sessions.id` for membership,
+and `message_nodes` descending `row_id` for the newest request — and never
+scans a session's node forest on the refresh path. `chat_message` carries
+full message payloads (~35KB per node), so any query that parses it across
+a session's nodes reads gigabytes and spills temp b-trees on every pane
+event.
 
 ## Context
 
@@ -32,20 +35,32 @@ context tokens = metrics.context_input_tokens   (newest row with the field)
 fresh input plus cached input — which is exactly the sidebar's `$context`
 meter; no replay of the transcript is required.
 
-The same `request_id` appears on several sibling nodes carrying the same
-metrics, because Devin writes one node per streamed update of the same
-request. Every aggregate dedupes by `request_id` (`MAX` per group), so a
-raw `SUM` would multiply-count a request by however many updates it
-streamed.
-
-Recency follows `row_id`, the database's own insertion order: `node_id`
-repeats across branches of the forest and `created_at` ties, so neither can
-name the newest request.
+Recency follows `row_id`, the table's INTEGER PRIMARY KEY: Devin appends
+one node per streamed update, so the newest metrics-bearing row is a btree
+descent away, not a sort. The cache row (`$cache_*`) falls back to that
+same request's own counters.
 
 The context window size is **not reported**: no local surface publishes a
 Devin model's context limit, so `WindowTokens` stays unset and the sidebar
 shows the bare token count rather than a percentage against a denominator
 that does not exist.
+
+### Not aggregated
+
+The same `request_id` appears on several sibling nodes carrying the same
+metrics, because Devin writes one node per streamed update of the same
+request. Any session-wide aggregate — lifetime tokens, prompt-cache rate
+over the session, tokens inside a time window — therefore has to dedupe by
+`metadata.request_id`, which lives inside `chat_message` and forces a parse
+of every node row. On a multi-GB store that is seconds of CPU and gigabytes
+of page traffic per invocation, and pane events arrive faster than such a
+query completes, so invocations stack up. These numbers are deliberately
+not collected until an incrementally maintained index can serve them: a
+watermark over `row_id` could add only new rows per refresh, but building
+that index is its own change.
+
+Concretely: `$cache_*` shows the newest request's hit rate rather than the
+session's, and the Agent Usage pane shows no token-share row for Devin.
 
 ### Session identity
 
@@ -59,9 +74,11 @@ construction.
 - `sessions.model`, `sessions.metadata`, `sessions.cogs_json` — the model on
   the session row is the launch-time choice and says nothing about what an
   individual request ran; the per-request `generation_model` is read instead
-  where a model is needed.
-- `message_nodes.metadata` — request metrics live on `chat_message`; the
-  separate metadata column holds node-tree bookkeeping.
+  where a model is needed. `metadata.total_acu_cost` is a plan-unit figure,
+  not tokens or dollars.
+- `message_nodes.metadata` — mostly NULL, and request ownership lives on
+  `chat_message`; the separate metadata column holds node-tree bookkeeping
+  where present.
 
 ## Quota
 

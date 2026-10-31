@@ -13,7 +13,9 @@
  * subscription directly. The context window size is left unset: no local
  * surface reports a model's limit, and inventing a denominator would draw
  * a percentage against a number that does not exist (see
- * docs/devin-contract.md).
+ * docs/devin-contract.md). The cache row falls back to the newest
+ * request's counters: session-cumulative cache requires a full scan of the
+ * node forest, which is too expensive to run on every pane event.
  */
 package devin
 
@@ -51,10 +53,7 @@ func ResolveUsageIn(dataDir, sessionID string) *core.ContextUsage {
 		return nil
 	}
 
-	totals := readSessionTotals(db, sessionID)
-	usage := &core.ContextUsage{
-		SessionCache: core.CacheFromTokenCounts(nonNegative(totals.Input), nonNegative(totals.CacheRead), nonNegative(totals.CacheCreate)),
-	}
+	usage := &core.ContextUsage{}
 	if latest, ok := readLatestMetrics(db, sessionID); ok {
 		usage.ContextTokens = nonNegative(latest.ContextInput)
 		usage.Cache = core.CacheFromTokenCounts(nonNegative(latest.Input), nonNegative(latest.CacheRead), nonNegative(latest.CacheCreate))

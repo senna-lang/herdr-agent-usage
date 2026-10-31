@@ -4,7 +4,7 @@
  * The fixtures mirror the rows Devin CLI actually writes: one sessions row
  * per conversation and a forest of message_nodes, where several sibling
  * nodes share a request_id and repeat its metrics — Devin writes one node
- * per streamed update of the same request, so any raw sum multiplies usage.
+ * per streamed update of the same request.
  */
 package devin
 
@@ -74,26 +74,19 @@ func requestNode(requestID string, createdAtSec int64, metrics string) storeNode
 	}
 }
 
-// streamNode duplicates one request's metrics the way a streamed update
-// does: same request_id, later row, repeated counters.
-func streamNode(requestID string, createdAtSec int64, metrics string) storeNode {
-	return requestNode(requestID, createdAtSec, metrics)
-}
-
 func userNode(createdAtSec int64) storeNode {
 	return storeNode{createdAtSec: createdAtSec, message: `{"role":"user","content":"hi"}`}
 }
 
 const oneRequest = `"context_input_tokens":1000,"input_tokens":800,"output_tokens":120,"cache_read_tokens":600,"cache_creation_tokens":40`
 
-func TestResolveUsageIn_DedupesStreamedRequests(t *testing.T) {
+func TestResolveUsageIn_ReadsNewestMetricsRow(t *testing.T) {
 	dir := writeStore(t, []storeSession{{
 		id:              "pane-a",
 		lastActivitySec: 200,
 		nodes: []storeNode{
 			userNode(90),
 			requestNode("req-1", 100, oneRequest),
-			streamNode("req-1", 101, oneRequest), // same request, later row
 			requestNode("req-2", 150, `"context_input_tokens":2200,"input_tokens":1900,"output_tokens":300,"cache_read_tokens":1500`),
 		},
 	}})
@@ -106,16 +99,19 @@ func TestResolveUsageIn_DedupesStreamedRequests(t *testing.T) {
 	if usage.ContextTokens != 2200 {
 		t.Fatalf("context = %d", usage.ContextTokens)
 	}
-	// Lifetime cache input: req-1 counted once (800 fresh + 600 read + 40
-	// create) plus req-2 (1900 + 1500). Doubling req-1 would prove the
-	// streamed sibling leaked into the aggregate.
-	if usage.SessionCache == nil {
-		t.Fatal("expected session cache")
+	// The cache row carries the newest request's own counters, and only
+	// those: a session-cumulative rate would require scanning every node.
+	if usage.Cache == nil {
+		t.Fatal("expected cache")
 	}
-	if usage.SessionCache.FreshInputTokens != 800+1900 ||
-		usage.SessionCache.ReadTokens != 600+1500 ||
-		usage.SessionCache.CreationTokens != 40 {
-		t.Fatalf("session cache = %+v", usage.SessionCache)
+	if usage.Cache.FreshInputTokens != 1900 || usage.Cache.ReadTokens != 1500 || usage.Cache.CreationTokens != 0 {
+		t.Fatalf("cache = %+v", usage.Cache)
+	}
+	if usage.Cache.LastActivityUnix == nil || *usage.Cache.LastActivityUnix != 150 {
+		t.Fatalf("last activity = %v", usage.Cache.LastActivityUnix)
+	}
+	if usage.SessionCache != nil {
+		t.Fatal("session-cumulative cache is deliberately not computed")
 	}
 }
 
@@ -139,6 +135,27 @@ func TestResolveUsageIn_LatestMetricsFollowRowOrder(t *testing.T) {
 	}
 }
 
+func TestResolveUsageIn_SkipsNonMetricRows(t *testing.T) {
+	// Streamed updates and user nodes carry no metrics; the newest
+	// metrics-bearing row is the answer, however far back it sits.
+	dir := writeStore(t, []storeSession{{
+		id:              "pane-a",
+		lastActivitySec: 200,
+		nodes: []storeNode{
+			requestNode("req-1", 100, oneRequest),
+			userNode(190),
+			{createdAtSec: 195, message: `{"role":"assistant","metadata":{"request_id":"req-2"}}`},
+		},
+	}})
+	usage := ResolveUsageIn(dir, "pane-a")
+	if usage == nil {
+		t.Fatal("expected usage")
+	}
+	if usage.ContextTokens != 1000 {
+		t.Fatalf("context = %d", usage.ContextTokens)
+	}
+}
+
 func TestResolveUsageIn_UnknownAndMetriclessSessions(t *testing.T) {
 	dir := writeStore(t, []storeSession{
 		{id: "empty", lastActivitySec: 10, nodes: []storeNode{userNode(5)}},
@@ -158,55 +175,5 @@ func TestResolveUsageIn_UnknownAndMetriclessSessions(t *testing.T) {
 	}
 	if got := ResolveUsageIn("", "empty"); got != nil {
 		t.Fatalf("no data dir should yield no usage, got %+v", got)
-	}
-}
-
-func TestSessionTokensInWindow(t *testing.T) {
-	dir := writeStore(t, []storeSession{{
-		id:              "pane-a",
-		lastActivitySec: 1000,
-		nodes: []storeNode{
-			requestNode("req-old", 50, `"input_tokens":100,"output_tokens":10`),
-			requestNode("req-in", 500, `"input_tokens":300,"output_tokens":20,"cache_read_tokens":900`),
-			streamNode("req-in", 501, `"input_tokens":300,"output_tokens":20,"cache_read_tokens":900`),
-			requestNode("req-late", 2000, `"input_tokens":700,"output_tokens":70`),
-		},
-	}})
-	// Window covers only req-in: fresh input+output, cache reads excluded,
-	// streamed sibling counted once.
-	got := SessionTokensInWindow(dir, "pane-a", 400_000, 1_500_000)
-	if got != 320 {
-		t.Fatalf("windowed tokens = %v", got)
-	}
-	if got := SessionTokensInWindow(dir, "pane-a", 0, 100_000); got != 110 {
-		t.Fatalf("early window = %v", got)
-	}
-	if got := SessionTokensInWindow(dir, "", 0, 1_500_000); got != 0 {
-		t.Fatalf("empty session id should yield 0, got %v", got)
-	}
-	if got := SessionTokensInWindow(dir, "absent", 0, 1_500_000); got != 0 {
-		t.Fatalf("unknown session should yield 0, got %v", got)
-	}
-}
-
-func TestTotalTokensInWindow_SkipsIdleSessions(t *testing.T) {
-	dir := writeStore(t, []storeSession{
-		{
-			id:              "active",
-			lastActivitySec: 500,
-			nodes:           []storeNode{requestNode("req-1", 500, `"input_tokens":300,"output_tokens":20`)},
-		},
-		{
-			id:              "idle",
-			lastActivitySec: 10,
-			nodes:           []storeNode{requestNode("req-2", 10, `"input_tokens":900,"output_tokens":90`)},
-		},
-	})
-	got := TotalTokensInWindow(dir, 400_000, 1_500_000)
-	if got != 320 {
-		t.Fatalf("total should only count the active session, got %v", got)
-	}
-	if got := TotalTokensInWindow(dir, 0, 1_500_000); got != 320+990 {
-		t.Fatalf("full range = %v", got)
 	}
 }
