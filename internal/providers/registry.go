@@ -17,6 +17,7 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/cursor"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/devin"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/hermes"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/kilo"
@@ -74,6 +75,7 @@ var Registrations = []Registration{
 	{claude.Provider, []Capability{CapOwnsSubscriptionQuota}},
 	{codex.Provider, []Capability{CapOwnsSubscriptionQuota}},
 	{cursor.Provider, []Capability{CapContextOnly}},
+	{devin.Provider, []Capability{CapOwnsSubscriptionQuota}},
 	{grok.Provider, []Capability{CapOwnsSubscriptionQuota}},
 	{hermes.Provider, []Capability{CapContextOnly}},
 	{kilo.Provider, []Capability{CapOwnsSubscriptionQuota}},

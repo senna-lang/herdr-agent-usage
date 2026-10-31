@@ -13,6 +13,7 @@ import (
 	providercontract "github.com/senna-lang/herdr-agent-usage/internal/provider"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/devin"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/kilo"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
@@ -292,6 +293,8 @@ func tokensForPaneWith(profiles []claude.ClaudeProfile, codexProfiles []codex.Co
 		return tokens
 	case "grok":
 		return grokTokensForPane(pane, startMs, endMs)
+	case "devin":
+		return devin.SessionTokensInWindow("", sessionIDStr(pane), startMs, endMs)
 	default:
 		return 0
 	}
@@ -431,6 +434,8 @@ func totalTokensForProviderWith(profiles []claude.ClaudeProfile, codexProfiles [
 		return openCodeTotal(startMs, endMs) + routed
 	case "grok":
 		return grokTotal(startMs, endMs) + routed
+	case "devin":
+		return devin.TotalTokensInWindow("", startMs, endMs) + routed
 	default:
 		return routed
 	}
