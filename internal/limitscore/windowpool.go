@@ -110,6 +110,7 @@ var LimitIDSlotTables = map[string]func(limitID string) (windowSlot, int){
 	"agy":      antigravityLimitIDSlot,
 	"claude":   claudeLimitIDSlot,
 	"codex":    codexLimitIDSlot,
+	"devin":    devinLimitIDSlot,
 	"grok":     grokLimitIDSlot,
 	"kilo":     kiloLimitIDSlot,
 	"opencode": opencodeLimitIDSlot,
@@ -174,6 +175,21 @@ func kiloLimitIDSlot(limitID string) (windowSlot, int) {
 	switch limitID {
 	case "kilo-pass:subscription:1mo":
 		return slotTertiary, 43200
+	}
+	return slotNone, 0
+}
+
+// devinLimitIDSlot maps Devin's two plan-quota windows: the daily meter is
+// the short slot and the weekly meter the mid slot, matching what
+// CollectDevinLimits produces first-hand. The ids are the plugin's own
+// vocabulary — no harness records Devin windows on disk, so the mapping only
+// matters if an observer ever reports them.
+func devinLimitIDSlot(limitID string) (windowSlot, int) {
+	switch limitID {
+	case "devin:daily":
+		return slotPrimary, 1440
+	case "devin:weekly":
+		return slotSecondary, 10080
 	}
 	return slotNone, 0
 }
