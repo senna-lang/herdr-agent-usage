@@ -108,6 +108,26 @@ func formatCacheTTL(seconds int64) string {
 	return fmt.Sprintf("%dm", minutes)
 }
 
+// FormatSidebarCountdown renders a reset countdown in the sidebar's compact
+// style: days once it is a day or more ("12d"), else hours ("3h"), else
+// minutes ("45m"). Returns "" for a non-positive delta.
+func FormatSidebarCountdown(seconds int64) string {
+	if seconds <= 0 {
+		return ""
+	}
+	if seconds >= 86400 {
+		return fmt.Sprintf("%dd", int(math.Round(float64(seconds)/86400)))
+	}
+	if seconds >= 3600 {
+		return fmt.Sprintf("%dh", int(math.Round(float64(seconds)/3600)))
+	}
+	minutes := int(math.Round(float64(seconds) / 60))
+	if minutes < 1 {
+		minutes = 1
+	}
+	return fmt.Sprintf("%dm", minutes)
+}
+
 // CacheHitBand is which styled sidebar token should carry the hit-rate row.
 type CacheHitBand string
 

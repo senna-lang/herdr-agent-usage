@@ -37,6 +37,9 @@ type PluginConfig struct {
 	// CacheDisplay controls both sidebar cache tokens and the Agent Usage pane's
 	// red-band cache warning.
 	CacheDisplay bool
+	// SidebarWindows selects the $limit presentation: "shortest" (default, the
+	// numerically tightest window) or "all" (every present window on one row).
+	SidebarWindows string
 	// ClaudeProfiles are the configured [[claude.profiles]] entries (unresolved).
 	// Empty means the single implicit "claude" profile is synthesized downstream.
 	ClaudeProfiles []claude.ProfileSpec
@@ -53,6 +56,27 @@ var DefaultPluginConfig = PluginConfig{
 	NotifyEnabled:       true,
 	LimitPercent:        core.LimitPercentRemaining,
 	CacheDisplay:        true,
+	SidebarWindows:      SidebarWindowsShortest,
+}
+
+// Sidebar $limit presentation modes.
+const (
+	SidebarWindowsShortest = "shortest"
+	SidebarWindowsAll      = "all"
+	SidebarWindowsCompact  = "compact"
+)
+
+// NormalizeSidebarWindows maps a config value to a known mode, defaulting to
+// "shortest" for anything unrecognised.
+func NormalizeSidebarWindows(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case SidebarWindowsAll:
+		return SidebarWindowsAll
+	case SidebarWindowsCompact:
+		return SidebarWindowsCompact
+	default:
+		return SidebarWindowsShortest
+	}
 }
 
 // pluginConfigWire mirrors the on-disk TOML shape for decoding.
@@ -62,8 +86,9 @@ type pluginConfigWire struct {
 		RemainingThresholds []int `toml:"remaining_thresholds"`
 	} `toml:"notify"`
 	UI struct {
-		LimitPercent *string `toml:"limit_percent"`
-		CacheDisplay *bool   `toml:"cache_display"`
+		LimitPercent   *string `toml:"limit_percent"`
+		CacheDisplay   *bool   `toml:"cache_display"`
+		SidebarWindows *string `toml:"sidebar_windows"`
 	} `toml:"ui"`
 	Claude struct {
 		Profiles []profileWire `toml:"profiles"`
@@ -151,6 +176,10 @@ func DefaultPluginConfigTOML(config PluginConfig) string {
 		`limit_percent = "` + string(core.ParseLimitPercent(string(config.LimitPercent))) + `"`,
 		"# Set false to hide cache data from both sidebar and Agent Usage.",
 		"cache_display = " + strconv.FormatBool(config.CacheDisplay),
+		"# Sidebar $limit row: shortest (default) shows the tightest window only;",
+		"# all shows every window tagged (5h 72% · 7d 90% · 30d 41%);",
+		"# compact shows bare percentages (72%/90%/41%) when space is tight.",
+		`sidebar_windows = "` + NormalizeSidebarWindows(config.SidebarWindows) + `"`,
 		"",
 		"# Multi-account Claude: uncomment and add one block per account.",
 
@@ -244,6 +273,9 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 	}
 	if wire.UI.CacheDisplay != nil {
 		cfg.CacheDisplay = *wire.UI.CacheDisplay
+	}
+	if wire.UI.SidebarWindows != nil {
+		cfg.SidebarWindows = NormalizeSidebarWindows(*wire.UI.SidebarWindows)
 	}
 
 	for _, p := range wire.Claude.Profiles {
