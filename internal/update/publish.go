@@ -12,8 +12,6 @@
 package update
 
 import (
-	"strings"
-
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
 	"github.com/senna-lang/herdr-agent-usage/internal/herdrcli"
 	"github.com/senna-lang/herdr-agent-usage/internal/limits"
@@ -93,39 +91,11 @@ func tokenValue(tokens map[string]string, name string) string {
 	return tokens[name]
 }
 
-// replaceContextLimitPrefix updates the limit segment parked on $context for
-// multi-profile panes without recomputing the context meter. It is the legacy
-// fallback for panes not yet publishing $context_meter: it treats the first
-// " · " as the prefix boundary, which only holds for single-window limit
-// text. Prefer contextWithLimitPrefix.
-func replaceContextLimitPrefix(current, limitText string) string {
-	if limitText == "" {
-		return current
-	}
-	if current == "" {
-		return limitText
-	}
-	if i := strings.Index(current, " · "); i >= 0 {
-		return limitText + current[i:]
-	}
-	if strings.Contains(current, "⛁") || strings.Contains(current, "compacted") {
-		return limitText + " · " + current
-	}
-	return limitText
-}
-
-// contextWithLimitPrefix rebuilds a multi-profile pane's $context row from
-// fresh limit text and the pane's context meter. The event path publishes the
-// raw meter on the internal $context_meter token, so the row is re-joined
-// without parsing: multi-window limit text ("5h 72% · 7d 30%") carries its own
-// " · " separators, so the first-separator parse in replaceContextLimitPrefix
-// would cut the prefix in half and stack stale windows on every refresh.
-// Panes predating the meter token fall back to that parse.
+// contextWithLimitPrefix rebuilds the row from fresh limits and the recorded
+// meter only. Missing meters stay absent until an event supplies one; parsing
+// the combined row would retain stale windows in all/compact mode.
 func contextWithLimitPrefix(tokens map[string]string, limitText string) string {
-	if meter := tokenValue(tokens, "context_meter"); meter != "" {
-		return combineLimitAndContext(limitText, meter)
-	}
-	return replaceContextLimitPrefix(tokenValue(tokens, "context"), limitText)
+	return combineLimitAndContext(limitText, tokenValue(tokens, "context_meter"))
 }
 
 func applyLimitPublishTargets(writer metadataTokenWriter, panes []LimitPublishPane, targets []LimitPublishTarget) {

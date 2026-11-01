@@ -154,7 +154,7 @@ func TestLimitPublishTargets_MultiProfileMovesPercentToContext(t *testing.T) {
 		LimitsProviderID: "claude",
 		MultiProfile:     true,
 		AccountLabel:     "user@example.com",
-		Tokens:           map[string]string{"context": "5h 99% · ⛁ 14% (136k)"},
+		Tokens:           map[string]string{"context_meter": "⛁ 14% (136k)", "context": "5h 99% · ⛁ 14% (136k)"},
 	}}, 0, "")
 	if len(got) != 1 {
 		t.Fatalf("len=%d", len(got))
@@ -197,24 +197,6 @@ func TestLimitPublishTargets_UsedPercentInvertsSidebarNumber(t *testing.T) {
 	}}, 0, core.LimitPercentUsed)
 	if len(got) != 1 || got[0].LimitToken != "5h 28%" {
 		t.Fatalf("got %#v", got)
-	}
-}
-
-func TestReplaceContextLimitPrefix(t *testing.T) {
-	tests := []struct {
-		current, limit, want string
-	}{
-		{"", "5h 72%", "5h 72%"},
-		{"5h 99% · ⛁ 14% (136k)", "5h 72%", "5h 72% · ⛁ 14% (136k)"},
-		{"⛁ 14% (136k)", "5h 72%", "5h 72% · ⛁ 14% (136k)"},
-		{"compacted (120k)", "5h 72%", "5h 72% · compacted (120k)"},
-		{"5h 99%", "5h 72%", "5h 72%"},
-		{"5h 99% · 14%", "5h 72%", "5h 72% · 14%"},
-	}
-	for _, tt := range tests {
-		if got := replaceContextLimitPrefix(tt.current, tt.limit); got != tt.want {
-			t.Fatalf("current=%q limit=%q got=%q want=%q", tt.current, tt.limit, got, tt.want)
-		}
 	}
 }
 
@@ -375,27 +357,58 @@ func TestLimitPublishTargets_MultiProfileConsecutivePublishesKeepOnlyMeter(t *te
 	}
 }
 
-func TestLimitPublishTargets_MultiProfileLegacyPaneFallsBackToParse(t *testing.T) {
-	// A pane last written before $context_meter existed: first-separator parse
-	// still works for the single-window text the old version published.
-	pane := LimitPublishPane{
-		PaneID:           "w1:p1",
-		Resolved:         true,
-		BillingMode:      limits.BillingSubscription,
-		LimitsProviderID: "claude",
-		MultiProfile:     true,
-		AccountLabel:     "user@example.com",
-		Tokens:           map[string]string{"context": "5h 99% · ⛁ 14% (136k)"},
+func TestLimitPublishTargets_ConsecutivePublishesWithoutMeter(t *testing.T) {
+	tests := []struct {
+		mode       string
+		initial    string
+		wantFirst  string
+		wantSecond string
+	}{
+		{"all", "5h 72% · 7d 30% · ⛁ 14% (136k)", "5h 60% · 7d 20%", "5h 50% · 7d 10%"},
+		{"compact", "72% · 30% · ⛁ 14% (136k)", "60% · 20%", "50% · 10%"},
 	}
-	got := LimitPublishTargets([]limits.ProviderLimits{{
-		ProviderID: "claude",
-		Primary:    window(28, 300),
-	}}, []LimitPublishPane{pane}, 0, "")
-	if len(got) != 1 || got[0].ContextToken == nil {
-		t.Fatalf("got %#v", got)
-	}
-	want := "5h 72% · ⛁ 14% (136k)"
-	if *got[0].ContextToken != want {
-		t.Fatalf("context = %q, want %q", *got[0].ContextToken, want)
+	for _, tt := range tests {
+		for _, meterState := range []string{"absent", "empty"} {
+			t.Run(tt.mode+"/"+meterState, func(t *testing.T) {
+				limits.SetSidebarWindows(tt.mode)
+				t.Cleanup(func() { limits.SetSidebarWindows("shortest") })
+				tokens := map[string]string{"context": tt.initial}
+				if meterState == "empty" {
+					tokens["context_meter"] = ""
+				}
+				pane := LimitPublishPane{
+					PaneID:           "w1:p1",
+					Resolved:         true,
+					BillingMode:      limits.BillingSubscription,
+					LimitsProviderID: "claude",
+					MultiProfile:     true,
+					AccountLabel:     "personal",
+					Tokens:           tokens,
+				}
+				ticks := []struct {
+					usedShort float64
+					usedWeek  float64
+					want      string
+				}{
+					{40, 80, tt.wantFirst},
+					{50, 90, tt.wantSecond},
+				}
+				for i, tick := range ticks {
+					providers := []limits.ProviderLimits{{ProviderID: "claude", Primary: window(tick.usedShort, 300), Secondary: window(tick.usedWeek, 10080)}}
+					targets := LimitPublishTargets(providers, []LimitPublishPane{pane}, 0, "")
+					if len(targets) != 1 || targets[0].ContextToken == nil {
+						t.Fatalf("tick %d: missing context target: %#v", i+1, targets)
+					}
+					if targets[0].LimitToken != pane.AccountLabel {
+						t.Errorf("tick %d: account label = %q", i+1, targets[0].LimitToken)
+					}
+					got := *targets[0].ContextToken
+					if got != tick.want {
+						t.Errorf("tick %d: context = %q, want %q", i+1, got, tick.want)
+					}
+					pane.Tokens["context"] = got
+				}
+			})
+		}
 	}
 }

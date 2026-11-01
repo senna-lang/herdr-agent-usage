@@ -231,6 +231,11 @@ live sidebar width (0.8.x) that width is used, so a drag-resized sidebar is
 followed; on Herdr 0.9+ it is not reported, so `[ui] sidebar_width` from your
 Herdr config (default 26 columns) is used instead.
 
+On multi-account panes, the account label occupies the limit row and the
+current limits appear before the context meter. Until a context meter is
+available, the context row shows only the current limits; periodic refreshes
+never recover a meter from an older combined row.
+
 ### Plugin config
 
 ```bash
