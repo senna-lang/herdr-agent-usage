@@ -49,6 +49,10 @@ herdr server reload-config
 
 `herdr plugin install` provisions the `usagebar` binary via the manifest's `[[build]]` hook: it builds with the local Go toolchain (≥ 1.25) when available, and otherwise downloads a prebuilt binary from [GitHub Releases](https://github.com/senna-lang/herdr-agent-usage/releases) (macOS / Linux, arm64 / amd64). `usagebar.setup` repeats this resolution as a fallback for installs predating the build hook. To build manually instead, run `make build` in the plugin root.
 
+Release downloads are pinned to the version in `herdr-plugin.toml`: the binary and `SHA256SUMS` must come from that exact `v<version>` release. The installer requires `shasum` or `sha256sum` and verifies the selected file before making it executable or running it. Missing or invalid checksums, unavailable release assets, or verification failures abort installation without replacing the existing binary; a failed install hook lets Herdr retain the previous working installation. There is no automatic fallback to `latest`.
+
+For an unreleased checkout, install Go and run `make build` in that checkout, or select an explicit released ref with `herdr plugin install senna-lang/herdr-agent-usage --ref v<version>`. If verification fails, do not bypass it: check the release assets and retry, or build from source. These checksums detect corruption and artifact mix-ups relative to the release metadata; they do not independently authenticate a compromised publisher.
+
 ## Update
 
 On Herdr 0.9.4+:
