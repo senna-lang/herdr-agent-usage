@@ -24,7 +24,6 @@ const (
 )
 
 type devinCacheEntry = quotaCacheEntry
-type devinCacheOutcome = quotaCacheOutcome
 
 const (
 	devinOutcomeFetched = quotaOutcomeFetched

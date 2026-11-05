@@ -281,7 +281,7 @@ func fetchDevinUserStatus(serverURL, apiKey string) (*DevinPlanStatus, error) {
 	}
 	switch {
 	case response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden:
-		return nil, fmt.Errorf("Devin rejected the CLI credential (HTTP %d)", response.StatusCode)
+		return nil, fmt.Errorf("devin rejected the CLI credential (HTTP %d)", response.StatusCode)
 	case response.StatusCode < 200 || response.StatusCode >= 300:
 		return nil, fmt.Errorf("HTTP %d", response.StatusCode)
 	}
