@@ -166,12 +166,182 @@ verify_release_binary() {
   fi
 }
 
+# pid_listed succeeds when PID $1 is one of the PIDs in $2, a `ps -e -o pid=` listing.
+pid_listed() {
+  local want="$1" line
+  while IFS= read -r line; do
+    line="${line//[[:space:]]/}"
+    if [[ "$line" == "$want" ]]; then
+      return 0
+    fi
+  done <<< "$2"
+  return 1
+}
+
+# Staging directories are named .usagebar-download.<scope>.<owner-pid>.<random>,
+# where owner-pid is the staging subshell that created them (see
+# record_stage_owner), or .usagebar-download.unscoped.<random> when this host's
+# scope cannot be identified. The EXIT trap removes a staging directory on every
+# normal path; SIGKILL skips traps and can leave one behind.
+#
+# A PID means something only inside the PID namespace and boot that issued it,
+# and bin/ may be shared by installers in several namespaces. So the scope is
+# the boot plus, on Linux, the PID namespace: the kernel boot_id and the identity
+# of /proc/self/ns/pid. On macOS it is kern.bootsessionuuid. Only a directory
+# whose scope equals this installer's scope and whose owner is missing from this
+# namespace's process listing is removed. Everything else is kept: legacy names
+# (including the owner-only .usagebar-download.<pid>.<random> of earlier
+# development builds), unscoped names, other boots or namespaces, symlinks,
+# non-directories, directories this user does not own, and owners still listed
+# (a reused PID counts as live). Cleanup never fails the install: when the scope
+# or the process listing is unavailable, nothing is removed. On Linux the listing
+# is trusted only when /proc shows this installer's own PID namespace
+# (proc_view_is_caller_namespace).
+is_uuid() {
+  [[ "$1" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]
+}
+
+# stage_scope prints this host's scope, or fails when the boot or PID namespace
+# cannot be identified with a well-formed value. The scope is lowercase [a-z0-9-].
+stage_scope() {
+  local boot ns
+  case "$(uname -s)" in
+    Linux)
+      boot="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" || return 1
+      is_uuid "$boot" || return 1
+      ns="$(readlink /proc/self/ns/pid 2>/dev/null)" || return 1
+      [[ "$ns" =~ ^pid:\[([0-9]+)\]$ ]] || return 1
+      ns="${BASH_REMATCH[1]}"
+      boot="$(printf '%s' "$boot" | tr '[:upper:]' '[:lower:]')"
+      printf 'linux-%s-pidns%s\n' "$boot" "$ns"
+      ;;
+    Darwin)
+      boot="$(sysctl -n kern.bootsessionuuid 2>/dev/null)" || return 1
+      is_uuid "$boot" || return 1
+      boot="$(printf '%s' "$boot" | tr '[:upper:]' '[:lower:]')"
+      printf 'darwin-%s\n' "$boot"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# stage_owner_of prints the owner PID that staging name $2 records under scope $1.
+# It fails unless the name is exactly .usagebar-download.<scope>.<pid>.<6 alphanumerics>.
+stage_owner_of() {
+  local prefix=".usagebar-download.$1." rest
+  [[ "$2" == "$prefix"* ]] || return 1
+  rest="${2#"$prefix"}"
+  [[ "$rest" =~ ^([1-9][0-9]*)\.[A-Za-z0-9]{6}$ ]] || return 1
+  printf '%s\n' "${BASH_REMATCH[1]}"
+}
+
+# proc_view_is_caller_namespace succeeds only when the /proc this installer reads
+# shows its own PID namespace, so PIDs in a `ps -e` listing name the same processes
+# as $$. It requires /proc/self/ns/pid and /proc/$$/ns/pid to name the same
+# namespace, and exactly one NSpid line in /proc/$$/status whose fields are positive
+# integers and whose last (innermost) field is $$. Any unreadable or malformed value
+# fails the check. Values are read with external cat and readlink, so PATH shims can
+# exercise the check in tests.
+proc_view_is_caller_namespace() {
+  local self_ns caller_ns status line nspid="" count=0 last
+  local -a fields
+  self_ns="$(readlink /proc/self/ns/pid 2>/dev/null)" || return 1
+  caller_ns="$(readlink "/proc/$$/ns/pid" 2>/dev/null)" || return 1
+  [[ "$self_ns" =~ ^pid:\[[0-9]+\]$ && "$caller_ns" == "$self_ns" ]] || return 1
+  status="$(cat "/proc/$$/status" 2>/dev/null)" || return 1
+  while IFS= read -r line; do
+    if [[ "$line" == NSpid:* ]]; then
+      count=$((count + 1))
+      nspid="$line"
+    fi
+  done <<< "$status"
+  [[ "$count" -eq 1 ]] || return 1
+  [[ "$nspid" =~ ^NSpid:[[:space:]]+([1-9][0-9]*([[:space:]]+[1-9][0-9]*)*)[[:space:]]*$ ]] || return 1
+  read -r -a fields <<< "${BASH_REMATCH[1]}"
+  last=$((${#fields[@]} - 1))
+  [[ "${fields[last]}" == "$$" ]]
+}
+
+# reclaim_orphaned_stages removes the staging directories of scope $1 whose owner
+# is no longer listed. Call it only with a scope that stage_scope returned.
+reclaim_orphaned_stages() {
+  local scope="$1" dir name owner listing pending=""
+  for dir in "$ROOT/bin"/.usagebar-download.*; do
+    [[ -d "$dir" && ! -L "$dir" && -O "$dir" ]] || continue
+    name="${dir##*/}"
+    stage_owner_of "$scope" "$name" >/dev/null || continue
+    pending+="$name"$'\n'
+  done
+  [[ -n "$pending" ]] || return 0
+  # On Linux the listing names this namespace's PIDs only when /proc shows our own
+  # namespace, so an owner missing from the listing proves nothing otherwise.
+  case "$scope" in
+    linux-*) proc_view_is_caller_namespace || return 0 ;;
+  esac
+  # Read the directories before listing processes. A directory found here was
+  # created by an owner that was alive at that moment, so an owner missing from
+  # the later listing has exited.
+  listing="$(ps -e -o pid= 2>/dev/null)" || return 0
+  # Our own PID must appear, or the listing cannot be trusted.
+  pid_listed "$$" "$listing" || return 0
+  while IFS= read -r name; do
+    # pending ends with a newline and the here-string adds another, so the last
+    # record is empty. An empty name would make "$ROOT/bin/$name" the bin
+    # directory itself, so only a well-formed name may reach the process test or rm.
+    [[ -n "$name" ]] || continue
+    owner="$(stage_owner_of "$scope" "$name")" || continue
+    pid_listed "$owner" "$listing" && continue
+    rm -rf -- "$ROOT/bin/$name" 2>/dev/null || true
+  done <<< "$pending"
+  return 0
+}
+
+# Set the caller's stage_owner to the PID of the process running this function,
+# which must be the staging subshell: the process whose EXIT trap removes the
+# staging directory. $$ names the shell that forked the subshell, and Bash 3.2
+# has no BASHPID. So a direct child shell reports its $PPID, which is the
+# subshell, into a file inside a fresh private directory, and `read` takes the
+# value from that file. Command substitution is never used for the answer,
+# because it would name the substitution's own process. The child is not the
+# subshell's last command, so bash cannot exec-optimize it over the subshell.
+# The private probe directory is tried under $TMPDIR (when set), then /tmp, then
+# bin/ as a last resort, since bin/ must be writable for staging anyway. Each
+# probe directory is removed after use. Returns 1, before any staging directory
+# exists, when no owner PID is read from any location.
+#
+# Limitation: if the installer is SIGKILLed while its probe is inside bin/, that
+# leftover usagebar-owner.* directory is not swept. Its name carries no owner
+# PID, so it cannot be proven dead; it is left for the user to remove.
+record_stage_owner() {
+  local base probe_dir pid="" ok=""
+  for base in "${TMPDIR:-}" /tmp "$ROOT/bin"; do
+    [[ -n "$base" ]] || continue
+    probe_dir="$(mktemp -d "$base/usagebar-owner.XXXXXX" 2>/dev/null)" || continue
+    pid=""
+    ok=""
+    if "$BASH" -c 'printf "%s\n" "$PPID" > "$1"' _ "$probe_dir/pid"; then
+      if IFS= read -r pid < "$probe_dir/pid" && [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+        ok=1
+      fi
+    fi
+    rm -rf -- "$probe_dir" 2>/dev/null || true
+    if [[ -n "$ok" ]]; then
+      stage_owner="$pid"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Install the prebuilt binary of this checkout's exact release. The staging
 # directory sits beside the destination, so the final mv is an atomic rename
 # within bin/. The subshell's EXIT trap removes the staging directory on every
-# path, and the destination changes only after verification succeeds.
+# path, and the destination changes only after verification succeeds. SIGKILL
+# skips that trap; reclaim_orphaned_stages covers it when the scope is known.
 download_release_binary() {
-  local asset tag stage
+  local asset tag stage stage_owner scope=""
   if ! asset="$(release_asset_name)"; then
     echo "usagebar: no prebuilt release binary for this platform." >&2
     return 1
@@ -186,9 +356,23 @@ download_release_binary() {
     return 1
   fi
   mkdir -p "$ROOT/bin" || return 1
+  if scope="$(stage_scope)"; then
+    reclaim_orphaned_stages "$scope"
+  else
+    scope=""
+    echo "usagebar: cannot identify this host's boot and PID namespace; staging directories left by interrupted installs will not be reclaimed." >&2
+  fi
   echo "usagebar: downloading prebuilt binary ($asset from $tag)..." >&2
   (
-    stage="$(mktemp -d "$ROOT/bin/.usagebar-download.XXXXXX")" || exit 1
+    if [[ -n "$scope" ]]; then
+      if ! record_stage_owner; then
+        echo "usagebar: could not record the staging subshell's PID; not downloading." >&2
+        exit 1
+      fi
+      stage="$(mktemp -d "$ROOT/bin/.usagebar-download.$scope.$stage_owner.XXXXXX")" || exit 1
+    else
+      stage="$(mktemp -d "$ROOT/bin/.usagebar-download.unscoped.XXXXXX")" || exit 1
+    fi
     trap 'rm -rf "$stage"' EXIT
     verify_release_binary "$tag" "$asset" "$stage" &&
       mv -f "$stage/$asset" "$ROOT/bin/usagebar"

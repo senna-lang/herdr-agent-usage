@@ -10,8 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -27,12 +30,21 @@ const (
 	ensureTestAsset   = "usagebar-linux-amd64"
 	ensureOriginal    = "original"
 	ensureTestTimeout = 60 * time.Second
+	ensureWaitTimeout = 20 * time.Second
+
+	ensureTestBootID      = "6f1d2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b"
+	ensureTestPIDNS       = "pid:[4026531836]"
+	ensureTestSession     = "9A8B7C6D-5E4F-4A3B-9C2D-1E0F9A8B7C6D"
+	ensureTestScope       = "linux-" + ensureTestBootID + "-pidns4026531836"
+	ensureTestDarwinScope = "darwin-9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d"
+	ensureOtherBootScope  = "linux-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d-pidns4026531836"
+	ensureOtherPIDNSScope = "linux-" + ensureTestBootID + "-pidns4026531999"
 )
 
-// ensureBaseTools are the only host utilities the entrypoint may use. PATH is
-// otherwise the sandbox alone, so no host gh, go, usagebar, or digest tool
-// leaks into a case.
-var ensureBaseTools = []string{"awk", "chmod", "cp", "dirname", "mkdir", "mktemp", "mv", "rm", "tr"}
+// ensureBaseTools are the only host utilities the entrypoint and its shims may
+// use. PATH is otherwise the sandbox alone, so no host gh, go, usagebar, or
+// digest tool leaks into a case.
+var ensureBaseTools = []string{"awk", "chmod", "cp", "dirname", "mkdir", "mktemp", "mv", "ps", "rm", "sleep", "tr"}
 
 // ensureOpts selects which fakes the sandbox PATH provides.
 type ensureOpts struct {
@@ -45,6 +57,13 @@ type ensureOpts struct {
 	brokenSHA bool     // sha256sum shim that always exits 1
 	goShim    bool     // go shim that writes the source payload to -o
 	goFail    bool     // go shim that exits 1 without writing
+	psBroken  bool     // ps shim that always fails
+	psListing string   // ps -e -o pid= output served in place of the host ps; "" keeps the host ps
+	holdGh    bool     // gh shim blocks its first call until the test releases it
+	bootID    string   // boot_id served by cat; "" makes the scope unavailable
+	pidNS     string   // /proc/self/ns/pid target; "" makes the scope unavailable
+	session   string   // kern.bootsessionuuid served by sysctl; "" makes it unavailable
+	procView  string   // /proc view of the installer's own PID served by cat and readlink; "" and "nested-valid" are matching views, other named values inject one fault
 }
 
 func ensureReleaseOpts() ensureOpts {
@@ -53,12 +72,16 @@ func ensureReleaseOpts() ensureOpts {
 		gh:        true,
 		curl:      true,
 		verifiers: []string{"sha256sum"},
+		bootID:    ensureTestBootID,
+		pidNS:     ensureTestPIDNS,
+		session:   ensureTestSession,
 	}
 }
 
 type ensureRun struct {
 	code int
 	out  string
+	pid  int
 }
 
 type ensureSandbox struct {
@@ -72,6 +95,7 @@ type ensureSandbox struct {
 	curlLog   string
 	goLog     string
 	goPayload string
+	hold      string
 }
 
 func newEnsureSandbox(t *testing.T, o ensureOpts) *ensureSandbox {
@@ -92,10 +116,12 @@ func newEnsureSandbox(t *testing.T, o ensureOpts) *ensureSandbox {
 		curlLog:   filepath.Join(base, "curl.log"),
 		goLog:     filepath.Join(base, "go.log"),
 		goPayload: filepath.Join(base, "go-source-payload"),
+		hold:      filepath.Join(base, "hold"),
 	}
 	ensureMkdir(t, filepath.Join(sb.repo, "bin"))
 	ensureMkdir(t, sb.pathDir)
 	ensureMkdir(t, sb.store)
+	ensureMkdir(t, sb.hold)
 	sb.copyEntrypoint()
 	manifest := fmt.Sprintf("name = \"herdr-agent-usage\"\nversion = %q\n", o.version)
 	ensureWriteFile(t, filepath.Join(sb.repo, "herdr-plugin.toml"), []byte(manifest), 0o644)
@@ -131,11 +157,17 @@ func (sb *ensureSandbox) writeShims(o ensureOpts) {
 		unameS = "Linux"
 	}
 	sb.writeExecutable("uname", "#!/bin/sh\ncase \"$1\" in\n  -s) echo "+unameS+" ;;\n  -m) echo x86_64 ;;\nesac\n")
+	if o.psBroken {
+		sb.breakPS()
+	}
+	if o.psListing != "" {
+		sb.servePS(o.psListing)
+	}
 	for _, name := range o.verifiers {
 		sb.linkVerifier(name, o.brokenSHA)
 	}
 	if o.gh {
-		sb.writeGhShim(o.ghBroken)
+		sb.writeGhShim(o.ghBroken, o.holdGh)
 	}
 	if o.curl {
 		sb.writeCurlShim()
@@ -143,6 +175,47 @@ func (sb *ensureSandbox) writeShims(o ensureOpts) {
 	if o.goShim {
 		sb.writeGoShim(o.goFail)
 	}
+	sb.writeScopeShims(o)
+}
+
+// writeScopeShims serves the boot, PID-namespace, and /proc identity that
+// stage_scope and proc_view_is_caller_namespace read. Each shim answers only the
+// exact queries the installer makes and fails on an empty value, as the real
+// source does when the identity is unavailable. o.procView selects the /proc
+// view of the installer's own PID: "" and "nested-valid" serve matching views,
+// and each other named value injects one fault that the installer must reject.
+func (sb *ensureSandbox) writeScopeShims(o ensureOpts) {
+	sb.writeExecutable("cat", `#!/bin/sh
+case "$1" in
+  /proc/sys/kernel/random/boot_id) [ -n '`+o.bootID+`' ] || exit 1; echo '`+o.bootID+`' ;;
+  /proc/*/status)
+    pid="${1#/proc/}"; pid="${pid%/status}"
+    case "$pid" in ''|*[!0-9]*) exit 1 ;; esac
+    case '`+o.procView+`' in
+      status-unreadable) exit 1 ;;
+      status-no-nspid) printf 'Name:\tinstaller\nPid:\t%s\n' "$pid" ;;
+      status-two-nspid) printf 'NSpid:\t%s\t1\nNSpid:\t%s\n' "$pid" "$pid" ;;
+      nspid-mismatch) printf 'NSpid:\t%s\t1\n' "$pid" ;;
+      nspid-malformed) printf 'NSpid:\t%s\tzero\n' "$pid" ;;
+      nested-valid) printf 'NSpid:\t%s\t%s\n' "$((pid + 1000))" "$pid" ;;
+      *) printf 'NSpid:\t%s\n' "$pid" ;;
+    esac ;;
+  *) exit 1 ;;
+esac
+`)
+	sb.writeExecutable("readlink", `#!/bin/sh
+case "$1" in
+  /proc/self/ns/pid) [ -n '`+o.pidNS+`' ] || exit 1; echo '`+o.pidNS+`' ;;
+  /proc/*/ns/pid)
+    case '`+o.procView+`' in
+      ns-unreadable) exit 1 ;;
+      ns-differs) echo 'pid:[1]' ;;
+      *) [ -n '`+o.pidNS+`' ] || exit 1; echo '`+o.pidNS+`' ;;
+    esac ;;
+  *) exit 1 ;;
+esac
+`)
+	sb.writeExecutable("sysctl", "#!/bin/sh\n[ \"$1 $2\" = \"-n kern.bootsessionuuid\" ] && [ -n '"+o.session+"' ] || exit 1\necho '"+o.session+"'\n")
 }
 
 func (sb *ensureSandbox) linkVerifier(name string, broken bool) {
@@ -188,9 +261,18 @@ func ensureHostSHA256(t *testing.T) (string, string) {
 }
 
 // writeGhShim serves "gh release download <tag> --pattern <asset> -O <dest>"
-// from the release store and logs every invocation.
-func (sb *ensureSandbox) writeGhShim(broken bool) {
+// from the release store and logs every invocation. With hold set, the first
+// call blocks until the test writes the release file, so the test can act
+// while the download is in flight.
+func (sb *ensureSandbox) writeGhShim(broken, hold bool) {
 	body := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + ensureShQuote(sb.ghLog) + "\n"
+	if hold {
+		body += "if mkdir " + ensureShQuote(sb.hold) + "/taken 2>/dev/null; then\n" +
+			"  : > " + ensureShQuote(sb.hold) + "/ready\n" +
+			"  i=0\n" +
+			"  while [ ! -e " + ensureShQuote(sb.hold) + "/release ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done\n" +
+			"fi\n"
+	}
 	if broken {
 		body += "exit 1\n"
 	} else {
@@ -236,6 +318,25 @@ func (sb *ensureSandbox) writeGoShim(broken bool) {
 	sb.writeExecutable("go", body)
 }
 
+// breakPS swaps the linked host ps for a shim that always fails. The link is
+// removed first, because writing through it would overwrite the host binary.
+func (sb *ensureSandbox) breakPS() {
+	if err := os.Remove(filepath.Join(sb.pathDir, "ps")); err != nil {
+		sb.t.Fatalf("unlink ps: %v", err)
+	}
+	sb.writeExecutable("ps", "#!/bin/sh\nexit 1\n")
+}
+
+// servePS swaps the linked host ps for a shim that answers only the installer's
+// `ps -e -o pid=` query with the given listing. The link is removed first, as in
+// breakPS.
+func (sb *ensureSandbox) servePS(listing string) {
+	if err := os.Remove(filepath.Join(sb.pathDir, "ps")); err != nil {
+		sb.t.Fatalf("unlink ps: %v", err)
+	}
+	sb.writeExecutable("ps", "#!/bin/sh\n[ \"$*\" = '-e -o pid=' ] || exit 1\nprintf '%s' "+ensureShQuote(listing)+"\n")
+}
+
 func (sb *ensureSandbox) writeExecutable(name, body string) {
 	ensureWriteFile(sb.t, filepath.Join(sb.pathDir, name), []byte(body), 0o755)
 }
@@ -271,13 +372,13 @@ func (sb *ensureSandbox) run(env []string, args ...string) ensureRun {
 		sb.t.Fatalf("ensure-binary timed out after %s; output:\n%s", ensureTestTimeout, out)
 	}
 	if err == nil {
-		return ensureRun{code: 0, out: string(out)}
+		return ensureRun{code: 0, out: string(out), pid: cmd.Process.Pid}
 	}
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
 		sb.t.Fatalf("run ensure-binary: %v", err)
 	}
-	return ensureRun{code: exitErr.ExitCode(), out: string(out)}
+	return ensureRun{code: exitErr.ExitCode(), out: string(out), pid: cmd.Process.Pid}
 }
 
 func (sb *ensureSandbox) assertExit(r ensureRun, want int) {
@@ -427,7 +528,12 @@ func ensurePayload(label string, exit int) []byte {
 // ensureSums returns a SHA256SUMS line for the test asset. sep is "  " for text
 // mode or " *" for binary mode.
 func ensureSums(payload []byte, sep string) []byte {
-	return []byte(ensureSha256Hex(payload) + sep + ensureTestAsset + "\n")
+	return ensureSumsFor(ensureTestAsset, payload, sep)
+}
+
+// ensureSumsFor is ensureSums for an asset other than the Linux test asset.
+func ensureSumsFor(asset string, payload []byte, sep string) []byte {
+	return []byte(ensureSha256Hex(payload) + sep + asset + "\n")
 }
 
 func ensureSha256Hex(data []byte) string {
@@ -850,4 +956,560 @@ func TestEnsureBinary_InTreeInstallIgnoresOverrideAndPathBinary(t *testing.T) {
 	sb.assertSanityRunOnly()
 	sb.assertBinEntries("usagebar")
 	sb.assertExactTagRequests()
+}
+
+// seedStage creates a staging directory holding a partial download, the
+// leftover a SIGKILLed install leaves behind. It returns the partial file.
+func (sb *ensureSandbox) seedStage(name string) string {
+	sb.t.Helper()
+	dir := filepath.Join(sb.repo, "bin", name)
+	ensureMkdir(sb.t, dir)
+	partial := filepath.Join(dir, "partial")
+	ensureWriteFile(sb.t, partial, []byte("partial"), 0o644)
+	return partial
+}
+
+// startLiveProcess runs a host sleep until the test ends, standing in for an
+// installer that is still running. It returns the process ID.
+func startLiveProcess(t *testing.T) int {
+	t.Helper()
+	sleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skipf("host sleep not available: %v", err)
+	}
+	cmd := exec.Command(sleep, "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start live process: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	return cmd.Process.Pid
+}
+
+// stageDirName returns the staging directory name the installer gives a
+// download by owner PID owner in scope.
+func stageDirName(scope string, owner int, random string) string {
+	return fmt.Sprintf(".usagebar-download.%s.%d.%s", scope, owner, random)
+}
+
+// TestEnsureBinary_ReclaimsStageOfDeadInstaller uses owner PID 99999999, which
+// exceeds every platform's PID range (macOS caps PIDs at 99999, Linux at
+// 4194304), so no live process can own it.
+func TestEnsureBinary_ReclaimsStageOfDeadInstaller(t *testing.T) {
+	sb := newEnsureSandbox(t, ensureReleaseOpts())
+	sb.seedStage(stageDirName(ensureTestScope, 99999999, "ABCDEF"))
+	payload := ensurePayload("release", 0)
+	sb.publish(ensureTestTag, ensureTestAsset, payload)
+	sb.publish(ensureTestTag, "SHA256SUMS", ensureSums(payload, "  "))
+
+	r := sb.run(nil, "--in-tree")
+	sb.assertExit(r, 0)
+	sb.assertInstalled(string(payload))
+	sb.assertSanityRunOnly()
+	sb.assertBinEntries("usagebar")
+	sb.assertExactTagRequests()
+}
+
+func TestEnsureBinary_ReclaimsStageOfDeadInstallerOnDarwin(t *testing.T) {
+	o := ensureReleaseOpts()
+	o.unameS = "Darwin"
+	sb := newEnsureSandbox(t, o)
+	const asset = "usagebar-darwin-amd64"
+	sb.seedStage(stageDirName(ensureTestDarwinScope, 99999999, "ABCDEF"))
+	payload := ensurePayload("release", 0)
+	sb.publish(ensureTestTag, asset, payload)
+	sb.publish(ensureTestTag, "SHA256SUMS", ensureSumsFor(asset, payload, "  "))
+
+	r := sb.run(nil, "--in-tree")
+	sb.assertExit(r, 0)
+	sb.assertInstalled(string(payload))
+	sb.assertBinEntries("usagebar")
+}
+
+// TestEnsureBinary_KeepsStageOfLiveInstaller checks that a stage whose owner
+// PID is alive in this scope is not touched.
+func TestEnsureBinary_KeepsStageOfLiveInstaller(t *testing.T) {
+	sb := newEnsureSandbox(t, ensureReleaseOpts())
+	stage := stageDirName(ensureTestScope, startLiveProcess(t), "ABCDEF")
+	partial := sb.seedStage(stage)
+	payload := ensurePayload("release", 0)
+	sb.publish(ensureTestTag, ensureTestAsset, payload)
+	sb.publish(ensureTestTag, "SHA256SUMS", ensureSums(payload, "  "))
+
+	r := sb.run(nil, "--in-tree")
+	sb.assertExit(r, 0)
+	sb.assertInstalled(string(payload))
+	sb.assertBinEntries("usagebar", stage)
+	if _, err := os.Stat(partial); err != nil {
+		t.Fatalf("live installer's staging directory was touched: %v", err)
+	}
+}
+
+// TestEnsureBinary_KeepsStagesOfOtherBootsAndNamespaces checks that a PID is
+// judged only inside the scope that issued it. Each owner here is absent from
+// this namespace's process listing, but its PID may be live in the boot or PID
+// namespace that created the stage.
+func TestEnsureBinary_KeepsStagesOfOtherBootsAndNamespaces(t *testing.T) {
+	sb := newEnsureSandbox(t, ensureReleaseOpts())
+	stages := []string{
+		stageDirName(ensureOtherBootScope, 99999999, "ABCDEF"),
+		stageDirName(ensureOtherPIDNSScope, 99999999, "GHIJKL"),
+		stageDirName(ensureTestDarwinScope, 99999999, "MNOPQR"),
+	}
+	var partials []string
+	for _, stage := range stages {
+		partials = append(partials, sb.seedStage(stage))
+	}
+	payload := ensurePayload("release", 0)
+	sb.publish(ensureTestTag, ensureTestAsset, payload)
+	sb.publish(ensureTestTag, "SHA256SUMS", ensureSums(payload, "  "))
+
+	r := sb.run(nil, "--in-tree")
+	sb.assertExit(r, 0)
+	sb.assertInstalled(string(payload))
+	sb.assertBinEntries(append([]string{"usagebar"}, stages...)...)
+	for _, partial := range partials {
+		if _, err := os.Stat(partial); err != nil {
+			t.Fatalf("stage of another scope was removed: %v", err)
+		}
+	}
+}
+
+// TestEnsureBinary_KeepsEntriesThatCannotBeProvenDead covers the entries the
+// reclaim rule must never touch: legacy and owner-only names, unscoped names,
+// non-canonical owners, symlinks, and regular files.
+func TestEnsureBinary_KeepsEntriesThatCannotBeProvenDead(t *testing.T) {
+	sb := newEnsureSandbox(t, ensureReleaseOpts())
+	legacyName := ".usagebar-download.ABCDEF"
+	ownerOnlyName := ".usagebar-download.99999999.ABCDEF"
+	unscopedName := ".usagebar-download.unscoped.GHIJKL"
+	noncanonicalName := fmt.Sprintf(".usagebar-download.%s.0099.STUVWX", ensureTestScope)
+	fileName := stageDirName(ensureTestScope, 99999999, "MNOPQR")
+	linkName := stageDirName(ensureTestScope, 99999999, "YZABCD")
+	legacy := sb.seedStage(legacyName)
+	ownerOnly := sb.seedStage(ownerOnlyName)
+	unscoped := sb.seedStage(unscopedName)
+	noncanonical := sb.seedStage(noncanonicalName)
+	file := filepath.Join(sb.repo, "bin", fileName)
+	ensureWriteFile(t, file, []byte("file"), 0o644)
+	target := t.TempDir()
+	keep := filepath.Join(target, "keep")
+	ensureWriteFile(t, keep, []byte("keep"), 0o644)
+	if err := os.Symlink(target, filepath.Join(sb.repo, "bin", linkName)); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	payload := ensurePayload("release", 0)
+	sb.publish(ensureTestTag, ensureTestAsset, payload)
+	sb.publish(ensureTestTag, "SHA256SUMS", ensureSums(payload, "  "))
+
+	r := sb.run(nil, "--in-tree")
+	sb.assertExit(r, 0)
+	sb.assertInstalled(string(payload))
+	sb.assertBinEntries("usagebar", legacyName, ownerOnlyName, unscopedName, noncanonicalName, fileName, linkName)
+	for _, path := range []string{legacy, ownerOnly, unscoped, noncanonical, file, keep} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("entry was removed: %v", err)
+		}
+	}
+}
+
+// TestEnsureBinary_UnavailableScopeNeverReclaims checks that without a
+// well-formed boot identity nothing is reclaimed, even a stage whose owner is
+// dead in the scope it would have had. The install stages under the unscoped
+// name, which is never reclaimed.
+func TestEnsureBinary_UnavailableScopeNeverReclaims(t *testing.T) {
+	o := ensureReleaseOpts()
+	o.bootID = ""
+	sb := newEnsureSandbox(t, o)
+	dead := stageDirName(ensureTestScope, 99999999, "ABCDEF")
+	partial := sb.seedStage(dead)
+	payload := ensurePayload("release", 0)
+	sb.publish(ensureTestTag, ensureTestAsset, payload)
+	sb.publish(ensureTestTag, "SHA256SUMS", ensureSums(payload, "  "))
+
+	r := sb.run(nil, "--in-tree")
+	sb.assertExit(r, 0)
+	sb.assertInstalled(string(payload))
+	sb.assertBinEntries("usagebar", dead)
+	if _, err := os.Stat(partial); err != nil {
+		t.Fatalf("stage was reclaimed without a scope: %v", err)
+	}
+	if !strings.Contains(r.out, "cannot identify this host's boot and PID namespace") {
+		t.Fatalf("output does not report the unavailable scope:\n%s", r.out)
+	}
+	unscoped := false
+	for _, line := range sb.requestLines(sb.ghLog) {
+		if strings.Contains(line, "/.usagebar-download.unscoped.") {
+			unscoped = true
+		}
+	}
+	if !unscoped {
+		t.Fatalf("download did not stage under the unscoped name; gh log:\n%q", sb.requestLines(sb.ghLog))
+	}
+}
+
+// TestEnsureBinary_MalformedScopeIdentityNeverReclaims checks that a boot ID,
+// PID namespace, or session UUID that is not well-formed leaves the scope
+// unavailable, so nothing is reclaimed. The stage name in each case is the
+// scope a reader of the bad value would have built.
+func TestEnsureBinary_MalformedScopeIdentityNeverReclaims(t *testing.T) {
+	cases := []struct {
+		name  string
+		edit  func(*ensureOpts)
+		asset string
+		scope string
+	}{
+		{"boot_id not a UUID", func(o *ensureOpts) { o.bootID = "not-a-uuid" }, ensureTestAsset, "linux-not-a-uuid-pidns4026531836"},
+		{"boot_id with trailing junk", func(o *ensureOpts) { o.bootID = ensureTestBootID + "x" }, ensureTestAsset, "linux-" + ensureTestBootID + "x-pidns4026531836"},
+		{"pid namespace without pid:[] form", func(o *ensureOpts) { o.pidNS = "4026531836" }, ensureTestAsset, ensureTestScope},
+		{"pid namespace unavailable", func(o *ensureOpts) { o.pidNS = "" }, ensureTestAsset, ensureTestScope},
+		{"darwin session not a UUID", func(o *ensureOpts) {
+			o.unameS = "Darwin"
+			o.session = "not-a-uuid"
+		}, "usagebar-darwin-amd64", "darwin-not-a-uuid"},
+		{"darwin session unavailable", func(o *ensureOpts) {
+			o.unameS = "Darwin"
+			o.session = ""
+		}, "usagebar-darwin-amd64", ensureTestDarwinScope},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o := ensureReleaseOpts()
+			tc.edit(&o)
+			sb := newEnsureSandbox(t, o)
+			dead := stageDirName(tc.scope, 99999999, "ABCDEF")
+			partial := sb.seedStage(dead)
+			payload := ensurePayload("release", 0)
+			sb.publish(ensureTestTag, tc.asset, payload)
+			sb.publish(ensureTestTag, "SHA256SUMS", ensureSumsFor(tc.asset, payload, "  "))
+
+			r := sb.run(nil, "--in-tree")
+			sb.assertExit(r, 0)
+			sb.assertInstalled(string(payload))
+			sb.assertBinEntries("usagebar", dead)
+			if _, err := os.Stat(partial); err != nil {
+				t.Fatalf("stage %s was reclaimed: %v", dead, err)
+			}
+		})
+	}
+}
+
+// TestEnsureBinary_KeepsStagesWhenProcessListingFails checks that cleanup never
+// blocks the install: with ps broken, a dead owner's directory is kept.
+func TestEnsureBinary_KeepsStagesWhenProcessListingFails(t *testing.T) {
+	o := ensureReleaseOpts()
+	o.psBroken = true
+	sb := newEnsureSandbox(t, o)
+	dead := stageDirName(ensureTestScope, 99999999, "ABCDEF")
+	sb.seedStage(dead)
+	payload := ensurePayload("release", 0)
+	sb.publish(ensureTestTag, ensureTestAsset, payload)
+	sb.publish(ensureTestTag, "SHA256SUMS", ensureSums(payload, "  "))
+
+	r := sb.run(nil, "--in-tree")
+	sb.assertExit(r, 0)
+	sb.assertInstalled(string(payload))
+	sb.assertBinEntries("usagebar", dead)
+}
+
+// TestEnsureBinary_KeepsStageWhenListingOmitsInstaller checks that a process
+// listing which succeeds but does not contain the installer's own PID is not
+// trusted, so a dead owner's stage is kept on both Linux and Darwin. The listing
+// names only PID 1, so the owner is absent from it too; only the installer-PID
+// check separates this case from a reclaim.
+func TestEnsureBinary_KeepsStageWhenListingOmitsInstaller(t *testing.T) {
+	cases := []struct {
+		name   string
+		unameS string
+		asset  string
+		scope  string
+	}{
+		{"linux", "", ensureTestAsset, ensureTestScope},
+		{"darwin", "Darwin", "usagebar-darwin-amd64", ensureTestDarwinScope},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o := ensureReleaseOpts()
+			o.unameS = tc.unameS
+			o.psListing = "1\n"
+			sb := newEnsureSandbox(t, o)
+			dead := stageDirName(tc.scope, 99999999, "ABCDEF")
+			partial := sb.seedStage(dead)
+			payload := ensurePayload("release", 0)
+			sb.publish(ensureTestTag, tc.asset, payload)
+			sb.publish(ensureTestTag, "SHA256SUMS", ensureSumsFor(tc.asset, payload, "  "))
+
+			r := sb.run(nil, "--in-tree")
+			sb.assertExit(r, 0)
+			sb.assertInstalled(string(payload))
+			sb.assertBinEntries("usagebar", dead)
+			if _, err := os.Stat(partial); err != nil {
+				t.Fatalf("stage %s was reclaimed: %v", dead, err)
+			}
+		})
+	}
+}
+
+// TestEnsureBinary_ProcViewGatesStageReclaim checks that a dead owner's stage is
+// reclaimed only when /proc shows the installer's own PID namespace. The owner is
+// absent from the process listing while the installer's PID is present in it, the
+// combination a bind-mounted /proc from another namespace produces. Every fault
+// leaves the stage in place and the install still succeeds.
+func TestEnsureBinary_ProcViewGatesStageReclaim(t *testing.T) {
+	cases := []struct {
+		name      string
+		procView  string
+		reclaimed bool
+	}{
+		{"matching view reclaims", "", true},
+		{"nested namespace view reclaims", "nested-valid", true},
+		{"caller namespace differs", "ns-differs", false},
+		{"caller namespace unreadable", "ns-unreadable", false},
+		{"status unreadable", "status-unreadable", false},
+		{"status without NSpid", "status-no-nspid", false},
+		{"status with two NSpid lines", "status-two-nspid", false},
+		{"innermost NSpid is not the installer PID", "nspid-mismatch", false},
+		{"malformed NSpid", "nspid-malformed", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o := ensureReleaseOpts()
+			o.procView = tc.procView
+			sb := newEnsureSandbox(t, o)
+			dead := stageDirName(ensureTestScope, 99999999, "ABCDEF")
+			partial := sb.seedStage(dead)
+			payload := ensurePayload("release", 0)
+			sb.publish(ensureTestTag, ensureTestAsset, payload)
+			sb.publish(ensureTestTag, "SHA256SUMS", ensureSums(payload, "  "))
+
+			r := sb.run(nil, "--in-tree")
+			sb.assertExit(r, 0)
+			sb.assertInstalled(string(payload))
+			if tc.reclaimed {
+				sb.assertBinEntries("usagebar")
+				return
+			}
+			sb.assertBinEntries("usagebar", dead)
+			if _, err := os.Stat(partial); err != nil {
+				t.Fatalf("stage was reclaimed without a verified PID namespace: %v", err)
+			}
+		})
+	}
+}
+
+// ensureStageName matches a scoped staging directory name and captures its
+// scope and owner PID.
+var ensureStageName = regexp.MustCompile(`^\.usagebar-download\.([a-z0-9-]+)\.([1-9][0-9]*)\.[A-Za-z0-9]{6}$`)
+
+// stageOwnerPID returns the owner PID encoded in a scoped staging directory
+// name of this sandbox's scope.
+func stageOwnerPID(t *testing.T, stage string) int {
+	t.Helper()
+	m := ensureStageName.FindStringSubmatch(stage)
+	if m == nil {
+		t.Fatalf("%q is not a scoped staging directory", stage)
+	}
+	if m[1] != ensureTestScope {
+		t.Fatalf("%q has scope %q, want %q", stage, m[1], ensureTestScope)
+	}
+	pid, err := strconv.Atoi(m[2])
+	if err != nil {
+		t.Fatalf("parse owner PID of %q: %v", stage, err)
+	}
+	return pid
+}
+
+// TestEnsureBinary_StagesAreOwnedByStagingSubshell checks that a staging
+// directory is named after the subshell that downloads into it, not after the
+// installer shell that spawned that subshell. The payload runs directly from
+// the subshell, so its PPID is the owner the directory name must carry.
+func TestEnsureBinary_StagesAreOwnedByStagingSubshell(t *testing.T) {
+	sb := newEnsureSandbox(t, ensureReleaseOpts())
+	payload := []byte("#!/bin/sh\nd=\"${0%/*}\"\nprintf '%s %s\\n' \"$PPID\" \"${d##*/}\" >> \"$ENSURE_TEST_MARKER\"\nexit 0\n")
+	sb.publish(ensureTestTag, ensureTestAsset, payload)
+	sb.publish(ensureTestTag, "SHA256SUMS", ensureSums(payload, "  "))
+
+	r := sb.run(nil, "--in-tree")
+	sb.assertExit(r, 0)
+	sb.assertInstalled(string(payload))
+	data, err := os.ReadFile(sb.marker)
+	if err != nil {
+		t.Fatalf("payload never ran: %v", err)
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) != 2 {
+		t.Fatalf("payload marker = %q, want \"<ppid> <stage>\"", data)
+	}
+	ppid, err := strconv.Atoi(fields[0])
+	if err != nil {
+		t.Fatalf("payload PPID %q: %v", fields[0], err)
+	}
+	if ppid == r.pid {
+		t.Fatalf("payload ran under installer shell %d; it must run under the staging subshell", r.pid)
+	}
+	if owner := stageOwnerPID(t, fields[1]); owner != ppid {
+		t.Fatalf("staging directory %s is owned by PID %d, but the staging subshell is %d", fields[1], owner, ppid)
+	}
+	sb.assertBinEntries("usagebar")
+}
+
+// startInstaller runs the entrypoint in the background without waiting for it.
+// Output goes to a file, so a killed installer's orphaned children cannot hold
+// a pipe open and block Wait.
+func (sb *ensureSandbox) startInstaller(args ...string) *exec.Cmd {
+	sb.t.Helper()
+	logFile, err := os.Create(filepath.Join(filepath.Dir(sb.repo), "installer.log"))
+	if err != nil {
+		sb.t.Fatalf("create installer log: %v", err)
+	}
+	sb.t.Cleanup(func() { _ = logFile.Close() })
+	script := filepath.Join(sb.repo, "bin", "ensure-binary.sh")
+	cmd := exec.Command(sb.bash, append([]string{script}, args...)...)
+	cmd.Dir = sb.repo
+	cmd.Env = []string{"PATH=" + sb.pathDir, "ENSURE_TEST_MARKER=" + sb.marker}
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	if err := cmd.Start(); err != nil {
+		sb.t.Fatalf("start ensure-binary: %v", err)
+	}
+	return cmd
+}
+
+// soleStage returns the single staging directory in bin/, failing otherwise.
+func (sb *ensureSandbox) soleStage() string {
+	sb.t.Helper()
+	entries, err := os.ReadDir(filepath.Join(sb.repo, "bin"))
+	if err != nil {
+		sb.t.Fatalf("read bin/: %v", err)
+	}
+	var stages []string
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".usagebar-download.") {
+			stages = append(stages, entry.Name())
+		}
+	}
+	if len(stages) != 1 {
+		sb.t.Fatalf("staging directories = %v, want exactly one", stages)
+	}
+	return stages[0]
+}
+
+// ensurePathExists reports whether path exists without following symlinks.
+func ensurePathExists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
+// waitFor polls cond until it holds, failing the test after ensureWaitTimeout.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(ensureWaitTimeout)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestEnsureBinary_KillingInstallerShellKeepsStageOfLiveSubshell covers the
+// window the owner must survive: the installer shell is killed while its
+// staging subshell is still downloading. A parallel installer must keep that
+// stage, since its owner is alive, and the held download must still finish.
+func TestEnsureBinary_KillingInstallerShellKeepsStageOfLiveSubshell(t *testing.T) {
+	o := ensureReleaseOpts()
+	o.holdGh = true
+	sb := newEnsureSandbox(t, o)
+	payload := ensurePayload("release", 0)
+	sb.publish(ensureTestTag, ensureTestAsset, payload)
+	sb.publish(ensureTestTag, "SHA256SUMS", ensureSums(payload, "  "))
+	release := filepath.Join(sb.hold, "release")
+	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o644) })
+
+	first := sb.startInstaller("--in-tree")
+	waitFor(t, "the staging subshell to reach its download", func() bool {
+		return ensurePathExists(filepath.Join(sb.hold, "ready"))
+	})
+	stage := sb.soleStage()
+	owner := stageOwnerPID(t, stage)
+	if owner == first.Process.Pid {
+		t.Fatalf("stage %s carries installer shell PID %d, not the staging subshell", stage, owner)
+	}
+	// Kill only the installer shell. Its staging subshell stays blocked in the
+	// held download.
+	if err := first.Process.Kill(); err != nil {
+		t.Fatalf("kill installer shell: %v", err)
+	}
+	_ = first.Wait()
+	if err := syscall.Kill(owner, 0); err != nil {
+		t.Fatalf("staging subshell %d is not alive after its installer was killed: %v", owner, err)
+	}
+
+	second := sb.run(nil, "--in-tree")
+	sb.assertExit(second, 0)
+	if !ensurePathExists(filepath.Join(sb.repo, "bin", stage)) {
+		t.Fatalf("parallel installer removed the live stage %s", stage)
+	}
+
+	ensureWriteFile(t, release, nil, 0o644)
+	waitFor(t, "the staging subshell to finish", func() bool {
+		return !ensurePathExists(filepath.Join(sb.repo, "bin", stage))
+	})
+	sb.assertInstalled(string(payload))
+	sb.assertBinEntries("usagebar")
+}
+
+// TestEnsureBinary_InstallsWhenTMPDIRMissing checks that an unusable TMPDIR does
+// not block the install: the owner probe falls back to /tmp, so a verified
+// binary is still installed from the exact release.
+func TestEnsureBinary_InstallsWhenTMPDIRMissing(t *testing.T) {
+	sb := newEnsureSandbox(t, ensureReleaseOpts())
+	payload := ensurePayload("release", 0)
+	sb.publish(ensureTestTag, ensureTestAsset, payload)
+	sb.publish(ensureTestTag, "SHA256SUMS", ensureSums(payload, "  "))
+
+	r := sb.run([]string{"TMPDIR=" + filepath.Join(sb.repo, "no-such-tmp")}, "--in-tree")
+	sb.assertExit(r, 0)
+	sb.assertInstalled(string(payload))
+	sb.assertSanityRunOnly()
+	sb.assertBinEntries("usagebar")
+	sb.assertExactTagRequests()
+}
+
+// TestEnsureBinary_FailsClosedWhenStageOwnerUnknown covers an owner PID that
+// cannot be recorded: the probe directory cannot be created under TMPDIR, /tmp,
+// or bin/, so the install refuses before any staging directory or release
+// request exists. Staging mktemp still works, so only the owner probe is broken.
+func TestEnsureBinary_FailsClosedWhenStageOwnerUnknown(t *testing.T) {
+	sb := newEnsureSandbox(t, ensureReleaseOpts())
+	sb.breakOwnerProbes()
+	payload := ensurePayload("release", 0)
+	sb.publish(ensureTestTag, ensureTestAsset, payload)
+	sb.publish(ensureTestTag, "SHA256SUMS", ensureSums(payload, "  "))
+
+	r := sb.run([]string{"TMPDIR=" + filepath.Join(sb.repo, "no-such-tmp")}, "--in-tree")
+	sb.assertExit(r, 127)
+	if !strings.Contains(r.out, "staging subshell") {
+		t.Fatalf("output does not report the unknown owner:\n%s", r.out)
+	}
+	sb.assertNotExecuted()
+	sb.assertNoRequests()
+	sb.assertBinEntries()
+}
+
+// breakOwnerProbes replaces the sandbox mktemp with a shim that fails only for
+// owner probe directories (usagebar-owner.*), delegating every other call to
+// the host mktemp so staging still works.
+func (sb *ensureSandbox) breakOwnerProbes() {
+	sb.t.Helper()
+	real, err := exec.LookPath("mktemp")
+	if err != nil {
+		sb.t.Fatalf("host mktemp: %v", err)
+	}
+	if err := os.Remove(filepath.Join(sb.pathDir, "mktemp")); err != nil {
+		sb.t.Fatalf("unlink mktemp: %v", err)
+	}
+	sb.writeExecutable("mktemp", "#!/bin/sh\ncase \"$*\" in\n  *usagebar-owner.*) exit 1 ;;\nesac\nexec "+ensureShQuote(real)+" \"$@\"\n")
 }
