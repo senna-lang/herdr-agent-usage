@@ -49,6 +49,14 @@ herdr server reload-config
 
 `herdr plugin install` provisions the `usagebar` binary via the manifest's `[[build]]` hook: it builds with the local Go toolchain (≥ 1.25) when available, and otherwise downloads a prebuilt binary from [GitHub Releases](https://github.com/senna-lang/herdr-agent-usage/releases) (macOS / Linux, arm64 / amd64). `usagebar.setup` repeats this resolution as a fallback for installs predating the build hook. To build manually instead, run `make build` in the plugin root.
 
+Release downloads are pinned to the version in `herdr-plugin.toml`: the binary and `SHA256SUMS` must come from that exact `v<version>` release. The installer requires `shasum` or `sha256sum` and verifies the selected file before making it executable or running it. Missing or invalid checksums, unavailable release assets, or verification failures abort installation without replacing the existing binary; a failed install hook lets Herdr retain the previous working installation. There is no automatic fallback to `latest`.
+
+A release download that is SIGKILLed can leave a staging directory behind in `bin/`, because SIGKILL skips the installer's cleanup trap. Staging directories are named `bin/.usagebar-download.<scope>.<pid>.<random>`. The `<pid>` is the staging subshell that created the directory, not the installer shell that spawned it. The `<scope>` names the boot and, on Linux, the PID namespace that issued that PID: `linux-<boot_id>-pidns<namespace>` on Linux and `darwin-<kern.bootsessionuuid>` on macOS. `bin/` can be shared by installers in several containers or boots, so a bare PID means nothing outside its scope. On the next release download, the installer removes a staging directory only when its scope equals the current installer's scope and the process listing of that PID namespace confirms the PID is no longer running. Directories from another boot or PID namespace, names it cannot parse, and every directory when the current scope is unavailable are left in place; a reused PID or unavailable process listing also leaves a directory in place. An installer that cannot identify its scope stages under `bin/.usagebar-download.unscoped.<random>`, which is never removed automatically. Legacy `bin/.usagebar-download.<random>` directories and owner-only `bin/.usagebar-download.<pid>.<random>` directories from earlier development builds that were never released are never removed automatically either; delete them by hand only when no install is running in any container that shares `bin/`. If temporary directories are unavailable outside `bin/`, an interrupted PID probe can also leave a `bin/usagebar-owner.<random>` directory that requires manual removal.
+
+On Linux the installer also leaves every staging directory in place unless `/proc` shows its own PID namespace: `/proc/self/ns/pid` and `/proc/$$/ns/pid` must name the same namespace, and the innermost `NSpid` value in `/proc/$$/status` must be the installer's own PID. Any unreadable or malformed value skips cleanup only; the install itself still proceeds.
+
+For an unreleased checkout, install Go and run `make build` in that checkout, or select an explicit released ref with `herdr plugin install senna-lang/herdr-agent-usage --ref v<version>`. If verification fails, do not bypass it: check the release assets and retry, or build from source. These checksums detect corruption and artifact mix-ups relative to the release metadata; they do not independently authenticate a compromised publisher.
+
 ## Update
 
 On Herdr 0.9.4+:
@@ -124,7 +132,8 @@ herdr plugin action invoke usagebar.setup
 | --- | --- |
 | **Sidebar `$context` row** | Per-pane context usage: `⛁ 13% (130k)` when the window size is known, or the token count alone |
 | **Sidebar `$cache_*` row** | Session-cumulative prompt-cache hit rate (`cache hit 93.3%`), plus remaining TTL only from a recorded expiry. ⚠️ when that TTL has already elapsed. Exactly one of `$cache_high` / `$cache_mid` / `$cache_low` is set. High uses the default sidebar color; mid/low are yellow/red in `config.toml` |
-| **Sidebar `$limit` row** | Shortest provider limit window (`5h 72%` remaining), refreshed with the Agent Usage pane (15s) or every 60s while that pane is closed. Pay-as-you-go panes show what that pane spent on its backend (`Σ 425k $0.04`, scoped to the pane's session and backend) instead |
+| **Sidebar `$limit` row** | Provider limit window, refreshed with the Agent Usage pane (15s) or every 60s while that pane is closed. `[ui] sidebar_windows` picks the shape: `shortest` (default, `5h 72%`), `all` (`5h 72% · 7d 90% · 30d 41%`), or `compact` (`72% 3h · 90% 3d · 41% 12d`). Pay-as-you-go panes show what that pane spent on its backend (`Σ 425k $0.04`, scoped to the pane's session and backend) instead |
+| **Sidebar limit colour bands** | Exactly one of `$limit_high` / `$limit_mid` / `$limit_low` is set, chosen by the tightest window: ≥50% left uses the default colour, 50%→25% yellow, <25% red. For per-number colours, `$limit_5h_*`, `$limit_7d_*`, and `$limit_30d_*` carry one window each |
 | **Sidebar `$provider` row** | Subscription provider (`opencode-go`, `grok`, `claude`, …) on a subscription pane, or the backend actually billed on a pay-as-you-go pane (`deepseek`). The adjacent burn total is scoped to that same backend in the pane's session |
 | **Agent Usage pane** | One block per billing provider, independent of harness. Subscription providers show plan windows and cross-harness pane activity. Pay-as-you-go backends show one merged 24h / 7d / 30d block, model breakdown, and pane share even when multiple harnesses use the same backend. Prompt-cache data stays sidebar-only, except red-band panes (<50% session hit rate), which produce a `⚠ low cache performance` warning |
 | **Toasts** (optional) | Remaining-limit warnings at configured thresholds (default 50 / 20 / 10 / 5 % left) |
@@ -143,11 +152,42 @@ herdr plugin action invoke usagebar.setup
 | OMP (Oh My Pi) | Yes | Yes | Session jsonl plus its credential metadata. Subscription routes: OpenCode Go, Grok OAuth, Anthropic OAuth → Claude, and OpenAI Codex OAuth → Codex. API-key backends show backend-scoped session burn |
 | Kilo Code | Yes | Yes | Context from the session store's `step-finish` parts; Kilo Pass monthly credit window from the account's own allowance, authenticated with the gateway login in `auth.json`. Kilo publishes no 5h/7d bucket, so those stay empty. Without a Kilo Pass the account pays from a shared credit balance, which Kilo reports without a limit — that shows as a balance note, never a fabricated percentage. A Kilo pane running on OpenCode Go routes to that account's windows. See [docs/kilo-contract.md](docs/kilo-contract.md) |
 | Pi coding agent | Yes | Yes | Session jsonl plus `~/.pi/agent/auth.json`; context windows come from Pi's `models-store.json` / `models.json`, and session trees plus compaction boundaries are respected. Uses the same recognized OAuth/subscription routes and pay-as-you-go rules as OMP |
+| Devin | Yes | Yes | Context occupancy from the newest request's `context_input_tokens` in `cli/sessions.db` (no local context-limit catalog, so the count has no denominator); daily and weekly plan-quota windows from the seat-status call Devin's own tooling makes, authenticated with the CLI login in `credentials.toml`. A non-zero extra-usage balance shows as a note, never a bar. Session-wide token aggregates are deliberately not read — the store grows to tens of GB and per-request dedup would parse every node — so `$cache_*` shows the newest request's rate and the limits pane shows no token-share row. See [docs/devin-contract.md](docs/devin-contract.md) |
 
 Percentages in the limits pane default to **remaining** (`% left`). Higher is safer.
 Set `[ui] limit_percent = "used"` to show consumption instead; the bar fills as
 the window burns, but colour still tracks remaining headroom. Set `[ui] cache_display = false`
 to hide cache data from both the sidebar and Agent Usage pane.
+
+`[ui] sidebar_windows` controls how much the `$limit` row shows:
+
+| Value | Row |
+| --- | --- |
+| `shortest` (default) | `5h 72%` — the numerically tightest window |
+| `all` | `5h 72% · 7d 90% · 30d 41%` — every window, tagged |
+| `compact` | `72% 3h · 90% 3d · 41% 12d` — every window with its reset countdown |
+
+Countdowns use days once the reset is a day or more, else hours, else minutes,
+and are omitted when the provider reports no reset time.
+
+Colour is per token, from Herdr config. For a single colour driven by the
+tightest window:
+
+```toml
+["$limit_high", { token = "$limit_mid", fg = "#e0af68" }, { token = "$limit_low", fg = "#f7768e" }],
+```
+
+For one colour per number, use the per-window tokens (`$limit_5h_*`,
+`$limit_7d_*`, `$limit_30d_*`) in the same exclusive shape:
+
+```toml
+["$limit_5h_high", { token = "$limit_5h_mid", fg = "#e0af68" }, { token = "$limit_5h_low", fg = "#f7768e" },
+ "$limit_7d_high", { token = "$limit_7d_mid", fg = "#e0af68" }, { token = "$limit_7d_low", fg = "#f7768e" },
+ "$limit_30d_high", { token = "$limit_30d_mid", fg = "#e0af68" }, { token = "$limit_30d_low", fg = "#f7768e" }],
+```
+
+Herdr joins the tokens of one row with `·`, so the token text carries no
+separator of its own.
 
 
 ## Agent Usage pane
@@ -174,7 +214,9 @@ context text remains unchanged:
 row_gap = 0
 rows = [
   ["state_icon", "$title"],
-  ["$provider", "$limit"],
+  ["$provider", "$limit_5h_high", { token = "$limit_5h_mid", fg = "#e0af68" }, { token = "$limit_5h_low", fg = "#f7768e" },
+                 "$limit_7d_high", { token = "$limit_7d_mid", fg = "#e0af68" }, { token = "$limit_7d_low", fg = "#f7768e" },
+                 "$limit_30d_high", { token = "$limit_30d_mid", fg = "#e0af68" }, { token = "$limit_30d_low", fg = "#f7768e" }],
   ["$cache_high", { token = "$cache_mid", fg = "#e0af68" }, { token = "$cache_low", fg = "#f7768e" }],
   ["$context"],
 ]
@@ -197,6 +239,11 @@ limit data. `$context` is shortened to fit the sidebar. Where Herdr reports the
 live sidebar width (0.8.x) that width is used, so a drag-resized sidebar is
 followed; on Herdr 0.9+ it is not reported, so `[ui] sidebar_width` from your
 Herdr config (default 26 columns) is used instead.
+
+On multi-account panes, the account label occupies the limit row and the
+current limits appear before the context meter. Until a context meter is
+available, the context row shows only the current limits; periodic refreshes
+never recover a meter from an older combined row.
 
 ### Plugin config
 
@@ -551,6 +598,7 @@ Local usage is read from files that the agents already keep on your machine:
 | OMP | `~/.omp/agent/sessions/**/*.jsonl`, `~/.omp/agent/models.db` (context window lookup), `~/.omp/agent/agent.db` (credential kind, and the `usage_history` windows OMP records for the accounts it drives) |
 | Pi coding agent | `~/.pi/agent/sessions/**/*.jsonl`, `~/.pi/agent/models-store.json` and `~/.pi/agent/models.json` (or the matching `PI_CODING_AGENT_DIR`), `~/.pi/agent/auth.json` (credential kind only) |
 | Kilo Code | `~/.local/share/kilo/kilo.db` (opened read-only: session usage, backend, credential kind), `~/.local/share/kilo/auth.json` (gateway login for the allowance fetch; the refresh token is never read), `~/.cache/kilo/models.json` (context window). Respects `KILO_DB`, `KILO_DATA_DIR`, `KILO_MODELS_PATH` |
+| Devin | `~/.local/share/devin/cli/sessions.db` (opened read-only: the newest request's context and token metrics — indexed single-row reads only, never a session scan), `~/.local/share/devin/credentials.toml` (seat API key + server URL for the quota fetch; the key is never persisted). Respects `DEVIN_DATA_DIR` |
 
 Pay-as-you-go detection is not tied to any one harness: it reads the same
 per-harness files above (the backend a session used is already recorded there —
@@ -645,6 +693,7 @@ Network requests happen in the following cases:
 - `opencode.ai` — only when a session is available: `OPENCODE_GO_COOKIE`, or an `opencode.ai` cookie in a local Chromium profile. Results are cached for 2 minutes (10 after a failure), so a sidebar refresh does not mean a request. Disable with `USAGEBAR_DISABLE_BROWSER_COOKIES=1`
 - `grok.com` — only when `~/.grok/auth.json` exists (you ran `grok login`)
 - `api.kilo.ai` — only when `~/.local/share/kilo/auth.json` holds a Kilo Gateway device login (you ran `kilo auth login`). Two GETs per refresh: the credit balance and the Kilo Pass allowance. The host is pinned and redirects are not followed, so the login is never replayed elsewhere; `KILO_API_URL` is deliberately not honoured. Results are cached for 2 minutes (10 after a failure) and keyed to the login, so a second account never sees the first one's numbers. The gateway token is never written to disk
+- the `api_server_url` recorded in `~/.local/share/devin/credentials.toml` (`server.codeium.com` by default) — only when that file holds a Devin CLI login (you ran `devin login`). One POST per refresh: the seat status carrying daily/weekly quota. The host must be https, redirects are not followed, and results are cached for 2 minutes (10 after a failure) keyed to the login's hash; the key itself is never written to disk
 - `api.github.com` — on the first pane focus and then at most once every 24 hours, to check this plugin's latest public release. The request has no credentials and sends no usage or session data.
 
 No telemetry, no analytics, or usage/session data is sent. State written by the plugin (config, notification state, update-check state, usage history) stays under `~/.config/herdr/plugins/config/usagebar/` and `~/.claude/herdr-usagebar/`.

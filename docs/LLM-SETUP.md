@@ -68,9 +68,11 @@ End state:
 - OS: macOS or Linux.  
 - **Go toolchain ≥ 1.25** (`go version`) recommended. `usagebar.setup`
   resolves the binary automatically on first run: it builds with Go when
-  available, else downloads a prebuilt binary from GitHub Releases. If
-  neither Go nor a working download path exists, stop and ask the user
-  to install Go.  
+  available, else downloads the exact manifest version from GitHub Releases
+  and verifies it against that release's `SHA256SUMS` using `shasum` or
+  `sha256sum` before execution. It never falls back to `latest`. If that
+  release is unavailable, build the checkout with Go or select an explicit
+  released ref; never bypass checksum verification.  
 - Recommended (ask if missing, do not force):
 
 ```bash
@@ -125,8 +127,9 @@ herdr plugin action invoke usagebar.setup
 This does two things:
 
 - **Resolves `bin/usagebar`** automatically if it is missing: builds with
-  the local Go toolchain, else downloads a prebuilt GitHub Release binary.
-  No separate `make build` is needed in the normal flow.  
+  the local Go toolchain, else downloads the exact manifest release binary
+  and verifies its SHA-256 before execution. No separate `make build` is
+  needed when a matching, verifiable release is available.  
 - Creates plugin config under
   `~/.config/herdr/plugins/config/usagebar/config.toml` when missing
   (`[notify]` thresholds, etc.). It does **not** by itself enable toast
@@ -139,10 +142,16 @@ finishes. Check the outcome via the plugin log:
 herdr plugin log list --plugin usagebar --limit 5
 ```
 
-If the log shows a binary-resolution failure (exit 127): install Go and run
-`make build` from the plugin root (resolve the path via `herdr plugin
-list`), or install + authenticate `gh` for the prebuilt download, then
-re-invoke `usagebar.setup`.
+If the log shows a binary-resolution failure (exit 127), use the diagnostic
+to identify a missing exact-tag asset, missing checksum tool, or checksum
+failure. Install `shasum` or `sha256sum` if needed; never run an unverified
+download or substitute `latest`. For an unreleased checkout, install Go and
+run `make build` from the plugin root (resolve the path via `herdr plugin
+list`), or install an explicit released ref with
+`herdr plugin install senna-lang/herdr-agent-usage --ref v<version>`.
+For download access errors, repair network access or authenticate `gh`,
+then retry. A failed install hook preserves the previous working install.
+Re-invoke `usagebar.setup` once the binary is available.
 
 ### 4. Sidebar rows (required)
 
@@ -255,7 +264,7 @@ herdr plugin action invoke usagebar.open-limits
 ```
 
 After an agent turn completes on a supported pane (Claude / Codex / OpenCode /
-Grok / OMP / Pi), verify with `herdr pane get <pane-id>` that both
+Grok / OMP / Pi / Devin), verify with `herdr pane get <pane-id>` that both
 `tokens.context` and `tokens.limit` are present. The sidebar should render
 limit above context. On OMP/Pi, `$provider` is the resolved subscription
 provider (`opencode-go`, `grok`, `claude`, or `codex`), or the current API

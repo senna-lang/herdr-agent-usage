@@ -1,5 +1,7 @@
 /**
- * Fans a collected ProviderLimits snapshot out to open panes' $limit tokens.
+ * Fans a collected ProviderLimits snapshot out to open panes' limit row:
+ * $limit plus the $limit_high/mid/low bands and per-window colour tokens the
+ * recommended layout renders.
  *
  * $limit is account state, so one collect updates every pane that bills the
  * same account. $context stays event-driven except the multi-profile limit
@@ -10,8 +12,6 @@
 package update
 
 import (
-	"strings"
-
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
 	"github.com/senna-lang/herdr-agent-usage/internal/herdrcli"
 	"github.com/senna-lang/herdr-agent-usage/internal/limits"
@@ -35,11 +35,16 @@ type LimitPublishPane struct {
 }
 
 // LimitPublishTarget is one metadata write. ContextToken is nil when $context
-// must not be touched.
+// must not be touched. UpdateBands marks the limit colour-band family (and the
+// per-window tokens) as derived from this same snapshot; panes without it keep
+// the legacy $limit-only write.
 type LimitPublishTarget struct {
-	PaneID       string
-	LimitToken   string
-	ContextToken *string
+	PaneID           string
+	LimitToken       string
+	ContextToken     *string
+	UpdateBands      bool
+	RemainingPercent float64
+	WindowBands      []limits.SidebarWindowBand
 }
 
 // LimitPublishTargets decides $limit (and multi-profile $context prefix)
@@ -62,10 +67,16 @@ func LimitPublishTargets(providers []limits.ProviderLimits, panes []LimitPublish
 		if limitText == "" {
 			continue
 		}
-		target := LimitPublishTarget{PaneID: pane.PaneID, LimitToken: limitText}
+		target := LimitPublishTarget{
+			PaneID:           pane.PaneID,
+			LimitToken:       limitText,
+			UpdateBands:      true,
+			RemainingPercent: limits.MinRemainingPercent(provider),
+			WindowBands:      limits.FormatSidebarWindowBands(provider, percent, nowMs),
+		}
 		if pane.MultiProfile && pane.AccountLabel != "" {
 			target.LimitToken = pane.AccountLabel
-			ctx := replaceContextLimitPrefix(tokenValue(pane.Tokens, "context"), limitText)
+			ctx := contextWithLimitPrefix(pane.Tokens, limitText)
 			target.ContextToken = &ctx
 		}
 		out = append(out, target)
@@ -80,22 +91,11 @@ func tokenValue(tokens map[string]string, name string) string {
 	return tokens[name]
 }
 
-// replaceContextLimitPrefix updates the limit segment parked on $context for
-// multi-profile panes without recomputing the context meter.
-func replaceContextLimitPrefix(current, limitText string) string {
-	if limitText == "" {
-		return current
-	}
-	if current == "" {
-		return limitText
-	}
-	if i := strings.Index(current, " · "); i >= 0 {
-		return limitText + current[i:]
-	}
-	if strings.Contains(current, "⛁") || strings.Contains(current, "compacted") {
-		return limitText + " · " + current
-	}
-	return limitText
+// contextWithLimitPrefix rebuilds the row from fresh limits and the recorded
+// meter only. Missing meters stay absent until an event supplies one; parsing
+// the combined row would retain stale windows in all/compact mode.
+func contextWithLimitPrefix(tokens map[string]string, limitText string) string {
+	return combineLimitAndContext(limitText, tokenValue(tokens, "context_meter"))
 }
 
 func applyLimitPublishTargets(writer metadataTokenWriter, panes []LimitPublishPane, targets []LimitPublishTarget) {
@@ -106,6 +106,13 @@ func applyLimitPublishTargets(writer metadataTokenWriter, panes []LimitPublishPa
 	for _, target := range targets {
 		current := tokensByPane[target.PaneID]
 		writeMetadataTokenWith(writer, current, target.PaneID, "limit", target.LimitToken, false)
+		if target.UpdateBands {
+			// The recommended layout renders the band tokens, not $limit, so a
+			// refresh that skipped them would freeze the visible row. Writing the
+			// full family also clears bands the new value no longer occupies.
+			writeLimitBandTokensWith(writer, current, target.PaneID, target.LimitToken, target.RemainingPercent, false, false)
+			writeWindowBandTokensWith(writer, current, target.PaneID, target.WindowBands, false)
+		}
 		if target.ContextToken != nil {
 			writeMetadataTokenWith(writer, current, target.PaneID, "context", *target.ContextToken, false)
 		}

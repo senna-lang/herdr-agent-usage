@@ -126,6 +126,11 @@ func paneBillingModeWith(profiles []claude.ClaudeProfile, codexProfiles []codex.
 			return BillingUnknown
 		}
 	}
+	if providers.ProviderHasCapability(providerID, providers.CapSubscriptionOnly) {
+		// The product offers no per-session backend choice, so every session
+		// meters against the account's plan the moment it exists.
+		return BillingSubscription
+	}
 	if profile, ok := profileByIDIn(profiles, providerID); ok {
 		return claudePaneBillingModeIn(profile.ConfigDir, pane)
 	}

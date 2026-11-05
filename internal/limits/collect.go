@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/antigravity"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/devin"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/kilo"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 )
@@ -53,6 +54,9 @@ type CollectOptions struct {
 	// Kilo has no per-account profile concept either (one Kilo Gateway login
 	// per store), so like Antigravity it is a single injectable collector.
 	Kilo LimitsCollector
+	// Devin likewise keeps one login per machine (credentials.toml), so it is
+	// a single injectable collector too.
+	Devin LimitsCollector
 	// Attach activity after collection (injectable for tests).
 	Attach func(providers []ProviderLimits, nowMs int64) []ProviderLimits
 	// Only restricts collection to these provider ids (nil = all providers).
@@ -151,6 +155,9 @@ func DefaultCollectOptions() CollectOptions {
 		Kilo: func(_ *string, nowMs int64) ProviderLimits {
 			return CollectKiloLimits(nowMs, CollectKiloLimitsOptions{})
 		},
+		Devin: func(_ *string, nowMs int64) ProviderLimits {
+			return CollectDevinLimits(nowMs, CollectDevinLimitsOptions{})
+		},
 	}
 }
 
@@ -175,6 +182,11 @@ var singleCollectorQuotaSpecs = []struct {
 		id:    kilo.Provider.AgentID(),
 		label: "Kilo",
 		field: func(o CollectOptions) LimitsCollector { return o.Kilo },
+	},
+	{
+		id:    devin.Provider.AgentID(),
+		label: "Devin",
+		field: func(o CollectOptions) LimitsCollector { return o.Devin },
 	},
 }
 

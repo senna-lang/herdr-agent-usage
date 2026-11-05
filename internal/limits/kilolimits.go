@@ -201,20 +201,10 @@ func CollectKiloLimits(nowMs int64, opts CollectKiloLimitsOptions) ProviderLimit
 		// Pass, so the last good snapshot survives for a later attempt and the
 		// failure is stored beside it rather than in place of it.
 		entry.Failure = &pl
-		entry.Limits = preservedKiloSnapshot(previous, credential.Identity)
+		entry.Limits = preservedQuotaSnapshot(previous, credential.Identity)
 	}
 	saveKiloCache(entry)
 	return pl
-}
-
-// preservedKiloSnapshot is the last good reading for this same identity, and
-// nothing else: an entry measured under a different login or a different
-// selected organization must never carry its numbers into this one.
-func preservedKiloSnapshot(previous kiloCacheEntry, identity string) *ProviderLimits {
-	if previous.AccountID != identity || previous.Limits == nil {
-		return nil
-	}
-	return previous.Limits
 }
 
 func kiloOutcomeFor(outcome kiloPassOutcome) kiloCacheOutcome {
