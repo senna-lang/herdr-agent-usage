@@ -15,6 +15,7 @@ import (
 	"sort"
 	"testing"
 
+	providercontract "github.com/senna-lang/herdr-agent-usage/internal/provider"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers"
 	claudeprovider "github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
@@ -100,16 +101,30 @@ func TestSingleCollectorQuotaSpecs_MatchCapabilityRegistrations(t *testing.T) {
 	assertSameIDSet(t, "singleCollectorQuotaSpecs ids", got, want)
 }
 
-// TestLimitIDSlotTables_MatchCapabilityRegistrations guards windowpool.go's
-// per-provider limit-id vocabulary: every quota-owning provider (including
-// Claude) must have a table, and no other provider must have one.
+// TestLimitIDSlotTables_MatchCapabilityRegistrations guards that every
+// quota-owning provider exposes its limit-id vocabulary: either through the
+// LimitWindowSlotter contract on its adapter or through windowpool.go's
+// legacy per-provider table. No other provider may appear in the table.
 func TestLimitIDSlotTables_MatchCapabilityRegistrations(t *testing.T) {
 	want := providers.IDsWithCapability(providers.CapOwnsSubscriptionQuota)
+	covered := map[string]bool{}
 	var got []string
 	for id := range limitIDSlotTables {
+		covered[id] = true
 		got = append(got, id)
 	}
-	assertSameIDSet(t, "limitIDSlotTables keys", got, want)
+	for _, id := range want {
+		if covered[id] {
+			continue
+		}
+		if p := providers.FindProvider(id); p != nil {
+			if _, ok := p.(providercontract.LimitWindowSlotter); ok {
+				covered[id] = true
+				got = append(got, id)
+			}
+		}
+	}
+	assertSameIDSet(t, "limit-id slot coverage (table or LimitWindowSlotter)", got, want)
 }
 
 // TestContextOnlyProviders_AppearInNoLimitsTable guards the other direction of

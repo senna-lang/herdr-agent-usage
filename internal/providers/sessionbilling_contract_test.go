@@ -29,3 +29,23 @@ func TestSessionBillingProviders_DoNotClaimSubscriptionQuota(t *testing.T) {
 		t.Skip("no session-billing providers registered")
 	}
 }
+
+// A provider declaring CapSubscriptionOnly asserts no billing route exists
+// to classify, so implementing SessionBillingProvider alongside it would be
+// a contradiction: the capability says "nothing to classify" while the
+// contract supplies per-session evidence.
+func TestSubscriptionOnlyProviders_DoNotClassifySessionBilling(t *testing.T) {
+	seen := 0
+	for _, r := range Registrations {
+		if !r.Has(CapSubscriptionOnly) {
+			continue
+		}
+		seen++
+		if _, ok := r.Provider.(provider.SessionBillingProvider); ok {
+			t.Errorf("%s: declares subscription-only billing but also classifies session billing", r.Provider.AgentID())
+		}
+	}
+	if seen == 0 {
+		t.Skip("no subscription-only providers registered")
+	}
+}
