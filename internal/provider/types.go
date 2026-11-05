@@ -53,3 +53,29 @@ func (p FuncProvider) AgentID() string { return p.ID }
 func (p FuncProvider) ResolveUsage(input UsageResolveInput) *core.ContextUsage {
 	return p.Func(input)
 }
+
+// LimitWindowSlot names where a quota window belongs in the shared display
+// triple. It is the normalized counterpart of a provider's own limit-id
+// vocabulary: shared layers consume this enum, never a provider's id
+// strings.
+type LimitWindowSlot int
+
+const (
+	LimitWindowNone LimitWindowSlot = iota
+	LimitWindowPrimary
+	LimitWindowSecondary
+	LimitWindowTertiary
+)
+
+// LimitWindowSlotter is implemented by providers that own a subscription
+// quota (providers.CapOwnsSubscriptionQuota) and can report their limit-id
+// vocabulary in normalized form: which display slot an observed limit id
+// belongs in, and the window's duration in minutes as a fallback when the
+// observation carries no duration label of its own. Shared window pooling
+// consumes this contract rather than learning any provider's id strings. An
+// unrecognized id must return LimitWindowNone — it is skipped, never
+// guessed into a bar.
+type LimitWindowSlotter interface {
+	UsageProvider
+	LimitWindowSlot(limitID string) (slot LimitWindowSlot, windowMinutes int)
+}
