@@ -28,6 +28,8 @@ import (
 	"strconv"
 	"strings"
 
+	providercontract "github.com/senna-lang/herdr-agent-usage/internal/provider"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/omp"
 )
 
@@ -99,34 +101,57 @@ const (
 	slotTertiary
 )
 
-// LimitIDSlotTables holds one limit-id vocabulary per quota-owning provider.
-// The vocabulary itself is necessarily provider-specific (each harness names
-// its own windows), but the outer key set is what must stay in sync with the
-// registry: internal/limits's TestLimitIDSlotTables_MatchCapabilityRegistrations
-// asserts these keys equal providers.IDsWithCapability(CapOwnsSubscriptionQuota),
-// so a newly registered quota-owning provider left out of this map fails that
-// test instead of silently returning slotNone for every limit id.
+// LimitIDSlotTables holds the limit-id vocabulary of each quota-owning
+// provider that predates the LimitWindowSlotter contract. New providers
+// declare their vocabulary on the adapter instead of adding to this map.
+// Exhaustiveness: internal/limits's TestLimitIDSlotTables_MatchCapabilityRegistrations
+// asserts every providers.CapOwnsSubscriptionQuota provider is covered here
+// or through the contract, so a newly registered quota-owning provider left
+// out of both fails that test instead of silently returning slotNone for
+// every limit id.
 var LimitIDSlotTables = map[string]func(limitID string) (windowSlot, int){
 	"agy":      antigravityLimitIDSlot,
 	"claude":   claudeLimitIDSlot,
 	"codex":    codexLimitIDSlot,
-	"devin":    devinLimitIDSlot,
 	"grok":     grokLimitIDSlot,
 	"kilo":     kiloLimitIDSlot,
 	"opencode": opencodeLimitIDSlot,
 }
 
-// slotForLimitID maps an OMP limit_id to a display slot and fallback duration.
+// slotForLimitID maps an observed limit_id to a display slot and fallback
+// duration.
 //
 // The window vocabulary differs per provider, so the mapping is explicit
-// rather than pattern-matched: an unrecognized id is skipped, never guessed
-// into the wrong bar. A recognized persisted window label overrides the
-// fallback duration when observations are folded below.
+// rather than pattern-matched: providers implementing LimitWindowSlotter
+// answer through that contract, providers that predate it answer through
+// LimitIDSlotTables, and an unrecognized id is skipped, never guessed into
+// the wrong bar. A recognized persisted window label overrides the fallback
+// duration when observations are folded below.
 func slotForLimitID(providerID, limitID string) (windowSlot, int) {
+	if p := providers.FindProvider(providerID); p != nil {
+		if slotter, ok := p.(providercontract.LimitWindowSlotter); ok {
+			slot, minutes := slotter.LimitWindowSlot(limitID)
+			return windowSlotForLimit(slot), minutes
+		}
+	}
 	if table, ok := LimitIDSlotTables[providerID]; ok {
 		return table(limitID)
 	}
 	return slotNone, 0
+}
+
+// windowSlotForLimit translates the shared contract's slot enum into this
+// package's internal slot type.
+func windowSlotForLimit(slot providercontract.LimitWindowSlot) windowSlot {
+	switch slot {
+	case providercontract.LimitWindowPrimary:
+		return slotPrimary
+	case providercontract.LimitWindowSecondary:
+		return slotSecondary
+	case providercontract.LimitWindowTertiary:
+		return slotTertiary
+	}
+	return slotNone
 }
 
 func claudeLimitIDSlot(limitID string) (windowSlot, int) {
@@ -175,21 +200,6 @@ func kiloLimitIDSlot(limitID string) (windowSlot, int) {
 	switch limitID {
 	case "kilo-pass:subscription:1mo":
 		return slotTertiary, 43200
-	}
-	return slotNone, 0
-}
-
-// devinLimitIDSlot maps Devin's two plan-quota windows: the daily meter is
-// the short slot and the weekly meter the mid slot, matching what
-// CollectDevinLimits produces first-hand. The ids are the plugin's own
-// vocabulary — no harness records Devin windows on disk, so the mapping only
-// matters if an observer ever reports them.
-func devinLimitIDSlot(limitID string) (windowSlot, int) {
-	switch limitID {
-	case "devin:daily":
-		return slotPrimary, 1440
-	case "devin:weekly":
-		return slotSecondary, 10080
 	}
 	return slotNone, 0
 }

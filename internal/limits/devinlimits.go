@@ -132,20 +132,10 @@ func CollectDevinLimits(nowMs int64, opts CollectDevinLimitsOptions) ProviderLim
 		// beside it rather than in place of it.
 		entry.Outcome = devinOutcomeFailed
 		entry.Failure = &pl
-		entry.Limits = preservedDevinSnapshot(previous, accountID)
+		entry.Limits = preservedQuotaSnapshot(previous, accountID)
 	}
 	saveDevinCache(entry)
 	return pl
-}
-
-// preservedDevinSnapshot is the last good reading for this same identity,
-// and nothing else: an entry measured under a different login must never
-// carry its numbers into this one.
-func preservedDevinSnapshot(previous devinCacheEntry, accountID string) *ProviderLimits {
-	if previous.AccountID != accountID || previous.Limits == nil {
-		return nil
-	}
-	return previous.Limits
 }
 
 func devinProviderLimits(providerID, label string, status *DevinPlanStatus, err error, nowMs int64) (ProviderLimits, devinQuotaOutcome) {

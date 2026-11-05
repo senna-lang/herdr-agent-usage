@@ -62,3 +62,23 @@ func TestProviderResolveUsage_NoStore(t *testing.T) {
 		t.Fatalf("absent store should yield no usage, got %+v", usage)
 	}
 }
+
+// The adapter owns Devin's limit-id vocabulary: the shared layer consumes
+// the normalized slot and duration, never the id strings.
+func TestLimitWindowSlot(t *testing.T) {
+	for _, c := range []struct {
+		limitID string
+		slot    provider.LimitWindowSlot
+		minutes int
+	}{
+		{"devin:daily", provider.LimitWindowPrimary, 1440},
+		{"devin:weekly", provider.LimitWindowSecondary, 10080},
+		{"devin:unknown", provider.LimitWindowNone, 0},
+		{"", provider.LimitWindowNone, 0},
+	} {
+		slot, minutes := Provider.LimitWindowSlot(c.limitID)
+		if slot != c.slot || minutes != c.minutes {
+			t.Errorf("LimitWindowSlot(%q) = (%v, %d), want (%v, %d)", c.limitID, slot, minutes, c.slot, c.minutes)
+		}
+	}
+}

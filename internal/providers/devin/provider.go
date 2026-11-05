@@ -9,8 +9,9 @@
  * Devin sessions always bill against the account's plan quota — the CLI
  * offers no per-session backend choice — so the store records no billing
  * route to classify and this adapter does not implement
- * SessionBillingProvider; billingmode_io maps the provider id to
- * subscription directly. The context window size is left unset: no local
+ * SessionBillingProvider; the registration declares CapSubscriptionOnly,
+ * which shared billing classification reads instead. The context window
+ * size is left unset: no local
  * surface reports a model's limit, and inventing a denominator would draw
  * a percentage against a number that does not exist (see
  * docs/devin-contract.md). The cache row falls back to the newest
@@ -66,6 +67,21 @@ func ResolveUsageIn(dataDir, sessionID string) *core.ContextUsage {
 	return usage
 }
 
+// LimitWindowSlot reports Devin's limit-id vocabulary in normalized form.
+// The seat-status endpoint reports exactly two windows — a rolling day and
+// a rolling week — so those are the only ids the adapter declares. No
+// harness records Devin windows on disk today, so the mapping only matters
+// if an observer ever reports them.
+func (usageProvider) LimitWindowSlot(limitID string) (provider.LimitWindowSlot, int) {
+	switch limitID {
+	case "devin:daily":
+		return provider.LimitWindowPrimary, 1440
+	case "devin:weekly":
+		return provider.LimitWindowSecondary, 10080
+	}
+	return provider.LimitWindowNone, 0
+}
+
 func nonNegative(n int) int {
 	if n > 0 {
 		return n
@@ -74,3 +90,4 @@ func nonNegative(n int) int {
 }
 
 var _ provider.UsageProvider = usageProvider{}
+var _ provider.LimitWindowSlotter = usageProvider{}

@@ -126,6 +126,11 @@ func paneBillingModeWith(profiles []claude.ClaudeProfile, codexProfiles []codex.
 			return BillingUnknown
 		}
 	}
+	if providers.ProviderHasCapability(providerID, providers.CapSubscriptionOnly) {
+		// The product offers no per-session backend choice, so every session
+		// meters against the account's plan the moment it exists.
+		return BillingSubscription
+	}
 	if profile, ok := profileByIDIn(profiles, providerID); ok {
 		return claudePaneBillingModeIn(profile.ConfigDir, pane)
 	}
@@ -189,11 +194,6 @@ func paneBillingModeWith(profiles []claude.ClaudeProfile, codexProfiles []codex.
 		return BillingPayAsYouGo
 	case "grok":
 		return grokPaneBillingMode(pane)
-	case "devin":
-		// Devin CLI has no backend choice: every session meters against the
-		// account's plan quota (plus plan overage, still subscription-class
-		// spend), so the pane is subscription the moment it exists.
-		return BillingSubscription
 	default:
 		return BillingUnknown
 	}

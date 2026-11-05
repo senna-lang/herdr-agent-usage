@@ -51,6 +51,14 @@ const (
 	// statusLine, while plan windows stay server-side with no local or
 	// documented API surface to collect them from.
 	CapContextOnly
+	// CapSubscriptionOnly means every session on this provider bills the
+	// account's plan: the product offers no per-session backend choice, so
+	// no vendor billing route exists for an adapter to classify. Shared
+	// billing classification reads this capability rather than branching on
+	// the provider id — a session on such a provider is subscription the
+	// moment it exists. Currently Devin, whose plan overage is still
+	// subscription-class spend.
+	CapSubscriptionOnly
 )
 
 // Registration pairs one provider with its declared capabilities.
@@ -75,7 +83,7 @@ var Registrations = []Registration{
 	{claude.Provider, []Capability{CapOwnsSubscriptionQuota}},
 	{codex.Provider, []Capability{CapOwnsSubscriptionQuota}},
 	{cursor.Provider, []Capability{CapContextOnly}},
-	{devin.Provider, []Capability{CapOwnsSubscriptionQuota}},
+	{devin.Provider, []Capability{CapOwnsSubscriptionQuota, CapSubscriptionOnly}},
 	{grok.Provider, []Capability{CapOwnsSubscriptionQuota}},
 	{hermes.Provider, []Capability{CapContextOnly}},
 	{kilo.Provider, []Capability{CapOwnsSubscriptionQuota}},
@@ -115,4 +123,15 @@ func IDsWithCapability(cap Capability) []string {
 		}
 	}
 	return ids
+}
+
+// ProviderHasCapability reports whether the registered provider for agentID
+// declares cap; unregistered ids report false.
+func ProviderHasCapability(agentID string, cap Capability) bool {
+	for _, r := range Registrations {
+		if r.Provider.AgentID() == agentID {
+			return r.Has(cap)
+		}
+	}
+	return false
 }
