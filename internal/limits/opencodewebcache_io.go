@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
 
 func openCodeWebCachePath() string {
@@ -45,8 +47,5 @@ func saveOpenCodeWebCache(limits *ProviderLimits, outcome openCodeWebOutcome, no
 		return
 	}
 	path := openCodeWebCachePath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return
-	}
-	_ = os.WriteFile(path, raw, 0o600)
+	_ = fsutil.WritePrivateFile(path, raw)
 }

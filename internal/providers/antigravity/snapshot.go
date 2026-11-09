@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
+	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
 
 // QuotaWindow is one weekly allotment observation from the statusLine's
@@ -78,34 +79,11 @@ func snapshotPath(sessionsDir, sessionID string) string {
 // whatever it is given, and an invalid snapshot written here would replace a
 // valid one. Validation lives in the statusLine adapter, before this point.
 func WriteSnapshot(sessionsDir string, snap Snapshot) error {
-	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
-		return err
-	}
 	raw, err := json.Marshal(snap)
 	if err != nil {
 		return err
 	}
-
-	// Same directory as the destination so the rename cannot cross filesystems.
-	tmp, err := os.CreateTemp(sessionsDir, ".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer func() {
-		// No-op once the rename succeeded; removes the temp file on any
-		// failure path so a crash mid-write leaves no debris behind.
-		_ = os.Remove(tmpPath)
-	}()
-
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, snapshotPath(sessionsDir, snap.SessionID))
+	return fsutil.WritePrivateFile(snapshotPath(sessionsDir, snap.SessionID), raw)
 }
 
 // ReadSnapshot loads one session's snapshot. A missing or unreadable file and

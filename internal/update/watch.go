@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 	"github.com/senna-lang/herdr-agent-usage/internal/limits"
 	"golang.org/x/sys/unix"
 )
@@ -44,7 +45,7 @@ func WatchAlreadyRunning(now time.Time) bool {
 // The guard file is never removed: all watchers must lock the same inode
 // while checking or replacing the lock path.
 func withWatchLockGuard(path string, action func()) bool {
-	guard, err := os.OpenFile(path+".guard", os.O_CREATE|os.O_RDWR, 0o644)
+	guard, err := os.OpenFile(path+".guard", os.O_CREATE|os.O_RDWR, fsutil.PrivateFileMode)
 	if err != nil {
 		return false
 	}
@@ -58,12 +59,12 @@ func withWatchLockGuard(path string, action func()) bool {
 
 func tryAcquireWatchLock(now time.Time) (*os.File, bool) {
 	path := watchLockPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := fsutil.MkdirPrivate(filepath.Dir(path)); err != nil {
 		return nil, false
 	}
 	var lock *os.File
 	if !withWatchLockGuard(path, func() {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		f, err := fsutil.OpenPrivateExclusive(path)
 		if err != nil {
 			st, statErr := os.Stat(path)
 			if statErr != nil || now.Sub(st.ModTime()) <= watchLockStale {
@@ -72,7 +73,7 @@ func tryAcquireWatchLock(now time.Time) (*os.File, bool) {
 			if err := os.Remove(path); err != nil {
 				return
 			}
-			f, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+			f, err = fsutil.OpenPrivateExclusive(path)
 			if err != nil {
 				return
 			}
