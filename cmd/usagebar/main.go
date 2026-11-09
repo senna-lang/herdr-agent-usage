@@ -108,6 +108,7 @@ Usage:
   usagebar notify                    Check non-Claude primary rate-limit toasts
   usagebar check-update --current-version X.Y.Z [--force] [--quiet]
                                      Check GitHub Releases for a newer plugin version
+                                     USAGEBAR_DISABLE_UPDATE_CHECK=1 disables it
   usagebar statusline                Claude Code statusLine (stdin rate_limits)
   usagebar cursor-statusline         Cursor CLI statusLine (stdin context_window)
   usagebar antigravity-statusline    Antigravity CLI statusLine (stdin context_window+quota)
@@ -122,35 +123,56 @@ Usage:
 `)
 }
 
+// runUpdateCheck is the check-update entrypoint bound to the real process
+// environment, the GitHub-backed checker, and the standard streams.
 func runUpdateCheck(args []string) {
+	checkForUpdate(args, environment(), updatecheck.Run, os.Stdout, os.Stderr)
+}
+
+// checkForUpdate runs the release update check and reports its outcome. The
+// opt-out is evaluated first, so a disabled check never resolves the state
+// directory or reaches the checker, even with --force. Write errors on the
+// output streams are ignored, as with fmt.Print.
+func checkForUpdate(
+	args []string,
+	env map[string]string,
+	run func(updatecheck.Options) updatecheck.Result,
+	stdout, stderr io.Writer,
+) {
 	quiet := hasFlag(args, "--quiet")
+	if updateCheckDisabled(env) {
+		if !quiet {
+			_, _ = fmt.Fprintf(stdout, "Agent Usage: update check is disabled by %s.\n", updateCheckDisableEnv)
+		}
+		return
+	}
 	currentVersion := flagValue(args, "--current-version")
 	if currentVersion == "" {
 		currentVersion = version
 	}
-	result := updatecheck.Run(updatecheck.Options{
+	result := run(updatecheck.Options{
 		CurrentVersion: currentVersion,
-		StateDir:       setup.ResolvePluginConfigDir(environment()),
+		StateDir:       setup.ResolvePluginConfigDir(env),
 		Force:          hasFlag(args, "--force"),
-		Notify:         updateNotification(environment()),
+		Notify:         updateNotification(env),
 	})
 	if quiet {
 		return
 	}
 	if result.Err != nil {
-		fmt.Fprintf(os.Stderr, "Agent Usage: could not check for updates: %v\n", result.Err)
+		_, _ = fmt.Fprintf(stderr, "Agent Usage: could not check for updates: %v\n", result.Err)
 		return
 	}
 	if !result.Checked {
-		fmt.Println("Agent Usage: update check is not due yet.")
+		_, _ = fmt.Fprintln(stdout, "Agent Usage: update check is not due yet.")
 		return
 	}
 	if !result.Update {
-		fmt.Printf("Agent Usage %s is up to date.\n", result.Current)
+		_, _ = fmt.Fprintf(stdout, "Agent Usage %s is up to date.\n", result.Current)
 		return
 	}
-	fmt.Printf("Agent Usage update available: %s (installed %s)\n", result.Latest, result.Current)
-	fmt.Printf("Release and update instructions: %s\n", result.ReleaseURL)
+	_, _ = fmt.Fprintf(stdout, "Agent Usage update available: %s (installed %s)\n", result.Latest, result.Current)
+	_, _ = fmt.Fprintf(stdout, "Release and update instructions: %s\n", result.ReleaseURL)
 }
 
 func hasFlag(args []string, flag string) bool {
@@ -195,6 +217,18 @@ func updateNotification(env map[string]string) updatecheck.NotifyFunc {
 		return nil
 	}
 	return herdrcli.ShowNotification
+}
+
+// updateCheckDisableEnv names the environment variable that opts out of the
+// GitHub release update check. Any non-blank value disables it.
+const updateCheckDisableEnv = "USAGEBAR_DISABLE_UPDATE_CHECK"
+
+// updateCheckDisabled reports whether the update check is switched off by
+// USAGEBAR_DISABLE_UPDATE_CHECK. This is a network policy independent of
+// notify.enabled, which only gates the update toast. --force overrides only
+// the check interval, never this opt-out.
+func updateCheckDisabled(env map[string]string) bool {
+	return strings.TrimSpace(env[updateCheckDisableEnv]) != ""
 }
 
 // runStatusLineNotifications applies configured notification policy to one
