@@ -698,6 +698,8 @@ Network requests happen in the following cases:
 
 No telemetry, no analytics, or usage/session data is sent. State written by the plugin (config, notification state, update-check state, usage history) stays under `~/.config/herdr/plugins/config/usagebar/` and `~/.claude/herdr-usagebar/`.
 
+State files written by the plugin (caches, usage history, notification state, heartbeats, locks, update-check state, statusLine snapshots) are created owner-only (`0600`) through a private temporary file and an atomic rename, and directories the plugin creates for that state are `0700`. A pre-existing `0644` state file becomes `0600` the next time the plugin rewrites it; existing directories, including `~/.claude` and any directory named by an override such as `USAGEBAR_STATE_DIR`, keep their current mode and are never chmod-ed. If a state path is a symlink, the rewrite replaces the link with a regular file instead of writing through it. The plugin and Herdr configuration files are user config and keep their usual modes.
+
 ## Limitations
 
 - **Not a billing dashboard.** Local transcripts / rollouts / signals (and optional OpenCode web / Grok.com credits) can differ from official consoles (other machines, server-side windows).

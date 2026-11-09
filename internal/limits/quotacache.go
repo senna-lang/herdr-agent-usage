@@ -19,7 +19,8 @@ package limits
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
 
 type quotaCacheOutcome string
@@ -117,11 +118,7 @@ func (c quotaCache) save(entry quotaCacheEntry) {
 	if err != nil {
 		return
 	}
-	path := c.path()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return
-	}
-	_ = os.WriteFile(path, raw, 0o600)
+	_ = fsutil.WritePrivateFile(c.path(), raw)
 }
 
 // preservedQuotaSnapshot is the last good reading for this same identity,

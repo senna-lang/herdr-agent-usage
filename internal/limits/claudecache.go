@@ -10,6 +10,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
 
 // RateLimitsInput is the statusLine rate_limits shape.
@@ -90,14 +92,11 @@ func WriteClaudeLimitsCache(rateLimits RateLimitsInput, nowMs int64, path string
 	if rateLimits.PromptCachePresent {
 		payload.PromptCacheExpiresAt = rateLimits.PromptCacheExpiresAt
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	b, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
+	return fsutil.WritePrivateFile(path, append(b, '\n'))
 }
 
 // WriteClaudeLimitsCacheGuarded writes the cache when at least one window or a

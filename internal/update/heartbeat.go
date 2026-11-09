@@ -21,6 +21,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
 
 const (
@@ -36,12 +38,12 @@ const (
 
 func pluginStateDir() string {
 	if v := os.Getenv("USAGEBAR_STATE_DIR"); v != "" {
-		_ = os.MkdirAll(v, 0o755)
+		_ = fsutil.MkdirPrivate(v)
 		return v
 	}
 	home, _ := os.UserHomeDir()
 	dir := filepath.Join(home, ".claude", "herdr-usagebar")
-	_ = os.MkdirAll(dir, 0o755)
+	_ = fsutil.MkdirPrivate(dir)
 	return dir
 }
 
@@ -86,9 +88,8 @@ func TouchPaneHeartbeat(now time.Time) {
 }
 
 func touchPaneHeartbeatWith(path string, now time.Time, fingerprint string) {
-	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	line := strconv.FormatInt(now.UnixMilli(), 10) + "|" + fingerprint + "\n"
-	_ = os.WriteFile(path, []byte(line), 0o644)
+	_ = fsutil.WritePrivateFile(path, []byte(line))
 }
 
 // PaneHeartbeatFresh reports whether the Agent Usage pane collected

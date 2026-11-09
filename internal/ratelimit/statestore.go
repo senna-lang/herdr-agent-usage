@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
 
 const (
@@ -23,12 +25,12 @@ const (
 // of whether CLAUDE_CONFIG_DIR is visible (it is not on the read side).
 func baseDir() string {
 	if v := os.Getenv("USAGEBAR_STATE_DIR"); v != "" {
-		_ = os.MkdirAll(v, 0o755)
+		_ = fsutil.MkdirPrivate(v)
 		return v
 	}
 	home, _ := os.UserHomeDir()
 	dir := filepath.Join(home, ".claude", "herdr-usagebar")
-	_ = os.MkdirAll(dir, 0o755)
+	_ = fsutil.MkdirPrivate(dir)
 	return dir
 }
 
@@ -39,7 +41,7 @@ func resolveDir(dir string) string {
 	if dir == "" {
 		return baseDir()
 	}
-	_ = os.MkdirAll(dir, 0o755)
+	_ = fsutil.MkdirPrivate(dir)
 	return dir
 }
 
@@ -66,7 +68,7 @@ func AcquireLockIn(dir string) bool {
 	path := lockFilePathIn(dir)
 	deadline := time.Now().Add(lockTimeout)
 	for {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		f, err := fsutil.OpenPrivateExclusive(path)
 		if err == nil {
 			_ = f.Close()
 			return true
@@ -164,15 +166,11 @@ func writeClaudeStateIn(dir string, state ClaudeNotifyState) {
 		"sevenDay": toWire(state.SevenDay),
 	}
 	path := stateFilePathIn(dir)
-	tmp := path + ".tmp"
 	b, err := json.Marshal(wire)
 	if err != nil {
 		return
 	}
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return
-	}
-	_ = os.Rename(tmp, path)
+	_ = fsutil.WritePrivateFile(path, b)
 }
 
 // WithLockedState runs read→update→write under lock for Claude statusLine state.
@@ -219,15 +217,11 @@ func writeProviderState(state ProviderNotifyStateMap) {
 		wire[k] = toWire(v)
 	}
 	path := providerStateFilePath()
-	tmp := path + ".tmp"
 	b, err := json.Marshal(wire)
 	if err != nil {
 		return
 	}
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return
-	}
-	_ = os.Rename(tmp, path)
+	_ = fsutil.WritePrivateFile(path, b)
 }
 
 // WithLockedProviderState runs provider-primary notify under the same lock.

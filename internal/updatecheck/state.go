@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
 
 const (
@@ -39,45 +41,25 @@ func readState(dir string) State {
 }
 
 func writeState(dir string, state State) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
 	raw, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".update-check-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }()
-	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, statePath(dir))
+	return fsutil.WritePrivateFile(statePath(dir), raw)
 }
 
 // acquireLock lets simultaneous focus events coalesce to one check. A stale
 // lock from a killed process is discarded after two minutes.
 func acquireLock(dir string, now time.Time) (func(), bool) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := fsutil.MkdirPrivate(dir); err != nil {
 		return nil, false
 	}
 	path := lockPath(dir)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	f, err := fsutil.OpenPrivateExclusive(path)
 	if err != nil {
 		if info, statErr := os.Stat(path); statErr == nil && now.Sub(info.ModTime()) > 2*time.Minute {
 			_ = os.Remove(path)
-			f, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+			f, err = fsutil.OpenPrivateExclusive(path)
 		}
 	}
 	if err != nil {
