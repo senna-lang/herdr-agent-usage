@@ -1,14 +1,20 @@
 /**
- * Persists rate-limit notification state with an O_EXCL lock file under
- * ~/.claude/herdr-usagebar/ (or USAGEBAR_STATE_DIR).
+ * Persists rate-limit notification state under ~/.claude/herdr-usagebar/ (or
+ * USAGEBAR_STATE_DIR), guarded by an advisory flock on a lock file that is
+ * never removed. The flock gives mutual exclusion across processes and across
+ * separate opens within one process, and the kernel drops it when the holder
+ * exits, so a crashed run can never leave the state locked.
  */
 package ratelimit
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
@@ -16,7 +22,6 @@ import (
 const (
 	lockRetryInterval = 20 * time.Millisecond
 	lockTimeout       = 2 * time.Second
-	lockStale         = time.Minute
 )
 
 // baseDir is the single-default notify-state dir. Per-profile isolation is
@@ -49,8 +54,12 @@ func stateFilePathIn(dir string) string {
 	return filepath.Join(resolveDir(dir), "rate-limit-state.json")
 }
 
+// lockFilePathIn is deliberately not the old O_EXCL `rate-limit-state.lock`:
+// an older usagebar still running during an upgrade unlinks that name on
+// release, which would otherwise remove the file a new process holds a flock
+// on. A leftover old `.lock` file is simply ignored.
 func lockFilePathIn(dir string) string {
-	return filepath.Join(resolveDir(dir), "rate-limit-state.lock")
+	return filepath.Join(resolveDir(dir), "rate-limit-state.flock")
 }
 
 func providerStateFilePathIn(dir string) string {
@@ -62,42 +71,45 @@ func providerStateFilePathIn(dir string) string {
 
 func providerStateFilePath() string { return providerStateFilePathIn("") }
 
-// AcquireLockIn returns true when the lock in dir was acquired.
-// On timeout returns false without destroying another process's lock.
-func AcquireLockIn(dir string) bool {
+// acquireLock takes the exclusive notify-state flock in dir ("" = default
+// dir, as resolveDir) and returns its release func. On timeout or any open or
+// flock error it returns ok=false and holds nothing.
+//
+// The lock file is never removed, not even by release: removing a path that
+// another process holds a flock on would let a third process create and lock
+// a new inode at the same path, so two holders would coexist. Because the
+// kernel releases the flock when the holder exits, there is no staleness or
+// reclaim logic.
+func acquireLock(dir string) (release func(), ok bool) {
 	path := lockFilePathIn(dir)
+	if err := fsutil.MkdirPrivate(filepath.Dir(path)); err != nil {
+		return nil, false
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, fsutil.PrivateFileMode)
+	if err != nil {
+		return nil, false
+	}
+	fd := int(f.Fd())
 	deadline := time.Now().Add(lockTimeout)
 	for {
-		f, err := fsutil.OpenPrivateExclusive(path)
+		err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB)
 		if err == nil {
-			_ = f.Close()
-			return true
+			return func() {
+				_ = unix.Flock(fd, unix.LOCK_UN)
+				_ = f.Close()
+			}, true
 		}
-		// stale lock?
-		if st, err := os.Stat(path); err == nil {
-			if time.Since(st.ModTime()) > lockStale {
-				_ = os.Remove(path)
-				continue
-			}
+		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
+			_ = f.Close()
+			return nil, false
 		}
 		if time.Now().After(deadline) {
-			return false
+			_ = f.Close()
+			return nil, false
 		}
 		time.Sleep(lockRetryInterval)
 	}
 }
-
-// ReleaseLockIn removes the lock file in dir.
-func ReleaseLockIn(dir string) {
-	_ = os.Remove(lockFilePathIn(dir))
-}
-
-// AcquireLock returns true when the lock was acquired.
-// On timeout returns false without destroying another process's lock.
-func AcquireLock() bool { return AcquireLockIn("") }
-
-// ReleaseLock removes the lock file.
-func ReleaseLock() { ReleaseLockIn("") }
 
 // windowStateWire is the on-disk JSON shape for WindowState.
 type windowStateWire struct {
@@ -181,10 +193,11 @@ func WithLockedState(update func(current ClaudeNotifyState) ClaudeNotifyState) C
 // WithLockedStateIn is WithLockedState scoped to an explicit state dir. It
 // never runs update without the lock, since that decision could not persist.
 func WithLockedStateIn(dir string, update func(current ClaudeNotifyState) ClaudeNotifyState) ClaudeNotifyState {
-	if !AcquireLockIn(dir) {
+	release, ok := acquireLock(dir)
+	if !ok {
 		return readClaudeStateIn(dir)
 	}
-	defer ReleaseLockIn(dir)
+	defer release()
 
 	current := readClaudeStateIn(dir)
 	next := update(current)
@@ -228,10 +241,11 @@ func writeProviderState(state ProviderNotifyStateMap) {
 // It does not run update without the lock because its deduplication result
 // would not be persisted.
 func WithLockedProviderState(update func(current ProviderNotifyStateMap) ProviderNotifyStateMap) ProviderNotifyStateMap {
-	if !AcquireLock() {
+	release, ok := acquireLock("")
+	if !ok {
 		return readProviderState()
 	}
-	defer ReleaseLock()
+	defer release()
 
 	current := readProviderState()
 	next := update(current)
