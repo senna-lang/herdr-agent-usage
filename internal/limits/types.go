@@ -18,3 +18,12 @@ type LimitWindow = limitscore.LimitWindow
 type ProviderLimits = limitscore.ProviderLimits
 
 type ProviderPaneActivity = limitscore.ProviderPaneActivity
+
+type Status = limitscore.Status
+
+const (
+	StatusOK          = limitscore.StatusOK
+	StatusStale       = limitscore.StatusStale
+	StatusNeedsLogin  = limitscore.StatusNeedsLogin
+	StatusUnavailable = limitscore.StatusUnavailable
+)

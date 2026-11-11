@@ -57,6 +57,61 @@ type ProviderLimits struct {
 	// a group (e.g. the account's real login email), so members sharing one
 	// GroupLabel stay distinguishable. Ignored outside a group.
 	AccountLabel string
+	// ProfileID, ProfileLabel and Identity name the configured account this
+	// entry was collected for, as separate facts rather than folded into
+	// Label/AccountLabel: the id and label from its [[<family>.profiles]]
+	// entry (or the family default), and the most specific identity the
+	// adapter can show (a login email, else the account's home directory).
+	// Empty for providers without per-account profiles.
+	ProfileID    string
+	ProfileLabel string
+	Identity     string
+	// StaleMinutes is set when the windows come from an observation older
+	// than the adapter's freshness bound (the same age the "stale ~Nm ago"
+	// Note reports). Nil means fresh or unknown.
+	StaleMinutes *int
+	// Action is the command the user must run to restore this provider's
+	// data (e.g. "grok login"), when the adapter knows one. Empty otherwise.
+	Action string
+}
+
+// Status is the provider-neutral health of one ProviderLimits entry, so a
+// renderer can choose its look without parsing the free-text Note.
+type Status string
+
+const (
+	// StatusOK has at least one window and no freshness or login problem.
+	StatusOK Status = "ok"
+	// StatusStale has windows, but they are older than the freshness bound.
+	StatusStale Status = "stale"
+	// StatusNeedsLogin needs the user to run Action before data can return.
+	StatusNeedsLogin Status = "needs-login"
+	// StatusUnavailable has no windows and no known fix (no source yet).
+	StatusUnavailable Status = "unavailable"
+)
+
+// AllStatuses lists every Status, for exhaustive contract tests.
+var AllStatuses = []Status{StatusOK, StatusStale, StatusNeedsLogin, StatusUnavailable}
+
+// HasWindows reports whether any limit window is present.
+func (p ProviderLimits) HasWindows() bool {
+	return p.Primary != nil || p.Secondary != nil || p.Tertiary != nil
+}
+
+// Status derives the entry's health from the structured fields adapters set
+// (Action, StaleMinutes, windows); it never inspects Note. A required login
+// wins over staleness because old windows cannot refresh until it is done.
+func (p ProviderLimits) Status() Status {
+	switch {
+	case p.Action != "":
+		return StatusNeedsLogin
+	case !p.HasWindows():
+		return StatusUnavailable
+	case p.StaleMinutes != nil:
+		return StatusStale
+	default:
+		return StatusOK
+	}
 }
 
 // ProviderPaneActivity is windowed per-pane activity for one provider.

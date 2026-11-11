@@ -260,8 +260,7 @@ func CollectCodexLimitsIn(home, providerID, label string, nowMs int64) ProviderL
 			FetchedAtMs: fetchedMs,
 		}
 		if age := minutesBetween(observedMs, nowMs); age > codexStaleAfterMinutes {
-			note := "stale ~" + itoa(age) + "m ago"
-			out.Note = &note
+			markStale(&out, age)
 		}
 		if borrowed := borrowCodexWindowsIn(home, providerID, label, nowMs); borrowed != nil && borrowed.FetchedAtMs > observedMs {
 			return *borrowed

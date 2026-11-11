@@ -168,6 +168,9 @@ func TestCollectKiloLimits_NoGatewayLoginExplainsHowToFix(t *testing.T) {
 	if pl.Source != "none" || pl.Note == nil || !strings.Contains(*pl.Note, "kilo auth login") {
 		t.Fatalf("pl = %+v", pl)
 	}
+	if pl.Action != "kilo auth login" || pl.Status() != StatusNeedsLogin {
+		t.Fatalf("Action = %q, Status = %q, want the login command and needs-login", pl.Action, pl.Status())
+	}
 }
 
 func TestCollectKiloLimits_AnUnpaidPlanIsNotMetered(t *testing.T) {

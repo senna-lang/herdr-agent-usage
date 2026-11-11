@@ -128,8 +128,7 @@ func ProviderLimitsFromClaudeJSON(rawJSON string, nowMs int64) *ProviderLimits {
 		FetchedAtMs: fetchedAtMs,
 	}
 	if ageMin > 120 {
-		note := "stale ~" + itoa(ageMin) + "m ago"
-		out.Note = &note
+		markStale(&out, ageMin)
 	}
 	return &out
 }
@@ -169,6 +168,17 @@ func AccountEmailFromJSONPath(path string) (string, bool) {
 		return "", false
 	}
 	return AccountEmailFromJSON(string(raw))
+}
+
+// markStale records that out's windows were observed ageMin minutes ago,
+// past the adapter's freshness bound: the structured StaleMinutes for
+// renderers that pick a look from it, and the "stale ~Nm ago" Note the
+// text panel prints.
+func markStale(out *ProviderLimits, ageMin int) {
+	note := "stale ~" + itoa(ageMin) + "m ago"
+	out.Note = &note
+	age := ageMin
+	out.StaleMinutes = &age
 }
 
 func itoa(n int) string {

@@ -156,8 +156,7 @@ func collectFromStatusLineCache(nowMs int64, path string) *ProviderLimits {
 		FetchedAtMs: fetched,
 	}
 	if ageMin > 30 {
-		note := "stale ~" + itoa(ageMin) + "m ago"
-		out.Note = &note
+		markStale(&out, ageMin)
 	}
 	return &out
 }

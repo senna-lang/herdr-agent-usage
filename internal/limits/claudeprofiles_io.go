@@ -71,14 +71,33 @@ func claudeProfileByID(id string) (claude.ClaudeProfile, bool) {
 // email so the nested row stays distinguishable even when the profile has no
 // explicit label; it falls back to pl.Label when the email can't be read.
 func applyProfileGrouping(pl ProviderLimits, p claude.ClaudeProfile, multiProfile bool) ProviderLimits {
+	email, hasEmail := AccountEmailFromJSONPath(p.JSONPath)
+	identity := p.ConfigDir
+	if hasEmail {
+		identity = email
+	}
+	pl = withProfileIdentity(pl, p.ID, p.Label, identity)
 	if !multiProfile {
 		return pl
 	}
 	pl.GroupLabel = "Claude"
-	if email, ok := AccountEmailFromJSONPath(p.JSONPath); ok {
+	if hasEmail {
 		pl.AccountLabel = email
 	} else {
 		pl.AccountLabel = pl.Label
+	}
+	return pl
+}
+
+// withProfileIdentity stamps the configured account behind pl as separate
+// fields (see limitscore.ProviderLimits.ProfileID), independent of whether the
+// panel groups it. An adapter's own identity (e.g. a borrowed reading's) is
+// kept only when the profile supplies none.
+func withProfileIdentity(pl ProviderLimits, id, label, identity string) ProviderLimits {
+	pl.ProfileID = id
+	pl.ProfileLabel = label
+	if identity != "" {
+		pl.Identity = identity
 	}
 	return pl
 }
@@ -137,6 +156,7 @@ func codexProfileByIDIn(profiles []codex.CodexProfile, id string) (codex.CodexPr
 // multiProfile is true. AccountLabel carries the configured label (or id);
 // auth.json has no email we are willing to decode here.
 func applyCodexProfileGrouping(pl ProviderLimits, p codex.CodexProfile, multiProfile bool) ProviderLimits {
+	pl = withProfileIdentity(pl, p.ID, p.Label, p.Home)
 	if !multiProfile {
 		return pl
 	}
@@ -148,6 +168,7 @@ func applyCodexProfileGrouping(pl ProviderLimits, p codex.CodexProfile, multiPro
 // applyGrokProfileGrouping nests configured Grok accounts beneath one family
 // heading while retaining the configured account label on each row.
 func applyGrokProfileGrouping(pl ProviderLimits, profile grok.GrokProfile, multiProfile bool) ProviderLimits {
+	pl = withProfileIdentity(pl, profile.ID, profile.Label, profile.Home)
 	if !multiProfile {
 		return pl
 	}
@@ -159,6 +180,7 @@ func applyGrokProfileGrouping(pl ProviderLimits, profile grok.GrokProfile, multi
 // applyOpenCodeProfileGrouping nests configured OpenCode accounts beneath one
 // family heading while retaining the configured account label on each row.
 func applyOpenCodeProfileGrouping(pl ProviderLimits, profile opencode.OpenCodeProfile, multiProfile bool) ProviderLimits {
+	pl = withProfileIdentity(pl, profile.ID, profile.Label, profile.DataDir)
 	if !multiProfile {
 		return pl
 	}
