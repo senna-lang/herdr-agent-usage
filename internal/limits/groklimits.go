@@ -19,6 +19,9 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/planlabels"
 )
 
+// grokLoginAction is the command that restores a missing or expired Grok login.
+const grokLoginAction = "grok login"
+
 // GrokAuthEntry is one auth.json entry.
 type GrokAuthEntry struct {
 	Email     *string
@@ -284,16 +287,16 @@ func CollectGrokLimits(nowMs int64, opts CollectGrokLimitsOptions) ProviderLimit
 		if b := borrowGrokWindows(nil, nil, nowMs); b != nil {
 			return *b
 		}
-		note := "no ~/.grok/auth.json — run `grok login`"
-		return ProviderLimits{ProviderID: "grok", Label: "Grok", Source: "none", FetchedAtMs: nowMs, Note: &note}
+		note := "no ~/.grok/auth.json — run `" + grokLoginAction + "`"
+		return ProviderLimits{ProviderID: "grok", Label: "Grok", Source: "none", FetchedAtMs: nowMs, Note: &note, Action: grokLoginAction}
 	}
 	auth := ParseGrokAuthJSON(string(raw))
 	if auth == nil {
 		if b := borrowGrokWindows(nil, nil, nowMs); b != nil {
 			return *b
 		}
-		note := "no ~/.grok/auth.json — run `grok login`"
-		return ProviderLimits{ProviderID: "grok", Label: "Grok", Source: "none", FetchedAtMs: nowMs, Note: &note}
+		note := "no ~/.grok/auth.json — run `" + grokLoginAction + "`"
+		return ProviderLimits{ProviderID: "grok", Label: "Grok", Source: "none", FetchedAtMs: nowMs, Note: &note, Action: grokLoginAction}
 	}
 
 	if auth.ExpiresAt != nil {
@@ -303,11 +306,11 @@ func CollectGrokLimits(nowMs int64, opts CollectGrokLimitsOptions) ProviderLimit
 			}
 			note := "token expired"
 			if auth.Email != nil {
-				note = fmt.Sprintf("token expired (%s) — run `grok login`", *auth.Email)
+				note = fmt.Sprintf("token expired (%s) — run `%s`", *auth.Email, grokLoginAction)
 			} else {
-				note = "token expired (unknown) — run `grok login`"
+				note = "token expired (unknown) — run `" + grokLoginAction + "`"
 			}
-			return ProviderLimits{ProviderID: "grok", Label: "Grok", Source: "grok auth.json", FetchedAtMs: nowMs, Note: &note}
+			return ProviderLimits{ProviderID: "grok", Label: "Grok", Source: "grok auth.json", FetchedAtMs: nowMs, Note: &note, Action: grokLoginAction}
 		}
 	}
 

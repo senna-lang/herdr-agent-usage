@@ -13,3 +13,7 @@
 # an untracked copy makes `git status --porcelain` non-empty, which blocks
 # scripts/release.sh's clean-worktree check.
 .serena/
+
+# Written by `herdr-app check` into a mod folder; the app regenerates them.
+/app/mods/*/gpui-kit.d.ts
+/app/mods/*/jsconfig.json

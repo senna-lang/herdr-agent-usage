@@ -29,6 +29,9 @@ import (
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/kilo"
 )
 
+// kiloLoginAction is the command that restores a missing Kilo Gateway login.
+const kiloLoginAction = "kilo auth login"
+
 // kiloMonthlyWindowMinutes is a calendar month's worth of minutes, used only
 // as a display hint. The countdown is driven by the reset timestamp Kilo itself
 // reports, never by this constant.
@@ -160,8 +163,8 @@ func CollectKiloLimits(nowMs int64, opts CollectKiloLimitsOptions) ProviderLimit
 	}
 	credential := kilo.GatewayLogin(authPath)
 	if credential == nil {
-		pl := ProviderLimits{ProviderID: providerID, Label: label, Source: "none", FetchedAtMs: nowMs}
-		pl.Note = strPtr("no Kilo Gateway login in Kilo's auth.json — run `kilo auth login`")
+		pl := ProviderLimits{ProviderID: providerID, Label: label, Source: "none", FetchedAtMs: nowMs, Action: kiloLoginAction}
+		pl.Note = strPtr("no Kilo Gateway login in Kilo's auth.json — run `" + kiloLoginAction + "`")
 		return pl
 	}
 

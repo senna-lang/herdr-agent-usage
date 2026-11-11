@@ -98,6 +98,27 @@ func TestStatusLineNotificationsDisabled(t *testing.T) {
 	}
 }
 
+// With external delivery the bridge stays silent and leaves the window state
+// untouched, so `notify --json` still sees the crossing.
+func TestStatusLineNotificationsExternalDelivery(t *testing.T) {
+	profile := claude.ClaudeProfile{StateDir: t.TempDir()}
+	config := setup.PluginConfig{NotifyEnabled: true, NotifyDelivery: setup.NotifyDeliveryExternal, RemainingThresholds: []int{50, 20, 10, 5}}
+	notifications := 0
+	runStatusLineNotifications(
+		profile,
+		`{"rate_limits":{"five_hour":{"used_percentage":55,"resets_at":1800000000}}}`,
+		1_700_000_000_000,
+		config,
+		func(_, _ string) bool { notifications++; return true },
+	)
+	if notifications != 0 {
+		t.Fatalf("external delivery sent %d toasts through herdr", notifications)
+	}
+	if _, err := os.Stat(filepath.Join(profile.StateDir, "rate-limit-state.json")); !os.IsNotExist(err) {
+		t.Fatalf("external delivery recorded state: %v", err)
+	}
+}
+
 // A quota dashboard must not wait for Herdr or read pane activity transcripts.
 // Legacy collection and active-provider filtering still query Herdr.
 func TestCollectQuotasOnly(t *testing.T) {
@@ -112,6 +133,8 @@ func TestCollectQuotasOnly(t *testing.T) {
 		{"active quotas", []string{"--quotas-only"}, true, "", false},
 		{"legacy full collection", []string{"--all"}, true, "", false},
 		{"active quotas with no panes", []string{"--quotas-only"}, true, `{"result":{"panes":[]}}`, true},
+		{"caller-supplied empty pane list", []string{"--quotas-only", "--panes", "[]"}, false, "", true},
+		{"caller-supplied claude pane", []string{"--quotas-only", "--panes", `[{"paneId":"p1","agent":"claude"}]`}, false, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -200,4 +223,31 @@ func captureCollectJSON(t *testing.T, args []string) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+// A Claude toast names its account unless it is the lone implicit default.
+func TestStatusLineNotifierNamesTheAccount(t *testing.T) {
+	defaultProfile := claude.ClaudeProfile{ID: claude.DefaultProfileID, Label: claude.DefaultProfileLabel}
+	work := claude.ClaudeProfile{ID: "claude-work", Label: "work"}
+	cases := []struct {
+		name     string
+		profile  claude.ClaudeProfile
+		profiles []claude.ClaudeProfile
+		want     string
+	}{
+		{"lone default", defaultProfile, []claude.ClaudeProfile{defaultProfile}, "Session limit"},
+		{"default among several", defaultProfile, []claude.ClaudeProfile{defaultProfile, work}, "Session limit · Claude"},
+		{"configured account", work, []claude.ClaudeProfile{defaultProfile, work}, "Session limit · work"},
+		{"lone configured account", work, []claude.ClaudeProfile{work}, "Session limit · work"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got string
+			notify := statusLineNotifier(func(title, _ string) bool { got = title; return true }, tc.profile, tc.profiles)
+			notify("Session limit", "body")
+			if got != tc.want {
+				t.Fatalf("title = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }

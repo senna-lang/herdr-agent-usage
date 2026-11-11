@@ -247,6 +247,11 @@ func TestCollectGrokLimits_DeadEndsKeepIdentityWithoutObservation(t *testing.T) 
 			if got.Primary != nil || got.Secondary != nil || got.Tertiary != nil {
 				t.Fatalf("dead end must carry no windows, got %+v", got)
 			}
+			// A note that tells the user to log in carries the same command as
+			// the structured Action, so renderers never parse the note.
+			if containsStr(*got.Note, "grok login") != (got.Action == "grok login") {
+				t.Fatalf("Note %q vs Action %q disagree", *got.Note, got.Action)
+			}
 		})
 	}
 }

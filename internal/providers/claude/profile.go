@@ -291,3 +291,13 @@ func IsClaudeProviderID(id string, profiles []ClaudeProfile) bool {
 	}
 	return false
 }
+
+// ToastAccountLabel is the account a rate-limit toast for p names in its
+// title, or "" when p is the lone implicit default and no account needs
+// naming. With several profiles every toast names its account.
+func ToastAccountLabel(p ClaudeProfile, profiles []ClaudeProfile) string {
+	if len(profiles) <= 1 && IsDefaultProfile(p) {
+		return ""
+	}
+	return p.Label
+}

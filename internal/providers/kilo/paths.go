@@ -92,3 +92,19 @@ func regularFile(path string) string {
 	}
 	return ""
 }
+
+// DataDir is Kilo's data directory (KILO_DATA_DIR, else XDG_DATA_HOME/kilo,
+// else ~/.local/share/kilo), whether or not it exists.
+func DataDir() string {
+	if dir := os.Getenv("KILO_DATA_DIR"); dir != "" {
+		return dir
+	}
+	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+		return filepath.Join(xdg, dataDirName)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", dataDirName)
+}

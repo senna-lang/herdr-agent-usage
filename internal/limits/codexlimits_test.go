@@ -323,10 +323,18 @@ func TestCollectCodexLimits_StaleRolloutIsLabeled(t *testing.T) {
 				if got.Note != nil {
 					t.Fatalf("note = %q, want none for a current snapshot", *got.Note)
 				}
+				if got.StaleMinutes != nil || got.Status() != StatusOK {
+					t.Fatalf("StaleMinutes = %v, Status = %q, want nil and ok", got.StaleMinutes, got.Status())
+				}
 				return
 			}
 			if got.Note == nil {
 				t.Fatalf("want note %q, got none", tc.wantNote)
+			}
+			// The structured fields carry the same age the note prints, so a
+			// renderer never needs to parse the text.
+			if got.StaleMinutes == nil || *got.StaleMinutes != 120 || got.Status() != StatusStale {
+				t.Fatalf("StaleMinutes = %v, Status = %q, want 120 and stale", got.StaleMinutes, got.Status())
 			}
 			if *got.Note != tc.wantNote {
 				t.Fatalf("note = %q, want %q", *got.Note, tc.wantNote)

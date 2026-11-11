@@ -11,11 +11,13 @@ package setup
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
@@ -30,6 +32,10 @@ type PluginConfig struct {
 	RemainingThresholds []int
 	// NotifyEnabled is the plugin-side intent (separate from host toast delivery).
 	NotifyEnabled bool
+	// NotifyDelivery says who sends due toasts: "herdr" (default) through the
+	// herdr CLI from the hooks and the statusLine bridge, or "external", where
+	// those stay silent and a host collects them with `usagebar notify --json`.
+	NotifyDelivery string
 	// LimitPercent is the presentation direction for quota percentages.
 	// remaining (default) shows headroom; used shows consumption. Notify
 	// firing still uses remaining thresholds.
@@ -40,6 +46,14 @@ type PluginConfig struct {
 	// SidebarWindows selects the $limit presentation: "shortest" (default, the
 	// numerically tightest window) or "all" (every present window on one row).
 	SidebarWindows string
+	// Providers is the [ui] providers list: the provider families (agent ids
+	// such as "claude", "codex") to collect and show. Empty means every
+	// provider; hosts may still hide ones not in use.
+	Providers []string
+	// UnknownProviders are the [ui] providers entries that name no
+	// registered provider; they are dropped from Providers and reported by
+	// `usagebar setup`.
+	UnknownProviders []string
 	// ClaudeProfiles are the configured [[claude.profiles]] entries (unresolved).
 	// Empty means the single implicit "claude" profile is synthesized downstream.
 	ClaudeProfiles []claude.ProfileSpec
@@ -54,9 +68,30 @@ type PluginConfig struct {
 var DefaultPluginConfig = PluginConfig{
 	RemainingThresholds: append([]int(nil), DefaultRemainingThresholds...),
 	NotifyEnabled:       true,
+	NotifyDelivery:      NotifyDeliveryHerdr,
 	LimitPercent:        core.LimitPercentRemaining,
 	CacheDisplay:        true,
 	SidebarWindows:      SidebarWindowsShortest,
+}
+
+// Toast delivery modes ([notify] delivery).
+const (
+	NotifyDeliveryHerdr    = "herdr"
+	NotifyDeliveryExternal = "external"
+)
+
+// NormalizeNotifyDelivery maps a config value to a known mode, defaulting to
+// herdr delivery for anything unrecognised.
+func NormalizeNotifyDelivery(v string) string {
+	if strings.EqualFold(strings.TrimSpace(v), NotifyDeliveryExternal) {
+		return NotifyDeliveryExternal
+	}
+	return NotifyDeliveryHerdr
+}
+
+// HerdrDelivers reports whether the herdr CLI path should send toasts.
+func (c PluginConfig) HerdrDelivers() bool {
+	return c.NotifyEnabled && c.NotifyDelivery != NotifyDeliveryExternal
 }
 
 // Sidebar $limit presentation modes.
@@ -82,13 +117,15 @@ func NormalizeSidebarWindows(v string) string {
 // pluginConfigWire mirrors the on-disk TOML shape for decoding.
 type pluginConfigWire struct {
 	Notify struct {
-		Enabled             *bool `toml:"enabled"`
-		RemainingThresholds []int `toml:"remaining_thresholds"`
+		Enabled             *bool   `toml:"enabled"`
+		RemainingThresholds []int   `toml:"remaining_thresholds"`
+		Delivery            *string `toml:"delivery"`
 	} `toml:"notify"`
 	UI struct {
-		LimitPercent   *string `toml:"limit_percent"`
-		CacheDisplay   *bool   `toml:"cache_display"`
-		SidebarWindows *string `toml:"sidebar_windows"`
+		LimitPercent   *string   `toml:"limit_percent"`
+		CacheDisplay   *bool     `toml:"cache_display"`
+		SidebarWindows *string   `toml:"sidebar_windows"`
+		Providers      *[]string `toml:"providers"`
 	} `toml:"ui"`
 	Claude struct {
 		Profiles []profileWire `toml:"profiles"`
@@ -253,6 +290,7 @@ func validThresholds(in []int) ([]int, bool) {
 func ParsePluginConfigTOML(raw string) PluginConfig {
 	cfg := PluginConfig{
 		NotifyEnabled:       DefaultPluginConfig.NotifyEnabled,
+		NotifyDelivery:      DefaultPluginConfig.NotifyDelivery,
 		RemainingThresholds: append([]int(nil), DefaultPluginConfig.RemainingThresholds...),
 		LimitPercent:        DefaultPluginConfig.LimitPercent,
 		CacheDisplay:        DefaultPluginConfig.CacheDisplay,
@@ -265,6 +303,9 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 	if wire.Notify.Enabled != nil {
 		cfg.NotifyEnabled = *wire.Notify.Enabled
 	}
+	if wire.Notify.Delivery != nil {
+		cfg.NotifyDelivery = NormalizeNotifyDelivery(*wire.Notify.Delivery)
+	}
 	if thr, ok := validThresholds(wire.Notify.RemainingThresholds); ok {
 		cfg.RemainingThresholds = thr
 	}
@@ -276,6 +317,9 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 	}
 	if wire.UI.SidebarWindows != nil {
 		cfg.SidebarWindows = NormalizeSidebarWindows(*wire.UI.SidebarWindows)
+	}
+	if wire.UI.Providers != nil {
+		cfg.Providers, cfg.UnknownProviders = splitProviderIDs(*wire.UI.Providers)
 	}
 
 	for _, p := range wire.Claude.Profiles {
@@ -300,6 +344,25 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 		cfg.OpenCodeProfiles = append(cfg.OpenCodeProfiles, opencode.ProfileSpec{ID: p.ID, Label: p.Label, DataDir: p.DataDir})
 	}
 	return cfg
+}
+
+// splitProviderIDs normalizes a [ui] providers list and separates the ids that
+// name a provider with its own quota from the ones that name nothing. A typo
+// must not silently hide a provider, so unknown ids are returned for the setup
+// report instead of being kept as filters that match nothing.
+func splitProviderIDs(ids []string) (known, unknown []string) {
+	valid := providers.IDsWithCapability(providers.CapOwnsSubscriptionQuota)
+	for _, id := range ids {
+		id = strings.ToLower(strings.TrimSpace(id))
+		switch {
+		case id == "":
+		case slices.Contains(valid, id):
+			known = append(known, id)
+		default:
+			unknown = append(unknown, id)
+		}
+	}
+	return known, unknown
 }
 
 // SeedPluginConfigIfMissing writes default config.toml when missing; returns true if created.

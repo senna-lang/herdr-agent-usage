@@ -11,7 +11,9 @@ package setup
 
 import (
 	"path/filepath"
+	"strings"
 
+	"github.com/senna-lang/herdr-agent-usage/internal/providers"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
@@ -198,4 +200,25 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// providerListReportLines reports the [ui] providers filter. Unknown ids are
+// dropped at load time, so setup is where the user learns an entry was ignored;
+// a list left with no known id falls back to every provider.
+func providerListReportLines(known, unknown []string) []string {
+	if len(known) == 0 && len(unknown) == 0 {
+		return nil
+	}
+	var lines []string
+	if len(known) > 0 {
+		lines = append(lines, "· ui providers: "+strings.Join(known, ", "))
+	}
+	if len(unknown) > 0 {
+		lines = append(lines, "  ! ignored unknown [ui] providers: "+strings.Join(unknown, ", ")+
+			" (known: "+strings.Join(providers.IDsWithCapability(providers.CapOwnsSubscriptionQuota), ", ")+")")
+		if len(known) == 0 {
+			lines = append(lines, "  ! no known provider left, so every provider is collected")
+		}
+	}
+	return append(lines, "")
 }
