@@ -113,3 +113,20 @@ func TestToastBucketAndLevel(t *testing.T) {
 		}
 	}
 }
+
+// Two Claude profiles signed into one account share a reading; the report
+// holds a single toast for it, not one per dir.
+func TestCollectPendingToasts_OneToastForTwoProfilesOnOneAccount(t *testing.T) {
+	isolatePendingToastState(t)
+	resets := notifyResetsAt
+	providers := []ProviderLimits{
+		{ProviderID: "claude", ProfileLabel: "personal", Primary: &LimitWindow{UsedPercentage: 85, ResetsAt: &resets}},
+		{ProviderID: "claude-work", ProfileLabel: "work", SameAccountAs: "claude", Primary: &LimitWindow{UsedPercentage: 85, ResetsAt: &resets}},
+	}
+
+	got := CollectPendingToasts(providers, notifyNowMs, nil, core.LimitPercentRemaining)
+
+	if len(got.Toasts) != 1 || got.Toasts[0].ProviderID != "claude" {
+		t.Fatalf("toasts = %+v, want exactly one for the owning profile", got.Toasts)
+	}
+}
