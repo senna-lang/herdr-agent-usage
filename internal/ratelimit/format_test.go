@@ -71,3 +71,12 @@ func TestFormatProviderPrimaryNotification_UsedInvertsFiredBucket(t *testing.T) 
 		t.Fatalf("body=%q", result.Body)
 	}
 }
+
+func TestWithAccountLabel(t *testing.T) {
+	if got := WithAccountLabel("Session limit", "work"); got != "Session limit · work" {
+		t.Fatalf("got %q", got)
+	}
+	if got := WithAccountLabel("Session limit", ""); got != "Session limit" {
+		t.Fatalf("got %q", got)
+	}
+}

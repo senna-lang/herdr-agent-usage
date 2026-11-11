@@ -67,3 +67,30 @@ Adding fields is compatible. Renaming or removing one bumps `version`.
   "lowCachePanes": [{ "label": "Task A", "hitPercent": 35 }]
 }
 ```
+
+## `usagebar notify --json [--panes JSON|-]`
+
+Prints the rate-limit toasts that are due now instead of sending them through
+herdr, and records them as shown, so a host can post them itself. It covers
+every provider's shortest window and both Claude windows (5h and 7d, per
+profile, sharing the statusLine bridge's state, so a crossing fires once):
+
+```json
+{ "version": 1, "toasts": [{
+  "providerId": "codex", "profileLabel": "personal", "window": "primary",
+  "bucket": 20, "resetsAt": 1793730000, "level": "warning",
+  "title": "Codex limit · personal",
+  "body": "20% remaining · resets in 1h 12m" }] }
+```
+
+`level` is `warning` above the 10% bucket and `error` at 10% and below (with
+the default thresholds: 50/20 warn, 10/5 error). It honours `[notify] enabled`
+and `remaining_thresholds`. To keep herdr from also sending them, set:
+
+```toml
+[notify]
+delivery = "external"   # default "herdr"
+```
+
+With `external`, `usagebar notify` (the herdr hook) and the statusLine bridge
+send nothing and leave the crossing for `notify --json`.

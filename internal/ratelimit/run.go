@@ -10,6 +10,10 @@ import "github.com/senna-lang/herdr-agent-usage/internal/core"
 // ShowNotificationFn displays a toast; returns whether it was shown.
 type ShowNotificationFn func(title, body string) bool
 
+// DeliverFn delivers one due toast with the bucket that fired it; it
+// returns whether the toast was shown (and so may be recorded as such).
+type DeliverFn func(bucket Bucket, text NotificationText) bool
+
 // ProcessWindow applies the configured bucket decision and notification for one Claude window.
 func ProcessWindow(
 	key WindowKey,
@@ -18,6 +22,25 @@ func ProcessWindow(
 	nowMs int64,
 	thresholds []int,
 	notify ShowNotificationFn,
+	percent core.LimitPercent,
+) *WindowState {
+	return ProcessWindowWith(key, input, previous, nowMs, thresholds, func(_ Bucket, text NotificationText) bool {
+		if notify == nil {
+			return false
+		}
+		return notify(text.Title, text.Body)
+	}, percent)
+}
+
+// ProcessWindowWith is ProcessWindow for callers that also need the fired
+// bucket (e.g. to choose a toast level).
+func ProcessWindowWith(
+	key WindowKey,
+	input *RateWindowInput,
+	previous *WindowState,
+	nowMs int64,
+	thresholds []int,
+	deliver DeliverFn,
 	percent core.LimitPercent,
 ) *WindowState {
 	if input == nil {
@@ -32,11 +55,7 @@ func ProcessWindow(
 		return &next
 	}
 	text := FormatNotificationBody(key, *decision.BucketToNotify, input.ResetsAt, nowMs, percent)
-	shown := false
-	if notify != nil {
-		shown = notify(text.Title, text.Body)
-	}
-	return ApplyNotifyResult(previous, decision.NewState, shown)
+	return ApplyNotifyResult(previous, decision.NewState, deliver(*decision.BucketToNotify, text))
 }
 
 // RunRateLimitCheck parses stdin JSON and updates Claude notify state under lock

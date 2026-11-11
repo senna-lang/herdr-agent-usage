@@ -18,12 +18,12 @@ type NotifyFunc func(title, body string) bool
 // ProviderNotifyState is keyed by provider id (codex, opencode, grok).
 type ProviderNotifyState map[string]*ratelimit.WindowState
 
-func processProvider(
+func processProviderWith(
 	provider ProviderLimits,
 	previous *ratelimit.WindowState,
 	nowMs int64,
 	thresholds []int,
-	notify NotifyFunc,
+	deliver ratelimit.DeliverFn,
 	percent core.LimitPercent,
 ) *ratelimit.WindowState {
 	primary := provider.Primary
@@ -41,14 +41,16 @@ func processProvider(
 		return &next
 	}
 
+	heading, account := toastHeading(provider)
 	text := ratelimit.FormatProviderPrimaryNotification(
-		provider.Label,
+		heading,
 		*decision.BucketToNotify,
 		*primary.ResetsAt,
 		nowMs,
 		percent,
 	)
-	return ratelimit.ApplyNotifyResult(previous, decision.NewState, notify(text.Title, text.Body))
+	text.Title = ratelimit.WithAccountLabel(text.Title, account)
+	return ratelimit.ApplyNotifyResult(previous, decision.NewState, deliver(*decision.BucketToNotify, text))
 }
 
 // CheckProviderPrimaryLimitsWithThresholds is the pure state transition for
@@ -63,6 +65,22 @@ func CheckProviderPrimaryLimitsWithThresholds(
 	claudeProfiles []claude.ClaudeProfile,
 	percent core.LimitPercent,
 ) ProviderNotifyState {
+	return checkProviderPrimaryLimitsWith(providers, current, nowMs, thresholds, func(_ ProviderLimits) ratelimit.DeliverFn {
+		return func(_ ratelimit.Bucket, text ratelimit.NotificationText) bool { return notify(text.Title, text.Body) }
+	}, claudeProfiles, percent)
+}
+
+// checkProviderPrimaryLimitsWith is the state transition with a per-provider
+// delivery, so a caller can see which provider and bucket fired.
+func checkProviderPrimaryLimitsWith(
+	providers []ProviderLimits,
+	current ProviderNotifyState,
+	nowMs int64,
+	thresholds []int,
+	deliverFor func(ProviderLimits) ratelimit.DeliverFn,
+	claudeProfiles []claude.ClaudeProfile,
+	percent core.LimitPercent,
+) ProviderNotifyState {
 	next := make(ProviderNotifyState, len(current)+len(providers))
 	for k, v := range current {
 		next[k] = v
@@ -72,7 +90,7 @@ func CheckProviderPrimaryLimitsWithThresholds(
 			continue
 		}
 		prev := current[provider.ProviderID]
-		next[provider.ProviderID] = processProvider(provider, prev, nowMs, thresholds, notify, percent)
+		next[provider.ProviderID] = processProviderWith(provider, prev, nowMs, thresholds, deliverFor(provider), percent)
 	}
 	return next
 }
@@ -86,4 +104,19 @@ func CheckProviderPrimaryLimits(
 	claudeProfiles []claude.ClaudeProfile,
 ) ProviderNotifyState {
 	return CheckProviderPrimaryLimitsWithThresholds(providers, current, nowMs, nil, notify, claudeProfiles, core.LimitPercentRemaining)
+}
+
+// toastHeading picks the provider name and account a toast title shows. An
+// entry grouped with other accounts of its family is titled by the family
+// ("Codex limit") and names its own account; a lone entry keeps its label
+// and names no account, as before.
+func toastHeading(provider ProviderLimits) (heading, account string) {
+	if provider.GroupLabel == "" {
+		return provider.Label, ""
+	}
+	account = provider.ProfileLabel
+	if account == "" {
+		account = provider.Label
+	}
+	return provider.GroupLabel, account
 }

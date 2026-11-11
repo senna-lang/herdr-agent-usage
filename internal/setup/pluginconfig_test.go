@@ -202,3 +202,23 @@ func contains(s, sub string) bool {
 			return false
 		}())
 }
+
+func TestParsePluginConfigTOML_NotifyDelivery(t *testing.T) {
+	cases := []struct {
+		raw       string
+		want      string
+		herdrSend bool
+	}{
+		{"", NotifyDeliveryHerdr, true},
+		{"[notify]\ndelivery = \"external\"\n", NotifyDeliveryExternal, false},
+		{"[notify]\ndelivery = \"EXTERNAL\"\n", NotifyDeliveryExternal, false},
+		{"[notify]\ndelivery = \"carrier pigeon\"\n", NotifyDeliveryHerdr, true},
+		{"[notify]\nenabled = false\n", NotifyDeliveryHerdr, false},
+	}
+	for _, tc := range cases {
+		cfg := ParsePluginConfigTOML(tc.raw)
+		if cfg.NotifyDelivery != tc.want || cfg.HerdrDelivers() != tc.herdrSend {
+			t.Errorf("%q: delivery = %q herdr = %v, want %q %v", tc.raw, cfg.NotifyDelivery, cfg.HerdrDelivers(), tc.want, tc.herdrSend)
+		}
+	}
+}

@@ -30,6 +30,10 @@ type PluginConfig struct {
 	RemainingThresholds []int
 	// NotifyEnabled is the plugin-side intent (separate from host toast delivery).
 	NotifyEnabled bool
+	// NotifyDelivery says who sends due toasts: "herdr" (default) through the
+	// herdr CLI from the hooks and the statusLine bridge, or "external", where
+	// those stay silent and a host collects them with `usagebar notify --json`.
+	NotifyDelivery string
 	// LimitPercent is the presentation direction for quota percentages.
 	// remaining (default) shows headroom; used shows consumption. Notify
 	// firing still uses remaining thresholds.
@@ -54,9 +58,30 @@ type PluginConfig struct {
 var DefaultPluginConfig = PluginConfig{
 	RemainingThresholds: append([]int(nil), DefaultRemainingThresholds...),
 	NotifyEnabled:       true,
+	NotifyDelivery:      NotifyDeliveryHerdr,
 	LimitPercent:        core.LimitPercentRemaining,
 	CacheDisplay:        true,
 	SidebarWindows:      SidebarWindowsShortest,
+}
+
+// Toast delivery modes ([notify] delivery).
+const (
+	NotifyDeliveryHerdr    = "herdr"
+	NotifyDeliveryExternal = "external"
+)
+
+// NormalizeNotifyDelivery maps a config value to a known mode, defaulting to
+// herdr delivery for anything unrecognised.
+func NormalizeNotifyDelivery(v string) string {
+	if strings.EqualFold(strings.TrimSpace(v), NotifyDeliveryExternal) {
+		return NotifyDeliveryExternal
+	}
+	return NotifyDeliveryHerdr
+}
+
+// HerdrDelivers reports whether the herdr CLI path should send toasts.
+func (c PluginConfig) HerdrDelivers() bool {
+	return c.NotifyEnabled && c.NotifyDelivery != NotifyDeliveryExternal
 }
 
 // Sidebar $limit presentation modes.
@@ -82,8 +107,9 @@ func NormalizeSidebarWindows(v string) string {
 // pluginConfigWire mirrors the on-disk TOML shape for decoding.
 type pluginConfigWire struct {
 	Notify struct {
-		Enabled             *bool `toml:"enabled"`
-		RemainingThresholds []int `toml:"remaining_thresholds"`
+		Enabled             *bool   `toml:"enabled"`
+		RemainingThresholds []int   `toml:"remaining_thresholds"`
+		Delivery            *string `toml:"delivery"`
 	} `toml:"notify"`
 	UI struct {
 		LimitPercent   *string `toml:"limit_percent"`
@@ -253,6 +279,7 @@ func validThresholds(in []int) ([]int, bool) {
 func ParsePluginConfigTOML(raw string) PluginConfig {
 	cfg := PluginConfig{
 		NotifyEnabled:       DefaultPluginConfig.NotifyEnabled,
+		NotifyDelivery:      DefaultPluginConfig.NotifyDelivery,
 		RemainingThresholds: append([]int(nil), DefaultPluginConfig.RemainingThresholds...),
 		LimitPercent:        DefaultPluginConfig.LimitPercent,
 		CacheDisplay:        DefaultPluginConfig.CacheDisplay,
@@ -264,6 +291,9 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 	}
 	if wire.Notify.Enabled != nil {
 		cfg.NotifyEnabled = *wire.Notify.Enabled
+	}
+	if wire.Notify.Delivery != nil {
+		cfg.NotifyDelivery = NormalizeNotifyDelivery(*wire.Notify.Delivery)
 	}
 	if thr, ok := validThresholds(wire.Notify.RemainingThresholds); ok {
 		cfg.RemainingThresholds = thr
