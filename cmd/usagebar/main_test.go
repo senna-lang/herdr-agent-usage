@@ -112,6 +112,8 @@ func TestCollectQuotasOnly(t *testing.T) {
 		{"active quotas", []string{"--quotas-only"}, true, "", false},
 		{"legacy full collection", []string{"--all"}, true, "", false},
 		{"active quotas with no panes", []string{"--quotas-only"}, true, `{"result":{"panes":[]}}`, true},
+		{"caller-supplied empty pane list", []string{"--quotas-only", "--panes", "[]"}, false, "", true},
+		{"caller-supplied claude pane", []string{"--quotas-only", "--panes", `[{"paneId":"p1","agent":"claude"}]`}, false, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()

@@ -113,9 +113,12 @@ Usage:
   usagebar cursor-statusline         Cursor CLI statusLine (stdin context_window)
   usagebar antigravity-statusline    Antigravity CLI statusLine (stdin context_window+quota)
   usagebar setup [--write-toast]     Seed plugin config / show snippets
-  usagebar collect [--all] [--quotas-only]
+  usagebar collect [--all] [--quotas-only] [--format v1] [--panes JSON|-]
                                      Print limits as JSON; --quotas-only skips
-                                     pane activity, API spend and cache diagnostics
+                                     pane activity, API spend and cache diagnostics;
+                                     --format v1 prints the versioned contract
+                                     (docs/collect-json-v1.md); --panes supplies
+                                     the open agent panes instead of asking herdr
   usagebar opencode-check            Debug: report the OpenCode Go usage path
                                      (browser session import → opencode.ai fetch)
   usagebar version
@@ -185,12 +188,18 @@ func hasFlag(args []string, flag string) bool {
 }
 
 func flagValue(args []string, flag string) string {
+	v, _ := flagValueOK(args, flag)
+	return v
+}
+
+// flagValueOK is flagValue plus whether the flag was given with a value.
+func flagValueOK(args []string, flag string) (string, bool) {
 	for i, arg := range args {
 		if arg == flag && i+1 < len(args) {
-			return args[i+1]
+			return args[i+1], true
 		}
 	}
-	return ""
+	return "", false
 }
 
 func environment() map[string]string {
@@ -293,16 +302,19 @@ type panelSnapshot struct {
 // that have no open agent pane in Herdr (the panel default; --all overrides).
 // When the pane query fails, all subscription providers are shown (fail-open).
 func collectPanel(nowMs int64, activeOnly bool) panelSnapshot {
-	return collectSnapshot(nowMs, activeOnly, true)
+	return collectSnapshot(nowMs, activeOnly, true, openPaneSnapshots)
 }
+
+// paneSource lists the open agent panes and whether the list is trustworthy.
+type paneSource func() ([]limits.OpenPaneSnapshot, bool)
 
 // Quota dashboards do not need activity transcripts. With all providers selected,
 // they also do not need Herdr; active-provider filtering still needs the pane list.
-func collectSnapshot(nowMs int64, activeOnly, includeActivity bool) panelSnapshot {
+func collectSnapshot(nowMs int64, activeOnly, includeActivity bool, listPanes paneSource) panelSnapshot {
 	var snaps []limits.OpenPaneSnapshot
 	var panesOK bool
 	if activeOnly || includeActivity {
-		snaps, panesOK = openPaneSnapshots()
+		snaps, panesOK = listPanes()
 	}
 	opts := limits.DefaultCollectOptions()
 	if activeOnly {
@@ -719,14 +731,65 @@ func runOpenCodeCheck() {
 }
 
 func runCollectJSON(args []string) {
+	format := flagValue(args, "--format")
+	if format != "" && format != "v1" {
+		fmt.Fprintf(os.Stderr, "usagebar collect: unknown --format %q (want v1)\n", format)
+		os.Exit(2)
+	}
+	listPanes, err := collectPaneSource(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "usagebar collect: %v\n", err)
+		os.Exit(2)
+	}
 	nowMs := time.Now().UnixMilli()
-	snap := collectSnapshot(nowMs, !hasFlag(args, "--all"), !hasFlag(args, "--quotas-only"))
+	activeOnly := !hasFlag(args, "--all")
+	snap := collectSnapshot(nowMs, activeOnly, !hasFlag(args, "--quotas-only"), listPanes)
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(struct {
-		Providers []limits.ProviderLimits   `json:"providers"`
-		APIUsage  []limits.APIProviderUsage `json:"apiUsage,omitempty"`
-	}{snap.providers, snap.apiUsage})
+	if format == "" {
+		// Legacy debug shape: Go field names, unversioned. Kept as-is.
+		_ = enc.Encode(struct {
+			Providers []limits.ProviderLimits   `json:"providers"`
+			APIUsage  []limits.APIProviderUsage `json:"apiUsage,omitempty"`
+		}{snap.providers, snap.apiUsage})
+		return
+	}
+	filter := limits.CollectFilterAll
+	if activeOnly {
+		filter = limits.CollectFilterOpenPanes
+	}
+	cfg := setup.LoadPluginConfig(setup.ResolvePluginConfigDir(environment()))
+	_ = enc.Encode(limits.BuildCollectReport(limits.CollectReportInput{
+		Providers:     snap.providers,
+		APIUsage:      snap.apiUsage,
+		LowCachePanes: snap.lowCachePanes,
+		Filter:        filter,
+		LimitPercent:  cfg.LimitPercent,
+		NowMs:         nowMs,
+	}))
+}
+
+// collectPaneSource picks where `collect` learns the open agent panes:
+// `--panes <json>` (a JSON array, or "-" for stdin) from a host that knows
+// its own panes, otherwise the herdr pane query.
+func collectPaneSource(args []string) (paneSource, error) {
+	raw, ok := flagValueOK(args, "--panes")
+	if !ok {
+		return openPaneSnapshots, nil
+	}
+	data := []byte(raw)
+	if raw == "-" {
+		read, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return nil, fmt.Errorf("read --panes from stdin: %w", err)
+		}
+		data = read
+	}
+	snaps, err := limits.ParseOpenPanesJSON(data)
+	if err != nil {
+		return nil, fmt.Errorf("--panes: %w", err)
+	}
+	return func() ([]limits.OpenPaneSnapshot, bool) { return snaps, true }, nil
 }
 
 // runCursorStatusLine records one Cursor statusLine payload and prints the line
