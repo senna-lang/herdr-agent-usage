@@ -213,6 +213,9 @@ func TestDefaultCollectOptions_MultiProfileGroupsEveryProfileUnderClaude(t *test
 		t.Fatalf("unlabeled profile should resolve AccountLabel from its email, got %q", got1.AccountLabel)
 	} // The profile's own id/label and its login identity are separate fields,
 	// so a renderer can show "My Work Account" and the email side by side.
+	if got0.Account != "primary@example.com" {
+		t.Fatalf("Account = %q, want the login email", got0.Account)
+	}
 	if got0.ProfileID != "claude" || got0.ProfileLabel != "My Work Account" || got0.Identity != "primary@example.com" {
 		t.Fatalf("profile identity = %q/%q/%q", got0.ProfileID, got0.ProfileLabel, got0.Identity)
 	}
@@ -424,6 +427,31 @@ func TestCollectAllProviderLimitsKeepsFreshRollingWindow(t *testing.T) {
 		got := CollectAllProviderLimits(nil, nowMs, opts)
 		if p := got[0].Primary; p.UsedPercentage != 75 || p.ResetsAt == nil {
 			t.Errorf("%dms until oldest expires: primary = %+v, want 75%% with resetsAt", untilOldestExpiresMs, *p)
+		}
+	}
+}
+
+// Every entry names its family, so a renderer can group and badge accounts
+// whose provider ids are arbitrary profile ids.
+func TestCollectAllProviderLimits_StampsTheFamily(t *testing.T) {
+	got := CollectAllProviderLimits(nil, 100, CollectOptions{
+		Claude: []ClaudeProfileCollector{{ID: "claude-2", Label: "work", Collector: func(_ *string, now int64) ProviderLimits {
+			return ProviderLimits{ProviderID: "claude-2", Label: "work", FetchedAtMs: now}
+		}}},
+		Codex: []CodexProfileCollector{{ID: "dev", Label: "dev", Collector: func(_ *string, now int64) ProviderLimits {
+			return ProviderLimits{ProviderID: "dev", Label: "dev", FetchedAtMs: now}
+		}}},
+	})
+	want := map[string]string{"claude-2": "claude", "dev": "codex", "opencode": "opencode", "grok": "grok"}
+	for _, spec := range singleCollectorQuotaSpecs {
+		want[spec.id] = spec.id
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d entries, want %d", len(got), len(want))
+	}
+	for _, p := range got {
+		if p.Family != want[p.ProviderID] {
+			t.Errorf("%s: Family = %q, want %q", p.ProviderID, p.Family, want[p.ProviderID])
 		}
 	}
 }

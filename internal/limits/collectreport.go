@@ -45,20 +45,25 @@ type CollectReport struct {
 
 // ProviderReport is one subscription account.
 type ProviderReport struct {
-	ProviderID   string  `json:"providerId"`
-	Label        string  `json:"label"`
-	GroupLabel   string  `json:"groupLabel"`
-	AccountLabel string  `json:"accountLabel"`
-	ProfileID    string  `json:"profileId"`
-	ProfileLabel string  `json:"profileLabel"`
-	Identity     string  `json:"identity"`
-	PlanType     *string `json:"planType"`
-	Source       string  `json:"source"`
-	FetchedAtMs  int64   `json:"fetchedAtMs"`
-	Note         *string `json:"note"`
-	Status       Status  `json:"status"`
-	StaleMinutes *int    `json:"staleMinutes"`
-	Action       string  `json:"action"`
+	ProviderID   string `json:"providerId"`
+	Family       string `json:"family"`
+	Label        string `json:"label"`
+	GroupLabel   string `json:"groupLabel"`
+	AccountLabel string `json:"accountLabel"`
+	ProfileID    string `json:"profileId"`
+	ProfileLabel string `json:"profileLabel"`
+	Identity     string `json:"identity"`
+	// Account is the login (email or account id) when readable, and
+	// SameAccountAs the providerId of the earlier entry for that account.
+	Account       string  `json:"account"`
+	SameAccountAs string  `json:"sameAccountAs"`
+	PlanType      *string `json:"planType"`
+	Source        string  `json:"source"`
+	FetchedAtMs   int64   `json:"fetchedAtMs"`
+	Note          *string `json:"note"`
+	Status        Status  `json:"status"`
+	StaleMinutes  *int    `json:"staleMinutes"`
+	Action        string  `json:"action"`
 	// Windows are in display order (primary, secondary, tertiary) and hold
 	// only the windows the provider reported.
 	Windows      []WindowReport      `json:"windows"`
@@ -188,21 +193,24 @@ func emptyMessageFor(filter CollectFilter) string {
 
 func providerReport(p ProviderLimits, percent core.LimitPercent, nowMs int64) ProviderReport {
 	out := ProviderReport{
-		ProviderID:   p.ProviderID,
-		Label:        p.Label,
-		GroupLabel:   p.GroupLabel,
-		AccountLabel: p.AccountLabel,
-		ProfileID:    p.ProfileID,
-		ProfileLabel: p.ProfileLabel,
-		Identity:     p.Identity,
-		PlanType:     p.PlanType,
-		Source:       p.Source,
-		FetchedAtMs:  p.FetchedAtMs,
-		Note:         p.Note,
-		Status:       p.Status(),
-		StaleMinutes: p.StaleMinutes,
-		Action:       p.Action,
-		Windows:      make([]WindowReport, 0, 3),
+		ProviderID:    p.ProviderID,
+		Family:        p.Family,
+		Label:         p.Label,
+		GroupLabel:    p.GroupLabel,
+		AccountLabel:  p.AccountLabel,
+		ProfileID:     p.ProfileID,
+		ProfileLabel:  p.ProfileLabel,
+		Identity:      p.Identity,
+		Account:       p.Account,
+		SameAccountAs: p.SameAccountAs,
+		PlanType:      p.PlanType,
+		Source:        p.Source,
+		FetchedAtMs:   p.FetchedAtMs,
+		Note:          p.Note,
+		Status:        p.Status(),
+		StaleMinutes:  p.StaleMinutes,
+		Action:        p.Action,
+		Windows:       make([]WindowReport, 0, 3),
 	}
 	// Same slots and fallback tags as the text panel's richBlock.
 	slots := []struct {

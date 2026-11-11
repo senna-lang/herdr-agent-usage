@@ -66,6 +66,19 @@ type ProviderLimits struct {
 	ProfileID    string
 	ProfileLabel string
 	Identity     string
+	// Account is the logged-in account behind this entry (a login email or
+	// account id) when the adapter can read it, else "". Unlike Identity it
+	// is never a path, so two entries of one family with the same Account
+	// are the same account seen through two config dirs.
+	Account string
+	// SameAccountAs is the ProviderID of an earlier entry (in collection
+	// order) of the same family and Account. Renderers fold this entry into
+	// that one instead of showing the account twice, and toasts skip it.
+	SameAccountAs string
+	// Family is the provider family this entry belongs to (the registered
+	// agent id: "claude", "codex", ...), shared by every configured account
+	// of that provider while ProviderID is per account.
+	Family string
 	// StaleMinutes is set when the windows come from an observation older
 	// than the adapter's freshness bound (the same age the "stale ~Nm ago"
 	// Note reports). Nil means fresh or unknown.

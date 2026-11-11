@@ -27,12 +27,16 @@ Adding fields is compatible. Renaming or removing one bumps `version`.
   "emptyMessage": "(no agent panes open)",
   "providers": [{
     "providerId": "claude-work",
+    "family": "claude",              // the provider family, shared by all its accounts
     "label": "work",                 // the text pane's heading for a lone entry
     "groupLabel": "Claude",          // set when 2+ accounts of a family share a heading
     "accountLabel": "me@example.com",
     "profileId": "claude-work",      // the [[claude.profiles]] entry behind it
     "profileLabel": "work",
     "identity": "me@example.com",    // login email, else the account's config/home dir
+    "account": "me@example.com",     // the login (email / account id) when readable, else ""
+    "sameAccountAs": "",             // providerId of an earlier entry with the same account:
+                                     // show the account once; its windows are shared (freshest wins)
     "planType": "Max",
     "source": "claude statusLine cache",
     "fetchedAtMs": 1793722431615,

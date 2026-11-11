@@ -93,7 +93,7 @@ func collectClaudeToasts(providers []ProviderLimits, profiles []claude.ClaudePro
 	var toasts []PendingToast
 	for _, p := range providers {
 		profile, ok := profileByIDIn(profiles, p.ProviderID)
-		if !ok {
+		if !ok || p.SameAccountAs != "" {
 			continue
 		}
 		fiveHour, sevenDay := rateWindowInput(p.Primary), rateWindowInput(p.Secondary)

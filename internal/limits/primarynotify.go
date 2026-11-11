@@ -86,7 +86,8 @@ func checkProviderPrimaryLimitsWith(
 		next[k] = v
 	}
 	for _, provider := range providers {
-		if claude.IsClaudeProviderID(provider.ProviderID, claudeProfiles) {
+		// A second view of an account already listed would repeat its toast.
+		if claude.IsClaudeProviderID(provider.ProviderID, claudeProfiles) || provider.SameAccountAs != "" {
 			continue
 		}
 		prev := current[provider.ProviderID]

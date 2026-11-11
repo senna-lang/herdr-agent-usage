@@ -9,7 +9,10 @@ import (
 	"path/filepath"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/antigravity"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/devin"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/kilo"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/opencode"
 )
@@ -190,6 +193,14 @@ var singleCollectorQuotaSpecs = []struct {
 	},
 }
 
+// The profile families' default (and family) ids: their registered agent ids.
+var (
+	defaultClaudeID   = claude.Provider.AgentID()
+	defaultCodexID    = codex.Provider.AgentID()
+	defaultOpenCodeID = opencode.Provider.AgentID()
+	defaultGrokID     = grok.Provider.AgentID()
+)
+
 // CollectAllProviderLimits runs collectors in display order: each configured
 // Claude profile (config order) -> Codex -> OpenCode -> Grok, then attaches
 // pane activity when configured. Providers excluded by opts.Only are skipped
@@ -208,54 +219,60 @@ func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []P
 			Note:        strPtr("limits collector not configured"),
 		}
 	}
+	// Each loop below collects one family; its default id names the family.
+	inFamily := func(family string, pl ProviderLimits) ProviderLimits {
+		pl.Family = family
+		return pl
+	}
 
 	claudeSpecs := opts.Claude
 	if len(claudeSpecs) == 0 {
-		claudeSpecs = []ClaudeProfileCollector{{ID: "claude", Label: "Claude"}}
+		claudeSpecs = []ClaudeProfileCollector{{ID: defaultClaudeID, Label: "Claude"}}
 	}
 	codexSpecs := opts.Codex
 	if len(codexSpecs) == 0 {
-		codexSpecs = []CodexProfileCollector{{ID: "codex", Label: "Codex"}}
+		codexSpecs = []CodexProfileCollector{{ID: defaultCodexID, Label: "Codex"}}
 	}
 	openCodeSpecs := opts.OpenCode
 	if len(openCodeSpecs) == 0 {
-		openCodeSpecs = []OpenCodeProfileCollector{{ID: "opencode", Label: "OpenCode"}}
+		openCodeSpecs = []OpenCodeProfileCollector{{ID: defaultOpenCodeID, Label: "OpenCode"}}
 	}
 	grokSpecs := opts.Grok
 	if len(grokSpecs) == 0 {
-		grokSpecs = []GrokProfileCollector{{ID: "grok", Label: "Grok"}}
+		grokSpecs = []GrokProfileCollector{{ID: defaultGrokID, Label: "Grok"}}
 	}
 
 	base := make([]ProviderLimits, 0, len(claudeSpecs)+len(codexSpecs)+len(openCodeSpecs)+len(grokSpecs)+len(singleCollectorQuotaSpecs))
 	for _, spec := range claudeSpecs {
 		if opts.Only == nil || opts.Only[spec.ID] {
-			base = append(base, collect(spec.Collector, spec.ID, spec.Label))
+			base = append(base, inFamily(defaultClaudeID, collect(spec.Collector, spec.ID, spec.Label)))
 		}
 	}
 	for _, spec := range codexSpecs {
 		if opts.Only == nil || opts.Only[spec.ID] {
-			base = append(base, collect(spec.Collector, spec.ID, spec.Label))
+			base = append(base, inFamily(defaultCodexID, collect(spec.Collector, spec.ID, spec.Label)))
 		}
 	}
 	for _, spec := range openCodeSpecs {
 		if opts.Only == nil || opts.Only[spec.ID] {
-			base = append(base, collect(spec.Collector, spec.ID, spec.Label))
+			base = append(base, inFamily(defaultOpenCodeID, collect(spec.Collector, spec.ID, spec.Label)))
 		}
 	}
 	for _, spec := range grokSpecs {
 		if opts.Only == nil || opts.Only[spec.ID] {
-			base = append(base, collect(spec.Collector, spec.ID, spec.Label))
+			base = append(base, inFamily(defaultGrokID, collect(spec.Collector, spec.ID, spec.Label)))
 		}
 	}
 	for _, spec := range singleCollectorQuotaSpecs {
 		if opts.Only == nil || opts.Only[spec.id] {
-			base = append(base, collect(spec.field(opts), spec.id, spec.label))
+			base = append(base, inFamily(spec.id, collect(spec.field(opts), spec.id, spec.label)))
 		}
 	}
 
 	for i := range base {
 		base[i] = expireElapsedWindows(base[i], nowMs)
 	}
+	base = ShareAccountWindows(base)
 	if opts.Attach != nil {
 		return opts.Attach(base, nowMs)
 	}

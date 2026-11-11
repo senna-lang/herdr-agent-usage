@@ -77,6 +77,9 @@ func applyProfileGrouping(pl ProviderLimits, p claude.ClaudeProfile, multiProfil
 		identity = email
 	}
 	pl = withProfileIdentity(pl, p.ID, p.Label, identity)
+	if hasEmail {
+		pl.Account = strings.ToLower(email)
+	}
 	if !multiProfile {
 		return pl
 	}
@@ -157,6 +160,7 @@ func codexProfileByIDIn(profiles []codex.CodexProfile, id string) (codex.CodexPr
 // auth.json has no email we are willing to decode here.
 func applyCodexProfileGrouping(pl ProviderLimits, p codex.CodexProfile, multiProfile bool) ProviderLimits {
 	pl = withProfileIdentity(pl, p.ID, p.Label, p.Home)
+	pl.Account = codex.AccountIDIn(p.Home)
 	if !multiProfile {
 		return pl
 	}
