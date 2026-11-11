@@ -271,6 +271,12 @@ window, from least to most severe. `limit_percent = "used"` inverts the displaye
 number (and bar fill) on the pane, sidebar `$limit`, statusLine, and toast body;
 notify firing stays on remaining thresholds. `cache_display = false` clears cache
 metadata from every sidebar pane and suppresses the Agent Usage low-cache warning.
+`providers = ["claude", "codex"]` (optional, under `[ui]`) collects and shows only
+those providers (`claude`, `codex`, `opencode`, `grok`, `agy`, `kilo`, `devin`); unset,
+every provider is collected as before. Unknown ids are ignored and named by `usagebar setup`.
+`delivery = "external"` (optional, under `[notify]`; the default is `"herdr"`) is
+for a host that posts toasts itself: the herdr hooks and the Claude statusLine
+bridge stay silent, and `usagebar notify --json` returns the toasts due now.
 
 
 ### Multiple Claude accounts
@@ -582,6 +588,19 @@ Herdr panes or compute transcript activity for panes. If `HERDR_PANE_ID` is set,
 it may still query that pane to resolve the working directory. Without `--all`,
 it lists Herdr panes to select active subscription providers. Plain `collect`
 and the interactive panel retain the full activity data.
+
+A host that draws the panel itself can use two more commands, both documented in
+[docs/collect-json-v1.md](docs/collect-json-v1.md):
+
+```sh
+usagebar collect --format v1 [--all] [--quotas-only] [--panes JSON|-]
+usagebar notify --json [--panes JSON|-]
+```
+
+`collect --format v1` prints a versioned report with every display value
+precomputed. `notify --json` prints the toasts due now and records them as shown,
+honouring `[notify] enabled` and the pay-as-you-go gate. `--panes` supplies the
+open agent panes as a JSON array (or `-` for stdin) instead of asking Herdr.
 
 ## Data handling
 
