@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
@@ -220,5 +221,41 @@ func TestParsePluginConfigTOML_NotifyDelivery(t *testing.T) {
 		if cfg.NotifyDelivery != tc.want || cfg.HerdrDelivers() != tc.herdrSend {
 			t.Errorf("%q: delivery = %q herdr = %v, want %q %v", tc.raw, cfg.NotifyDelivery, cfg.HerdrDelivers(), tc.want, tc.herdrSend)
 		}
+	}
+}
+
+// [ui] providers keeps only ids of registered quota providers; typos are
+// reported rather than kept as filters that match nothing.
+func TestParsePluginConfig_ProvidersDropsUnknownIDs(t *testing.T) {
+	cfg := ParsePluginConfigTOML("[ui]\nproviders = [\" Claude \", \"codx\", \"\", \"devin\", \"cursor\"]\n")
+
+	if got := strings.Join(cfg.Providers, ","); got != "claude,devin" {
+		t.Fatalf("Providers = %q, want claude,devin", got)
+	}
+	// cursor is registered but owns no quota, so it cannot be collected.
+	if got := strings.Join(cfg.UnknownProviders, ","); got != "codx,cursor" {
+		t.Fatalf("UnknownProviders = %q, want codx,cursor", got)
+	}
+
+	if cfg := ParsePluginConfigTOML("[ui]\nlimit_percent = \"used\"\n"); len(cfg.Providers) != 0 || len(cfg.UnknownProviders) != 0 {
+		t.Fatalf("unset providers = %v / %v", cfg.Providers, cfg.UnknownProviders)
+	}
+}
+
+func TestProviderListReport(t *testing.T) {
+	if got := providerListReportLines(nil, nil); got != nil {
+		t.Fatalf("unset list must print nothing: %q", got)
+	}
+	ok := strings.Join(providerListReportLines([]string{"claude"}, nil), "\n")
+	if !strings.Contains(ok, "ui providers: claude") || strings.Contains(ok, "!") {
+		t.Fatalf("valid list = %q", ok)
+	}
+	partial := strings.Join(providerListReportLines([]string{"claude"}, []string{"codx"}), "\n")
+	if !strings.Contains(partial, "ignored unknown [ui] providers: codx") || strings.Contains(partial, "every provider") {
+		t.Fatalf("partial = %q", partial)
+	}
+	none := strings.Join(providerListReportLines(nil, []string{"codx"}), "\n")
+	if !strings.Contains(none, "every provider is collected") {
+		t.Fatalf("all-unknown = %q", none)
 	}
 }

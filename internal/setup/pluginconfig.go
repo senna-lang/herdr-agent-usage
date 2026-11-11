@@ -11,11 +11,13 @@ package setup
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
+	"github.com/senna-lang/herdr-agent-usage/internal/providers"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/claude"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/codex"
 	"github.com/senna-lang/herdr-agent-usage/internal/providers/grok"
@@ -48,6 +50,10 @@ type PluginConfig struct {
 	// such as "claude", "codex") to collect and show. Empty means every
 	// provider; hosts may still hide ones not in use.
 	Providers []string
+	// UnknownProviders are the [ui] providers entries that name no
+	// registered provider; they are dropped from Providers and reported by
+	// `usagebar setup`.
+	UnknownProviders []string
 	// ClaudeProfiles are the configured [[claude.profiles]] entries (unresolved).
 	// Empty means the single implicit "claude" profile is synthesized downstream.
 	ClaudeProfiles []claude.ProfileSpec
@@ -313,11 +319,7 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 		cfg.SidebarWindows = NormalizeSidebarWindows(*wire.UI.SidebarWindows)
 	}
 	if wire.UI.Providers != nil {
-		for _, id := range *wire.UI.Providers {
-			if id = strings.ToLower(strings.TrimSpace(id)); id != "" {
-				cfg.Providers = append(cfg.Providers, id)
-			}
-		}
+		cfg.Providers, cfg.UnknownProviders = splitProviderIDs(*wire.UI.Providers)
 	}
 
 	for _, p := range wire.Claude.Profiles {
@@ -342,6 +344,25 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 		cfg.OpenCodeProfiles = append(cfg.OpenCodeProfiles, opencode.ProfileSpec{ID: p.ID, Label: p.Label, DataDir: p.DataDir})
 	}
 	return cfg
+}
+
+// splitProviderIDs normalizes a [ui] providers list and separates the ids that
+// name a provider with its own quota from the ones that name nothing. A typo
+// must not silently hide a provider, so unknown ids are returned for the setup
+// report instead of being kept as filters that match nothing.
+func splitProviderIDs(ids []string) (known, unknown []string) {
+	valid := providers.IDsWithCapability(providers.CapOwnsSubscriptionQuota)
+	for _, id := range ids {
+		id = strings.ToLower(strings.TrimSpace(id))
+		switch {
+		case id == "":
+		case slices.Contains(valid, id):
+			known = append(known, id)
+		default:
+			unknown = append(unknown, id)
+		}
+	}
+	return known, unknown
 }
 
 // SeedPluginConfigIfMissing writes default config.toml when missing; returns true if created.
