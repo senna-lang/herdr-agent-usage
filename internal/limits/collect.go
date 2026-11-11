@@ -167,7 +167,9 @@ func DefaultCollectOptions() CollectOptions {
 			return pl
 		},
 		Devin: func(_ *string, nowMs int64) ProviderLimits {
-			return CollectDevinLimits(nowMs, CollectDevinLimitsOptions{})
+			pl := CollectDevinLimits(nowMs, CollectDevinLimitsOptions{})
+			pl.Home = devin.ResolveDevinDataDir()
+			return pl
 		},
 	}
 }

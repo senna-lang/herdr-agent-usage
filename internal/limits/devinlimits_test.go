@@ -395,3 +395,34 @@ func TestDevinRoundTrip_CacheFileShape(t *testing.T) {
 	}
 	_ = devin.CredentialID // keep the import honest: account ids come from the provider package
 }
+
+// A signed-out Devin asks for a login and reports its data dir, so an
+// installed one still counts as in use while an absent one does not.
+func TestDefaultCollectOptionsDevinHomeAndLoginAction(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", t.TempDir())
+	t.Setenv("USAGEBAR_DEVIN_CACHE_PATH", filepath.Join(home, "devin-cache.json"))
+	devinDir := filepath.Join(home, "devin-data")
+	if err := os.MkdirAll(devinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DEVIN_DATA_DIR", devinDir)
+
+	got := DefaultCollectOptions().Devin(nil, 1_800_000_000_000)
+	if got.Home != devinDir {
+		t.Fatalf("devin Home = %q, want %q", got.Home, devinDir)
+	}
+	if got.Action != devinLoginAction || got.Status() != StatusNeedsLogin {
+		t.Fatalf("signed-out devin = %+v (status %q)", got, got.Status())
+	}
+	if !MarkInUse([]ProviderLimits{got}, false)[0].InUse {
+		t.Fatal("an installed, signed-out Devin must count as in use")
+	}
+
+	t.Setenv("DEVIN_DATA_DIR", filepath.Join(home, "never-installed"))
+	absent := DefaultCollectOptions().Devin(nil, 1_800_000_000_000)
+	if MarkInUse([]ProviderLimits{absent}, false)[0].InUse {
+		t.Fatal("a Devin with no data dir must not count as in use")
+	}
+}
