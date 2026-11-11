@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
+	"github.com/senna-lang/herdr-agent-usage/internal/ratelimit"
 )
 
 // isolatePendingToastState points every notify state file and the profile
@@ -71,5 +72,44 @@ func TestCollectPendingToasts_NothingDueIsAnEmptyList(t *testing.T) {
 	got := CollectPendingToasts([]ProviderLimits{notifyTestProvider(func(p *ProviderLimits) { p.Primary.UsedPercentage = 5 })}, notifyNowMs, nil, core.LimitPercentRemaining)
 	if got.Toasts == nil || len(got.Toasts) != 0 {
 		t.Fatalf("toasts = %#v, want an empty list", got.Toasts)
+	}
+}
+
+// A Claude entry that shares an account with another dir is skipped, so the
+// same crossing is not toasted once per dir.
+func TestCollectClaudeToasts_SkipsEntriesSharingAnAccount(t *testing.T) {
+	isolatePendingToastState(t)
+	resets := notifyResetsAt
+	profiles := ResolvedClaudeProfiles()
+	providers := []ProviderLimits{
+		{ProviderID: "claude-work", ProfileLabel: "work", SameAccountAs: "claude", Primary: &LimitWindow{UsedPercentage: 85, ResetsAt: &resets}},
+	}
+
+	if got := collectClaudeToasts(providers, profiles, notifyNowMs, nil, core.LimitPercentRemaining); len(got) != 0 {
+		t.Fatalf("toasts for a shared-account entry: %+v", got)
+	}
+
+	providers[0].SameAccountAs = ""
+	if got := collectClaudeToasts(providers, profiles, notifyNowMs, nil, core.LimitPercentRemaining); len(got) != 1 {
+		t.Fatalf("toasts for the owning entry = %+v, want one", got)
+	}
+}
+
+func TestToastBucketAndLevel(t *testing.T) {
+	for _, tc := range []struct {
+		bucket    ratelimit.Bucket
+		wantN     int
+		wantLevel ToastLevel
+	}{
+		{"50", 50, ToastWarning},
+		{"20", 20, ToastWarning},
+		{"10", 10, ToastError},
+		{"5", 5, ToastError},
+		{"bogus", 0, ToastWarning},
+	} {
+		n, level := toastBucketAndLevel(tc.bucket)
+		if n != tc.wantN || level != tc.wantLevel {
+			t.Errorf("toastBucketAndLevel(%q) = %d, %s; want %d, %s", tc.bucket, n, level, tc.wantN, tc.wantLevel)
+		}
 	}
 }

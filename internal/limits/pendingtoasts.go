@@ -50,10 +50,16 @@ type PendingToastsReport struct {
 	Toasts  []PendingToast `json:"toasts"`
 }
 
-// toastLevelFor maps a fired remaining-percent bucket to a level.
-func toastLevelFor(bucket ratelimit.Bucket) (int, ToastLevel) {
+// toastBucketAndLevel maps a fired remaining-percent bucket to its number and
+// the level a host shows it with. Buckets are always numeric; a value that is
+// not claims no severity, so it reports bucket 0 as a warning rather than an
+// error toast.
+func toastBucketAndLevel(bucket ratelimit.Bucket) (int, ToastLevel) {
 	n, err := strconv.Atoi(string(bucket))
-	if err != nil || n <= toastErrorAtOrBelow {
+	if err != nil {
+		return 0, ToastWarning
+	}
+	if n <= toastErrorAtOrBelow {
 		return n, ToastError
 	}
 	return n, ToastWarning
@@ -63,22 +69,13 @@ func toastLevelFor(bucket ratelimit.Bucket) (int, ToastLevel) {
 func CollectPendingToasts(providers []ProviderLimits, nowMs int64, thresholds []int, percent core.LimitPercent) PendingToastsReport {
 	claudeProfiles := ResolvedClaudeProfiles()
 	toasts := collectClaudeToasts(providers, claudeProfiles, nowMs, thresholds, percent)
-	ratelimit.WithLockedProviderState(func(current ratelimit.ProviderNotifyStateMap) ratelimit.ProviderNotifyStateMap {
-		cur := ProviderNotifyState{}
-		for k, v := range current {
-			cur[k] = v
-		}
-		next := checkProviderPrimaryLimitsWith(providers, cur, nowMs, thresholds, func(p ProviderLimits) ratelimit.DeliverFn {
+	withProviderNotifyState(func(cur ProviderNotifyState) ProviderNotifyState {
+		return checkProviderPrimaryLimitsWith(providers, cur, nowMs, thresholds, func(p ProviderLimits) ratelimit.DeliverFn {
 			return func(bucket ratelimit.Bucket, text ratelimit.NotificationText) bool {
 				toasts = append(toasts, pendingToast(p, "primary", bucket, *p.Primary.ResetsAt, text))
 				return true
 			}
 		}, claudeProfiles, percent)
-		out := ratelimit.ProviderNotifyStateMap{}
-		for k, v := range next {
-			out[k] = v
-		}
-		return out
 	})
 	if toasts == nil {
 		toasts = []PendingToast{}
@@ -128,7 +125,7 @@ func rateWindowInput(w *LimitWindow) *ratelimit.RateWindowInput {
 }
 
 func pendingToast(p ProviderLimits, slot string, bucket ratelimit.Bucket, resetsAt int64, text ratelimit.NotificationText) PendingToast {
-	n, level := toastLevelFor(bucket)
+	n, level := toastBucketAndLevel(bucket)
 	return PendingToast{
 		ProviderID:   p.ProviderID,
 		ProfileLabel: p.ProfileLabel,
