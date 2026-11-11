@@ -404,3 +404,25 @@ func TestValidProfileSpecCount(t *testing.T) {
 		t.Fatalf("ValidProfileSpecCount = %d, want 1", n)
 	}
 }
+
+// A toast names its account unless it is the lone implicit default.
+func TestToastAccountLabel(t *testing.T) {
+	def := ClaudeProfile{ID: DefaultProfileID, Label: DefaultProfileLabel}
+	work := ClaudeProfile{ID: "claude-work", Label: "work"}
+	for _, tc := range []struct {
+		name     string
+		profile  ClaudeProfile
+		profiles []ClaudeProfile
+		want     string
+	}{
+		{"lone implicit default", def, []ClaudeProfile{def}, ""},
+		{"no profiles listed", def, nil, ""},
+		{"default among several", def, []ClaudeProfile{def, work}, DefaultProfileLabel},
+		{"configured account among several", work, []ClaudeProfile{def, work}, "work"},
+		{"lone configured account", work, []ClaudeProfile{work}, "work"},
+	} {
+		if got := ToastAccountLabel(tc.profile, tc.profiles); got != tc.want {
+			t.Errorf("%s: ToastAccountLabel = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
