@@ -203,12 +203,13 @@ var singleCollectorQuotaSpecs = []struct {
 	},
 }
 
-// The profile families' default (and family) ids: their registered agent ids.
+// The profile families: each family id is its registered agent id, and the
+// default profile of a family carries the same id.
 var (
-	defaultClaudeID   = claude.Provider.AgentID()
-	defaultCodexID    = codex.Provider.AgentID()
-	defaultOpenCodeID = opencode.Provider.AgentID()
-	defaultGrokID     = grok.Provider.AgentID()
+	claudeFamily   = claude.Provider.AgentID()
+	codexFamily    = codex.Provider.AgentID()
+	openCodeFamily = opencode.Provider.AgentID()
+	grokFamily     = grok.Provider.AgentID()
 )
 
 // CollectAllProviderLimits runs collectors in display order: each configured
@@ -240,40 +241,40 @@ func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []P
 
 	claudeSpecs := opts.Claude
 	if len(claudeSpecs) == 0 {
-		claudeSpecs = []ClaudeProfileCollector{{ID: defaultClaudeID, Label: "Claude"}}
+		claudeSpecs = []ClaudeProfileCollector{{ID: claudeFamily, Label: "Claude"}}
 	}
 	codexSpecs := opts.Codex
 	if len(codexSpecs) == 0 {
-		codexSpecs = []CodexProfileCollector{{ID: defaultCodexID, Label: "Codex"}}
+		codexSpecs = []CodexProfileCollector{{ID: codexFamily, Label: "Codex"}}
 	}
 	openCodeSpecs := opts.OpenCode
 	if len(openCodeSpecs) == 0 {
-		openCodeSpecs = []OpenCodeProfileCollector{{ID: defaultOpenCodeID, Label: "OpenCode"}}
+		openCodeSpecs = []OpenCodeProfileCollector{{ID: openCodeFamily, Label: "OpenCode"}}
 	}
 	grokSpecs := opts.Grok
 	if len(grokSpecs) == 0 {
-		grokSpecs = []GrokProfileCollector{{ID: defaultGrokID, Label: "Grok"}}
+		grokSpecs = []GrokProfileCollector{{ID: grokFamily, Label: "Grok"}}
 	}
 
 	base := make([]ProviderLimits, 0, len(claudeSpecs)+len(codexSpecs)+len(openCodeSpecs)+len(grokSpecs)+len(singleCollectorQuotaSpecs))
 	for _, spec := range claudeSpecs {
-		if wanted(defaultClaudeID, spec.ID) {
-			base = append(base, inFamily(defaultClaudeID, collect(spec.Collector, spec.ID, spec.Label)))
+		if wanted(claudeFamily, spec.ID) {
+			base = append(base, inFamily(claudeFamily, collect(spec.Collector, spec.ID, spec.Label)))
 		}
 	}
 	for _, spec := range codexSpecs {
-		if wanted(defaultCodexID, spec.ID) {
-			base = append(base, inFamily(defaultCodexID, collect(spec.Collector, spec.ID, spec.Label)))
+		if wanted(codexFamily, spec.ID) {
+			base = append(base, inFamily(codexFamily, collect(spec.Collector, spec.ID, spec.Label)))
 		}
 	}
 	for _, spec := range openCodeSpecs {
-		if wanted(defaultOpenCodeID, spec.ID) {
-			base = append(base, inFamily(defaultOpenCodeID, collect(spec.Collector, spec.ID, spec.Label)))
+		if wanted(openCodeFamily, spec.ID) {
+			base = append(base, inFamily(openCodeFamily, collect(spec.Collector, spec.ID, spec.Label)))
 		}
 	}
 	for _, spec := range grokSpecs {
-		if wanted(defaultGrokID, spec.ID) {
-			base = append(base, inFamily(defaultGrokID, collect(spec.Collector, spec.ID, spec.Label)))
+		if wanted(grokFamily, spec.ID) {
+			base = append(base, inFamily(grokFamily, collect(spec.Collector, spec.ID, spec.Label)))
 		}
 	}
 	for _, spec := range singleCollectorQuotaSpecs {
