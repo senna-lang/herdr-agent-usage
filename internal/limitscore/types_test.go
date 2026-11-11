@@ -19,6 +19,8 @@ func TestProviderLimitsStatus_DerivesFromStructuredFields(t *testing.T) {
 		{"a login action needs login", ProviderLimits{Action: "grok login"}, StatusNeedsLogin},
 		{"a login action outranks stale windows", ProviderLimits{Primary: window, StaleMinutes: &age, Action: "grok login"}, StatusNeedsLogin},
 		{"no windows and no fix is unavailable", ProviderLimits{Note: &note}, StatusUnavailable},
+		{"no reading yet is no-data", ProviderLimits{Note: &note, NoReadingYet: true}, StatusNoData},
+		{"a reading outranks no-reading-yet", ProviderLimits{Primary: window, NoReadingYet: true}, StatusOK},
 		{"a tertiary window alone counts", ProviderLimits{Tertiary: window}, StatusOK},
 	}
 	seen := map[Status]bool{}

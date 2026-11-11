@@ -54,7 +54,7 @@ func CollectAntigravityLimits(nowMs int64, opts CollectAntigravityLimitsOptions)
 	snap, ok := antigravity.LatestFreshSnapshot(sessionsDir, nowMs)
 	if !ok {
 		note := "no statusLine observation yet — see docs/antigravity-contract.md"
-		return ProviderLimits{ProviderID: providerID, Label: label, Source: "none", FetchedAtMs: nowMs, Note: &note}
+		return ProviderLimits{ProviderID: providerID, Label: label, Source: "none", FetchedAtMs: nowMs, Note: &note, NoReadingYet: true}
 	}
 
 	pl := ProviderLimits{

@@ -59,3 +59,25 @@ func TestCheckProviderPrimaryLimits_SkipsAFoldedAccount(t *testing.T) {
 		t.Fatalf("titles = %v", titles)
 	}
 }
+
+// A dedicated dir that has not run yet is stamped "now" with no windows; it
+// must still take its account's reading from the dir that has one.
+func TestShareAccountWindows_FillsAnEmptyDedicatedRow(t *testing.T) {
+	note := "no ~/.claude.json utilization and no statusLine cache"
+	seen := &LimitWindow{UsedPercentage: 91}
+	got := ShareAccountWindows([]ProviderLimits{
+		{ProviderID: "claude-1", Family: "claude", Account: "a@example.com", FetchedAtMs: 1000, Note: &note, Source: "none", NoReadingYet: true},
+		{ProviderID: "claude-2", Family: "claude", Account: "b@example.com", FetchedAtMs: 1000, Note: &note, Source: "none", NoReadingYet: true},
+		{ProviderID: "claude", Family: "claude", ProfileLabel: "claude", Account: "b@example.com", FetchedAtMs: 500, Secondary: seen, Source: "claude statusLine cache"},
+	})
+	two := got[1]
+	if two.Secondary != seen || two.Status() != StatusOK || two.Note != nil || two.Source != "claude statusLine cache via claude" {
+		t.Fatalf("claude-2 = %+v, want the ~/.claude reading", two)
+	}
+	if got[2].SameAccountAs != "claude-2" {
+		t.Fatalf("claude = %+v", got[2])
+	}
+	if one := got[0]; one.Status() != StatusNoData || one.SameAccountAs != "" {
+		t.Fatalf("claude-1 = %+v, want no-data on its own row", one)
+	}
+}

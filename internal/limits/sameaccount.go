@@ -37,7 +37,9 @@ func ShareAccountWindows(entries []ProviderLimits) []ProviderLimits {
 		freshest := freshestWithWindows(out, members)
 		first := out[members[0]].ProviderID
 		for n, i := range members {
-			if freshest >= 0 && i != freshest && out[freshest].FetchedAtMs > out[i].FetchedAtMs {
+			// A member without windows takes the account's reading whatever
+			// its own timestamp says: an empty entry is stamped "now".
+			if freshest >= 0 && i != freshest && (!out[i].HasWindows() || out[freshest].FetchedAtMs > out[i].FetchedAtMs) {
 				out[i] = withWindowsOf(out[i], out[freshest])
 			}
 			if n > 0 {
@@ -71,6 +73,7 @@ func withWindowsOf(dst, src ProviderLimits) ProviderLimits {
 	dst.StaleMinutes = src.StaleMinutes
 	dst.Note = src.Note
 	dst.Action = src.Action
+	dst.NoReadingYet = src.NoReadingYet
 	dst.Source = src.Source
 	if src.ProfileLabel != "" {
 		dst.Source = src.Source + " via " + src.ProfileLabel

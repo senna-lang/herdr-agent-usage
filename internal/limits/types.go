@@ -25,5 +25,6 @@ const (
 	StatusOK          = limitscore.StatusOK
 	StatusStale       = limitscore.StatusStale
 	StatusNeedsLogin  = limitscore.StatusNeedsLogin
+	StatusNoData      = limitscore.StatusNoData
 	StatusUnavailable = limitscore.StatusUnavailable
 )

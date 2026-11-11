@@ -35,13 +35,18 @@ Adding fields is compatible. Renaming or removing one bumps `version`.
     "profileLabel": "work",
     "identity": "me@example.com",    // login email, else the account's config/home dir
     "account": "me@example.com",     // the login (email / account id) when readable, else ""
+    "home": "/home/me/.claude-work", // the account's config/home dir, where its agent writes readings
+    "configured": true,              // from an explicit [[<family>.profiles]] entry
+    "inUse": true,                   // false: nothing on this machine (no install, no profile,
+                                     // no data); hosts hide these. Always true with [ui] providers
     "sameAccountAs": "",             // providerId of an earlier entry with the same account:
                                      // show the account once; its windows are shared (freshest wins)
     "planType": "Max",
     "source": "claude statusLine cache",
     "fetchedAtMs": 1793722431615,
     "note": null,                    // the text pane's note line, unchanged
-    "status": "ok",                  // ok | stale | needs-login | unavailable
+    "status": "ok",                  // ok | stale | needs-login | no-data | unavailable
+                                     // no-data: nothing recorded yet; fills in once the agent runs
     "staleMinutes": null,            // set with status "stale"
     "action": "",                    // e.g. "grok login" with status "needs-login"
     "windows": [{
@@ -68,7 +73,10 @@ Adding fields is compatible. Renaming or removing one bumps `version`.
     "models": [{ "modelId": "deepseek-chat", "tokens": 332000, "costUsd": 0.02 }],
     "paneActivity": null
   }],
-  "lowCachePanes": [{ "label": "Task A", "hitPercent": 35 }]
+  "lowCachePanes": [{ "label": "Task A", "hitPercent": 35 }],
+  // folders whose changes mean fresh data: each Claude profile's statusLine
+  // cache folder and each Codex home's sessions tree (may not exist yet)
+  "watchDirs": ["/home/me/.claude/herdr-usagebar", "/home/me/.codex/sessions"]
 }
 ```
 

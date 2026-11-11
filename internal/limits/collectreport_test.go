@@ -51,8 +51,8 @@ func TestBuildCollectReport_PinsTheV1FieldNames(t *testing.T) {
 		got  []string
 		want []string
 	}{
-		{"document", keysOf(doc), []string{"apiUsage", "emptyMessage", "filter", "generatedAtMs", "limitPercent", "lowCachePanes", "providers", "version"}},
-		{"provider", keysOf(provider), []string{"account", "accountLabel", "action", "family", "fetchedAtMs", "groupLabel", "identity", "label", "note", "paneActivity", "planType", "profileId", "profileLabel", "providerId", "sameAccountAs", "source", "staleMinutes", "status", "windows"}},
+		{"document", keysOf(doc), []string{"apiUsage", "emptyMessage", "filter", "generatedAtMs", "limitPercent", "lowCachePanes", "providers", "version", "watchDirs"}},
+		{"provider", keysOf(provider), []string{"account", "accountLabel", "action", "configured", "family", "fetchedAtMs", "groupLabel", "home", "identity", "inUse", "label", "note", "paneActivity", "planType", "profileId", "profileLabel", "providerId", "sameAccountAs", "source", "staleMinutes", "status", "windows"}},
 		{"window", keysOf(window), []string{"band", "barFill", "displayPercent", "remainingPercent", "resetIn", "resetsAt", "runOut", "slot", "tag", "usedPercentage", "windowMinutes"}},
 		{"runOut", keysOf(window["runOut"]), []string{"emptyBeforeReset", "minutesToEmpty", "text"}},
 		{"paneActivity", keysOf(provider["paneActivity"]), []string{"panes", "tag", "totalTokens", "windowMinutes"}},
@@ -124,7 +124,7 @@ func TestBuildCollectReport_EmptyInputHasEmptyListsNotNull(t *testing.T) {
 	}
 	var doc map[string]any
 	_ = json.Unmarshal(raw, &doc)
-	for _, key := range []string{"providers", "apiUsage", "lowCachePanes"} {
+	for _, key := range []string{"providers", "apiUsage", "lowCachePanes", "watchDirs"} {
 		if _, ok := doc[key].([]any); !ok {
 			t.Errorf("%s = %v, want []", key, doc[key])
 		}

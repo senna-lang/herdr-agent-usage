@@ -6,6 +6,7 @@ package limits
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
@@ -37,6 +38,20 @@ func ResolvedClaudeProfiles() []claude.ClaudeProfile {
 func ResolvedLimitPercent() core.LimitPercent {
 	cfg := setup.LoadPluginConfig(setup.ResolvePluginConfigDir(processEnvMap()))
 	return cfg.LimitPercent
+}
+
+// ResolvedProviderFamilies is the [ui] providers setting as a family set, or
+// nil when unset (every provider).
+func ResolvedProviderFamilies() map[string]bool {
+	cfg := setup.LoadPluginConfig(setup.ResolvePluginConfigDir(processEnvMap()))
+	if len(cfg.Providers) == 0 {
+		return nil
+	}
+	families := make(map[string]bool, len(cfg.Providers))
+	for _, id := range cfg.Providers {
+		families[id] = true
+	}
+	return families
 }
 
 // ResolvedCacheDisplay returns whether cache data may be rendered. It keeps the
@@ -77,6 +92,8 @@ func applyProfileGrouping(pl ProviderLimits, p claude.ClaudeProfile, multiProfil
 		identity = email
 	}
 	pl = withProfileIdentity(pl, p.ID, p.Label, identity)
+	pl.Home = p.ConfigDir
+	pl.Configured = !p.Implicit
 	if hasEmail {
 		pl.Account = strings.ToLower(email)
 	}
@@ -160,6 +177,8 @@ func codexProfileByIDIn(profiles []codex.CodexProfile, id string) (codex.CodexPr
 // auth.json has no email we are willing to decode here.
 func applyCodexProfileGrouping(pl ProviderLimits, p codex.CodexProfile, multiProfile bool) ProviderLimits {
 	pl = withProfileIdentity(pl, p.ID, p.Label, p.Home)
+	pl.Home = p.Home
+	pl.Configured = !p.Implicit
 	pl.Account = codex.AccountIDIn(p.Home)
 	if !multiProfile {
 		return pl
@@ -173,6 +192,8 @@ func applyCodexProfileGrouping(pl ProviderLimits, p codex.CodexProfile, multiPro
 // heading while retaining the configured account label on each row.
 func applyGrokProfileGrouping(pl ProviderLimits, profile grok.GrokProfile, multiProfile bool) ProviderLimits {
 	pl = withProfileIdentity(pl, profile.ID, profile.Label, profile.Home)
+	pl.Home = profile.Home
+	pl.Configured = !profile.Implicit
 	if !multiProfile {
 		return pl
 	}
@@ -185,6 +206,8 @@ func applyGrokProfileGrouping(pl ProviderLimits, profile grok.GrokProfile, multi
 // family heading while retaining the configured account label on each row.
 func applyOpenCodeProfileGrouping(pl ProviderLimits, profile opencode.OpenCodeProfile, multiProfile bool) ProviderLimits {
 	pl = withProfileIdentity(pl, profile.ID, profile.Label, profile.DataDir)
+	pl.Home = profile.DataDir
+	pl.Configured = !profile.Implicit
 	if !multiProfile {
 		return pl
 	}
@@ -217,4 +240,26 @@ func openCodeProfileByIDIn(profiles []opencode.OpenCodeProfile, id string) (open
 		}
 	}
 	return opencode.OpenCodeProfile{}, false
+}
+
+// WatchDirs lists the folders whose changes mean fresh limit data for the
+// configured profiles: each Claude profile's statusLine cache folder and each
+// Codex home's sessions tree. A host can watch them to re-collect sooner than
+// its timer. Folders may not exist yet.
+func WatchDirs() []string {
+	var dirs []string
+	seen := map[string]bool{}
+	add := func(dir string) {
+		if dir != "" && !seen[dir] {
+			seen[dir] = true
+			dirs = append(dirs, dir)
+		}
+	}
+	for _, p := range ResolvedClaudeProfiles() {
+		add(filepath.Dir(p.LimitsCache))
+	}
+	for _, home := range configuredCodexHomes() {
+		add(filepath.Join(home, "sessions"))
+	}
+	return dirs
 }

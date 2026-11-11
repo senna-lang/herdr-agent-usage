@@ -800,6 +800,7 @@ func runCollectJSON(args []string) {
 		Providers:     snap.providers,
 		APIUsage:      snap.apiUsage,
 		LowCachePanes: snap.lowCachePanes,
+		WatchDirs:     limits.WatchDirs(),
 		Filter:        filter,
 		LimitPercent:  cfg.LimitPercent,
 		NowMs:         nowMs,

@@ -41,6 +41,8 @@ type CollectReport struct {
 	Providers     []ProviderReport    `json:"providers"`
 	APIUsage      []APIUsageReport    `json:"apiUsage"`
 	LowCachePanes []LowCachePaneEntry `json:"lowCachePanes"`
+	// WatchDirs are folders whose changes mean fresh data (see WatchDirs).
+	WatchDirs []string `json:"watchDirs"`
 }
 
 // ProviderReport is one subscription account.
@@ -55,15 +57,21 @@ type ProviderReport struct {
 	Identity     string `json:"identity"`
 	// Account is the login (email or account id) when readable, and
 	// SameAccountAs the providerId of the earlier entry for that account.
-	Account       string  `json:"account"`
-	SameAccountAs string  `json:"sameAccountAs"`
-	PlanType      *string `json:"planType"`
-	Source        string  `json:"source"`
-	FetchedAtMs   int64   `json:"fetchedAtMs"`
-	Note          *string `json:"note"`
-	Status        Status  `json:"status"`
-	StaleMinutes  *int    `json:"staleMinutes"`
-	Action        string  `json:"action"`
+	Account       string `json:"account"`
+	SameAccountAs string `json:"sameAccountAs"`
+	// Home is the account's config/home dir, where its agent writes readings.
+	Home string `json:"home"`
+	// InUse is false for a provider with nothing on this machine (no
+	// install, no profile, no data); Configured marks an explicit profile.
+	InUse        bool    `json:"inUse"`
+	Configured   bool    `json:"configured"`
+	PlanType     *string `json:"planType"`
+	Source       string  `json:"source"`
+	FetchedAtMs  int64   `json:"fetchedAtMs"`
+	Note         *string `json:"note"`
+	Status       Status  `json:"status"`
+	StaleMinutes *int    `json:"staleMinutes"`
+	Action       string  `json:"action"`
 	// Windows are in display order (primary, secondary, tertiary) and hold
 	// only the windows the provider reported.
 	Windows      []WindowReport      `json:"windows"`
@@ -149,6 +157,7 @@ type CollectReportInput struct {
 	Providers     []ProviderLimits
 	APIUsage      []APIProviderUsage
 	LowCachePanes []LowCachePane
+	WatchDirs     []string
 	Filter        CollectFilter
 	LimitPercent  core.LimitPercent
 	NowMs         int64
@@ -170,6 +179,7 @@ func BuildCollectReport(in CollectReportInput) CollectReport {
 		Providers:     make([]ProviderReport, 0, len(in.Providers)),
 		APIUsage:      make([]APIUsageReport, 0, len(in.APIUsage)),
 		LowCachePanes: make([]LowCachePaneEntry, 0, len(in.LowCachePanes)),
+		WatchDirs:     append([]string{}, in.WatchDirs...),
 	}
 	for _, p := range in.Providers {
 		report.Providers = append(report.Providers, providerReport(p, percent, in.NowMs))
@@ -202,6 +212,9 @@ func providerReport(p ProviderLimits, percent core.LimitPercent, nowMs int64) Pr
 		ProfileLabel:  p.ProfileLabel,
 		Identity:      p.Identity,
 		Account:       p.Account,
+		Home:          p.Home,
+		InUse:         p.InUse,
+		Configured:    p.Configured,
 		SameAccountAs: p.SameAccountAs,
 		PlanType:      p.PlanType,
 		Source:        p.Source,

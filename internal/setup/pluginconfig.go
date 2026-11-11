@@ -44,6 +44,10 @@ type PluginConfig struct {
 	// SidebarWindows selects the $limit presentation: "shortest" (default, the
 	// numerically tightest window) or "all" (every present window on one row).
 	SidebarWindows string
+	// Providers is the [ui] providers list: the provider families (agent ids
+	// such as "claude", "codex") to collect and show. Empty means every
+	// provider; hosts may still hide ones not in use.
+	Providers []string
 	// ClaudeProfiles are the configured [[claude.profiles]] entries (unresolved).
 	// Empty means the single implicit "claude" profile is synthesized downstream.
 	ClaudeProfiles []claude.ProfileSpec
@@ -112,9 +116,10 @@ type pluginConfigWire struct {
 		Delivery            *string `toml:"delivery"`
 	} `toml:"notify"`
 	UI struct {
-		LimitPercent   *string `toml:"limit_percent"`
-		CacheDisplay   *bool   `toml:"cache_display"`
-		SidebarWindows *string `toml:"sidebar_windows"`
+		LimitPercent   *string   `toml:"limit_percent"`
+		CacheDisplay   *bool     `toml:"cache_display"`
+		SidebarWindows *string   `toml:"sidebar_windows"`
+		Providers      *[]string `toml:"providers"`
 	} `toml:"ui"`
 	Claude struct {
 		Profiles []profileWire `toml:"profiles"`
@@ -306,6 +311,13 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 	}
 	if wire.UI.SidebarWindows != nil {
 		cfg.SidebarWindows = NormalizeSidebarWindows(*wire.UI.SidebarWindows)
+	}
+	if wire.UI.Providers != nil {
+		for _, id := range *wire.UI.Providers {
+			if id = strings.ToLower(strings.TrimSpace(id)); id != "" {
+				cfg.Providers = append(cfg.Providers, id)
+			}
+		}
 	}
 
 	for _, p := range wire.Claude.Profiles {

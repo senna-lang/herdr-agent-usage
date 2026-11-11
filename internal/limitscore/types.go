@@ -83,6 +83,20 @@ type ProviderLimits struct {
 	// than the adapter's freshness bound (the same age the "stale ~Nm ago"
 	// Note reports). Nil means fresh or unknown.
 	StaleMinutes *int
+	// Configured is true when the entry comes from an explicit
+	// [[<family>.profiles]] entry rather than the implicit default.
+	Configured bool
+	// InUse says the provider is in use on this machine (see
+	// limits.MarkInUse); hosts hide entries that are not.
+	InUse bool
+	// NoReadingYet marks an entry whose source simply has not recorded a
+	// reading yet (the agent has not run with this account), as opposed to
+	// a broken or missing source.
+	NoReadingYet bool
+	// Home is the account's config/home directory (a Claude config_dir, a
+	// CODEX_HOME, ...), where its agent writes the readings this entry is
+	// collected from. Empty for providers without per-account profiles.
+	Home string
 	// Action is the command the user must run to restore this provider's
 	// data (e.g. "grok login"), when the adapter knows one. Empty otherwise.
 	Action string
@@ -99,12 +113,15 @@ const (
 	StatusStale Status = "stale"
 	// StatusNeedsLogin needs the user to run Action before data can return.
 	StatusNeedsLogin Status = "needs-login"
-	// StatusUnavailable has no windows and no known fix (no source yet).
+	// StatusNoData has no windows only because the agent has not recorded
+	// a reading for this account yet; it fills in once the agent runs.
+	StatusNoData Status = "no-data"
+	// StatusUnavailable has no windows and no known fix.
 	StatusUnavailable Status = "unavailable"
 )
 
 // AllStatuses lists every Status, for exhaustive contract tests.
-var AllStatuses = []Status{StatusOK, StatusStale, StatusNeedsLogin, StatusUnavailable}
+var AllStatuses = []Status{StatusOK, StatusStale, StatusNeedsLogin, StatusNoData, StatusUnavailable}
 
 // HasWindows reports whether any limit window is present.
 func (p ProviderLimits) HasWindows() bool {
@@ -118,6 +135,8 @@ func (p ProviderLimits) Status() Status {
 	switch {
 	case p.Action != "":
 		return StatusNeedsLogin
+	case !p.HasWindows() && p.NoReadingYet:
+		return StatusNoData
 	case !p.HasWindows():
 		return StatusUnavailable
 	case p.StaleMinutes != nil:

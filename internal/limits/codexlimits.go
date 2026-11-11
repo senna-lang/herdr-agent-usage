@@ -272,7 +272,7 @@ func CollectCodexLimitsIn(home, providerID, label string, nowMs int64) ProviderL
 	}
 	if len(paths) == 0 {
 		note := "no rollout jsonl under ~/.codex/sessions"
-		return ProviderLimits{ProviderID: providerID, Label: label, Source: "none", FetchedAtMs: nowMs, Note: &note}
+		return ProviderLimits{ProviderID: providerID, Label: label, Source: "none", FetchedAtMs: nowMs, Note: &note, NoReadingYet: true}
 	}
 	note := "rollout found but no rate_limits in recent token_count"
 	return ProviderLimits{ProviderID: providerID, Label: label, Source: "codex rollout", FetchedAtMs: nowMs, Note: &note}
