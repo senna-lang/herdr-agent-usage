@@ -1,7 +1,7 @@
 # `usagebar collect --format v1`
 
 A versioned JSON snapshot of the Agent Usage panel, for hosts that draw the
-panel themselves (for example the herdr-app mod). The text pane and the
+panel themselves (the herdr-app mod under `app/`). The text pane and the
 sidebar do not use it.
 
 ```sh
