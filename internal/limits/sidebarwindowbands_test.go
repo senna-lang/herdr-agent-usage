@@ -54,3 +54,33 @@ func TestFormatSidebarWindowBandsSkipsAbsentAndClamps(t *testing.T) {
 		t.Fatalf("over-limit: got %+v, want 0%% low", bands)
 	}
 }
+
+func TestSidebarBars(t *testing.T) {
+	SetSidebarBars(true)
+	t.Cleanup(func() { SetSidebarBars(false) })
+	five, seven := 300, 10080
+	p := ProviderLimits{Primary: &LimitWindow{UsedPercentage: 25, WindowMinutes: &five}, Secondary: &LimitWindow{UsedPercentage: 75, WindowMinutes: &seven}}
+	bands := FormatSidebarWindowBands(p, core.LimitPercentUsed, sidebarNowMs)
+	if bands[0].Text != "5h ██░░░░░░ 25%" || bands[1].Text != "7d ██████░░ 75%" {
+		t.Fatalf("used bars: %+v", bands)
+	}
+	remaining := FormatSidebarWindowBands(p, core.LimitPercentRemaining, sidebarNowMs)
+	if remaining[0].Text != "5h ██████░░ 75%" {
+		t.Fatalf("remaining bar: %+v", remaining)
+	}
+	if bands[1].Band != remaining[1].Band {
+		t.Fatal("display direction changed warning colour")
+	}
+	for _, tc := range []struct {
+		used float64
+		want string
+	}{{0, "5h ░░░░░░░░ 0%"}, {100, "5h ████████ 100%"}, {140, "5h ████████ 100%"}, {-10, "5h ░░░░░░░░ 0%"}} {
+		got := FormatSidebarWindowBands(ProviderLimits{Primary: &LimitWindow{UsedPercentage: tc.used, WindowMinutes: &five}}, core.LimitPercentUsed, sidebarNowMs)
+		if len(got) != 1 || got[0].Text != tc.want {
+			t.Fatalf("%v: %+v", tc.used, got)
+		}
+	}
+	if got := FormatSidebarWindowBands(ProviderLimits{}, core.LimitPercentUsed, sidebarNowMs); len(got) != 0 {
+		t.Fatalf("absent: %+v", got)
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/senna-lang/herdr-agent-usage/internal/bar"
 	"github.com/senna-lang/herdr-agent-usage/internal/core"
 )
 
@@ -168,6 +169,12 @@ func sidebarWindowPick(tag string, p ProviderLimits) *LimitWindow {
 	}
 }
 
+var sidebarBars atomic.Bool
+
+// SetSidebarBars enables compact progress bars in per-window sidebar tokens.
+// Keep this opt-in so existing single-row layouts retain their width.
+func SetSidebarBars(enabled bool) { sidebarBars.Store(enabled) }
+
 // FormatSidebarWindowBands splits every present window into its own banded
 // token so a layout can colour each number separately. Text carries no
 // separator: Herdr already joins row items with "·", so adding one would
@@ -183,9 +190,15 @@ func FormatSidebarWindowBands(p ProviderLimits, percent core.LimitPercent, nowMs
 		if remaining < 0 {
 			remaining = 0
 		}
+		text := sidebarWindowText(window, percent, nowMs)
+		if sidebarBars.Load() {
+			fill := percent.DisplayPercent(remainingOf(window.UsedPercentage))
+			// Let Herdr apply the existing warning colour to the entire row.
+			text = fmt.Sprintf("%s %s %s", windowTag(window, tag), bar.RenderBar(float64(fill), 8), text)
+		}
 		bands = append(bands, SidebarWindowBand{
 			Tag:  tag,
-			Text: sidebarWindowText(window, percent, nowMs),
+			Text: text,
 			Band: core.LimitBandFor(remaining),
 		})
 	}

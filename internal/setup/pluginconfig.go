@@ -40,6 +40,8 @@ type PluginConfig struct {
 	// SidebarWindows selects the $limit presentation: "shortest" (default, the
 	// numerically tightest window) or "all" (every present window on one row).
 	SidebarWindows string
+	// SidebarBars adds eight-column bars to the per-window sidebar tokens.
+	SidebarBars bool
 	// ClaudeProfiles are the configured [[claude.profiles]] entries (unresolved).
 	// Empty means the single implicit "claude" profile is synthesized downstream.
 	ClaudeProfiles []claude.ProfileSpec
@@ -89,6 +91,7 @@ type pluginConfigWire struct {
 		LimitPercent   *string `toml:"limit_percent"`
 		CacheDisplay   *bool   `toml:"cache_display"`
 		SidebarWindows *string `toml:"sidebar_windows"`
+		SidebarBars    *bool   `toml:"sidebar_bars"`
 	} `toml:"ui"`
 	Claude struct {
 		Profiles []profileWire `toml:"profiles"`
@@ -180,6 +183,7 @@ func DefaultPluginConfigTOML(config PluginConfig) string {
 		"# all shows every window tagged (5h 72% · 7d 90% · 30d 41%);",
 		"# compact shows bare percentages (72%/90%/41%) when space is tight.",
 		`sidebar_windows = "` + NormalizeSidebarWindows(config.SidebarWindows) + `"`,
+		`sidebar_bars = ` + strconv.FormatBool(config.SidebarBars),
 		"",
 		"# Multi-account Claude: uncomment and add one block per account.",
 
@@ -273,6 +277,9 @@ func ParsePluginConfigTOML(raw string) PluginConfig {
 	}
 	if wire.UI.CacheDisplay != nil {
 		cfg.CacheDisplay = *wire.UI.CacheDisplay
+	}
+	if wire.UI.SidebarBars != nil {
+		cfg.SidebarBars = *wire.UI.SidebarBars
 	}
 	if wire.UI.SidebarWindows != nil {
 		cfg.SidebarWindows = NormalizeSidebarWindows(*wire.UI.SidebarWindows)

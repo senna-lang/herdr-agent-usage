@@ -245,6 +245,33 @@ current limits appear before the context meter. Until a context meter is
 available, the context row shows only the current limits; periodic refreshes
 never recover a meter from an older combined row.
 
+### Sidebar progress bars
+
+Set `[ui] sidebar_bars = true` in the plugin config to add eight-column progress
+bars to the per-window `$limit_5h_*`, `$limit_7d_*`, and `$limit_30d_*` tokens.
+Bars default off, preserving existing layouts. Use a separate sidebar row per
+window; the combined `$limit` token is unchanged. `limit_percent = "used"` makes
+bars fill with consumption; `"remaining"` fills with remaining allowance. Warning
+colours always follow remaining headroom. Missing windows stay blank. Reset
+countdowns are retained, so allow enough sidebar width for them.
+
+```toml
+# Plugin config: merge into the existing [ui] section.
+[ui]
+limit_percent = "used"
+sidebar_bars = true
+```
+
+Example sidebar rows (used mode):
+
+```text
+5h ██░░░░░░ 25%
+7d ██████░░ 75%
+```
+
+These are account-wide rolling quotas, not conversation-specific token budgets.
+Use the per-window colour tokens documented above on separate Herdr sidebar rows.
+
 ### Plugin config
 
 ```bash
