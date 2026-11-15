@@ -84,3 +84,30 @@ func TestSidebarBars(t *testing.T) {
 		t.Fatalf("absent: %+v", got)
 	}
 }
+
+func TestSidebarPaneColoursAndWarnings(t *testing.T) {
+	SetSidebarBars(true)
+	t.Cleanup(func() { SetSidebarBars(false) })
+	for _, tc := range []struct {
+		used    float64
+		band    core.LimitBand
+		warning string
+	}{
+		{50, core.LimitHigh, ""}, {80, core.LimitMid, ""},
+		{81, core.LimitLow, "⚠ 5h quota nearly used"}, {100, core.LimitLow, "⚠ 5h quota exhausted"},
+	} {
+		got := FormatSidebarWindowBands(ProviderLimits{Primary: &LimitWindow{UsedPercentage: tc.used}}, core.LimitPercentUsed, sidebarNowMs)[0]
+		if got.Band != tc.band || got.Warning != tc.warning {
+			t.Fatalf("%v: %+v", tc.used, got)
+		}
+	}
+	p := ProviderLimits{Primary: &LimitWindow{UsedPercentage: 40, RunOut: &RunOutEstimate{MinutesToEmpty: 44, EmptyBeforeReset: true}}}
+	got := FormatSidebarWindowBands(p, core.LimitPercentUsed, sidebarNowMs)[0]
+	if got.Warning != "⚠ 5h empty in ~44m" {
+		t.Fatal(got.Warning)
+	}
+	SetSidebarBars(false)
+	if got := FormatSidebarWindowBands(p, core.LimitPercentUsed, sidebarNowMs)[0]; got.Warning != "" {
+		t.Fatal("disabled bars changed legacy output")
+	}
+}

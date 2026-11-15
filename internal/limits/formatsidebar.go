@@ -150,9 +150,10 @@ func SetSidebarWindows(mode string) {
 // row: its slot tag, the text (including the trailing separator unless it is
 // the last present window), and the colour band that text belongs to.
 type SidebarWindowBand struct {
-	Tag  string
-	Text string
-	Band core.LimitBand
+	Tag     string
+	Text    string
+	Band    core.LimitBand
+	Warning string
 }
 
 // SidebarWindowTags is the fixed slot order a per-number row renders in.
@@ -191,15 +192,34 @@ func FormatSidebarWindowBands(p ProviderLimits, percent core.LimitPercent, nowMs
 			remaining = 0
 		}
 		text := sidebarWindowText(window, percent, nowMs)
+		band := core.LimitBandFor(remaining)
+		warning := ""
 		if sidebarBars.Load() {
 			fill := percent.DisplayPercent(remainingOf(window.UsedPercentage))
 			// Let Herdr apply the existing warning colour to the entire row.
 			text = fmt.Sprintf("%s %s %s", windowTag(window, tag), bar.RenderBar(float64(fill), 8), text)
+			switch bar.ToneForRemaining(remaining) {
+			case bar.ToneHigh:
+				band = core.LimitHigh
+			case bar.ToneMid:
+				band = core.LimitMid
+			case bar.ToneLow:
+				band = core.LimitLow
+			}
+			if window.RunOut != nil && window.RunOut.EmptyBeforeReset {
+				warning = fmt.Sprintf("⚠ %s empty in ~%s", windowTag(window, tag), formatShortDuration(window.RunOut.MinutesToEmpty))
+			} else if remaining < 20 {
+				warning = fmt.Sprintf("⚠ %s quota nearly used", windowTag(window, tag))
+			}
+			if remaining <= 0 {
+				warning = fmt.Sprintf("⚠ %s quota exhausted", windowTag(window, tag))
+			}
 		}
 		bands = append(bands, SidebarWindowBand{
-			Tag:  tag,
-			Text: text,
-			Band: core.LimitBandFor(remaining),
+			Tag:     tag,
+			Text:    text,
+			Band:    band,
+			Warning: warning,
 		})
 	}
 	return bands
