@@ -18,14 +18,22 @@ func NotifyProviderPrimaryLimits(providers []ProviderLimits, nowMs int64) {
 // remaining-percent thresholds under the shared notification-state lock.
 func NotifyProviderPrimaryLimitsWithThresholds(providers []ProviderLimits, nowMs int64, thresholds []int, percent core.LimitPercent) {
 	claudeProfiles := ResolvedClaudeProfiles()
+	withProviderNotifyState(func(cur ProviderNotifyState) ProviderNotifyState {
+		return CheckProviderPrimaryLimitsWithThresholds(providers, cur, nowMs, thresholds, herdrcliShowNotification, claudeProfiles, percent)
+	})
+}
+
+// withProviderNotifyState runs update on the persisted provider state under
+// the shared lock, converting between the stored map type and the one the
+// bucket decisions work on.
+func withProviderNotifyState(update func(ProviderNotifyState) ProviderNotifyState) {
 	ratelimit.WithLockedProviderState(func(current ratelimit.ProviderNotifyStateMap) ratelimit.ProviderNotifyStateMap {
 		cur := ProviderNotifyState{}
 		for k, v := range current {
 			cur[k] = v
 		}
-		next := CheckProviderPrimaryLimitsWithThresholds(providers, cur, nowMs, thresholds, herdrcliShowNotification, claudeProfiles, percent)
 		out := ratelimit.ProviderNotifyStateMap{}
-		for k, v := range next {
+		for k, v := range update(cur) {
 			out[k] = v
 		}
 		return out

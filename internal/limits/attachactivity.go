@@ -4,7 +4,11 @@
  */
 package limits
 
-import "github.com/senna-lang/herdr-agent-usage/internal/providers"
+import (
+	"encoding/json"
+
+	"github.com/senna-lang/herdr-agent-usage/internal/providers"
+)
 
 // OpenPaneSnapshot is one open agent pane used for share aggregation.
 type OpenPaneSnapshot struct {
@@ -127,4 +131,37 @@ func AttachPaneActivity(
 		out[i].PaneActivity = &activity
 	}
 	return out
+}
+
+// openPaneWire is one caller-supplied open pane (`collect --panes`): the
+// caller's own pane list stands in for the herdr pane query, so a host other
+// than herdr (herdr-app) can drive the open-panes filter and pane shares.
+type openPaneWire struct {
+	PaneID    string  `json:"paneId"`
+	Agent     string  `json:"agent"`
+	Label     string  `json:"label"`
+	SessionID *string `json:"sessionId"`
+	Cwd       *string `json:"cwd"`
+}
+
+// ParseOpenPanesJSON decodes a JSON array of {paneId, agent, label?,
+// sessionId?, cwd?}. Entries without an agent are dropped (they are plain
+// terminals); a missing label falls back to the agent id, as herdr's does.
+func ParseOpenPanesJSON(raw []byte) ([]OpenPaneSnapshot, error) {
+	var wire []openPaneWire
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return nil, err
+	}
+	snaps := make([]OpenPaneSnapshot, 0, len(wire))
+	for _, p := range wire {
+		if p.Agent == "" {
+			continue
+		}
+		label := p.Label
+		if label == "" {
+			label = p.Agent
+		}
+		snaps = append(snaps, OpenPaneSnapshot{PaneID: p.PaneID, Agent: p.Agent, Label: label, SessionID: p.SessionID, Cwd: p.Cwd})
+	}
+	return snaps, nil
 }

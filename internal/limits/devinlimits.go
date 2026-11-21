@@ -39,6 +39,9 @@ const (
 	devinWeeklyWindowMinutes = 7 * 24 * 60
 )
 
+// devinLoginAction is the command that restores a missing Devin login.
+const devinLoginAction = "devin login"
+
 // devinCompatVersion is the client version reported to the endpoint. Devin's
 // seat service only checks that a plausible Windsurf-family client is
 // asking, so the version OpenUsage converged on is reused.
@@ -100,8 +103,8 @@ func CollectDevinLimits(nowMs int64, opts CollectDevinLimitsOptions) ProviderLim
 	}
 	credential := devin.LoadCredentials(credentialsPath)
 	if credential == nil {
-		pl := ProviderLimits{ProviderID: providerID, Label: label, Source: "none", FetchedAtMs: nowMs}
-		pl.Note = strPtr("no Devin CLI login in credentials.toml — run `devin login`")
+		pl := ProviderLimits{ProviderID: providerID, Label: label, Source: "none", FetchedAtMs: nowMs, Action: devinLoginAction}
+		pl.Note = strPtr("no Devin CLI login in credentials.toml — run `" + devinLoginAction + "`")
 		return pl
 	}
 

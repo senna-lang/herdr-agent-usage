@@ -6,6 +6,7 @@ package limits
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -211,6 +212,17 @@ func TestDefaultCollectOptions_MultiProfileGroupsEveryProfileUnderClaude(t *test
 	if got1.AccountLabel != "secondary@example.com" {
 		t.Fatalf("unlabeled profile should resolve AccountLabel from its email, got %q", got1.AccountLabel)
 	}
+	// The profile's own id/label and its login identity are separate fields,
+	// so a renderer can show "My Work Account" and the email side by side.
+	if got0.Account != "primary@example.com" {
+		t.Fatalf("Account = %q, want the login email", got0.Account)
+	}
+	if got0.ProfileID != "claude" || got0.ProfileLabel != "My Work Account" || got0.Identity != "primary@example.com" {
+		t.Fatalf("profile identity = %q/%q/%q", got0.ProfileID, got0.ProfileLabel, got0.Identity)
+	}
+	if got1.ProfileID != "claude-secondary" || got1.ProfileLabel != "claude-secondary" || got1.Identity != "secondary@example.com" {
+		t.Fatalf("profile identity = %q/%q/%q", got1.ProfileID, got1.ProfileLabel, got1.Identity)
+	}
 }
 
 func TestDefaultCollectOptions_SingleProfileNotGrouped(t *testing.T) {
@@ -231,6 +243,15 @@ func TestDefaultCollectOptions_SingleProfileNotGrouped(t *testing.T) {
 	}
 	if got.AccountLabel != "" {
 		t.Fatalf("single-profile mode should not set AccountLabel, got %q", got.AccountLabel)
+	}
+	// Identity fields are stamped even when nothing is grouped; without a
+	// readable login email the identity falls back to the config dir.
+	// Nothing recorded yet is "no data", not a failure.
+	if got.Status() != StatusNoData || !strings.HasSuffix(got.Home, ".claude") {
+		t.Fatalf("Status = %q, Home = %q", got.Status(), got.Home)
+	}
+	if got.ProfileID != "claude" || got.ProfileLabel != "Claude" || !strings.HasSuffix(got.Identity, ".claude") {
+		t.Fatalf("profile identity = %q/%q/%q", got.ProfileID, got.ProfileLabel, got.Identity)
 	}
 }
 
@@ -320,6 +341,16 @@ func TestDefaultCollectOptions_MultiProfileGroupsEveryProfileUnderCodex(t *testi
 	if got1.GroupLabel != "Codex" || got1.AccountLabel != "dev" {
 		t.Fatalf("unlabeled profile grouping = %q/%q", got1.GroupLabel, got1.AccountLabel)
 	}
+	// Codex has no email, so the identity is the profile's codex_home.
+	if got0.Home != dirPersonal {
+		t.Fatalf("Home = %q, want the codex_home", got0.Home)
+	}
+	if got0.ProfileID != "codex" || got0.ProfileLabel != "personal" || got0.Identity != dirPersonal {
+		t.Fatalf("profile identity = %q/%q/%q", got0.ProfileID, got0.ProfileLabel, got0.Identity)
+	}
+	if got1.ProfileID != "dev" || got1.Identity != dirDev {
+		t.Fatalf("profile identity = %q/%q/%q", got1.ProfileID, got1.ProfileLabel, got1.Identity)
+	}
 }
 
 func TestCollectAllProviderLimits_MultipleGrokAndOpenCodeProfiles(t *testing.T) {
@@ -407,5 +438,52 @@ func TestCollectAllProviderLimitsKeepsFreshRollingWindow(t *testing.T) {
 		if p := got[0].Primary; p.UsedPercentage != 75 || p.ResetsAt == nil {
 			t.Errorf("%dms until oldest expires: primary = %+v, want 75%% with resetsAt", untilOldestExpiresMs, *p)
 		}
+	}
+}
+
+// Every entry names its family, so a renderer can group and badge accounts
+// whose provider ids are arbitrary profile ids.
+func TestCollectAllProviderLimits_StampsTheFamily(t *testing.T) {
+	got := CollectAllProviderLimits(nil, 100, CollectOptions{
+		Claude: []ClaudeProfileCollector{{ID: "claude-2", Label: "work", Collector: func(_ *string, now int64) ProviderLimits {
+			return ProviderLimits{ProviderID: "claude-2", Label: "work", FetchedAtMs: now}
+		}}},
+		Codex: []CodexProfileCollector{{ID: "dev", Label: "dev", Collector: func(_ *string, now int64) ProviderLimits {
+			return ProviderLimits{ProviderID: "dev", Label: "dev", FetchedAtMs: now}
+		}}},
+	})
+	want := map[string]string{"claude-2": "claude", "dev": "codex", "opencode": "opencode", "grok": "grok"}
+	for _, spec := range singleCollectorQuotaSpecs {
+		want[spec.id] = spec.id
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d entries, want %d", len(got), len(want))
+	}
+	for _, p := range got {
+		if p.Family != want[p.ProviderID] {
+			t.Errorf("%s: Family = %q, want %q", p.ProviderID, p.Family, want[p.ProviderID])
+		}
+	}
+}
+
+func TestWatchDirs_ListsEachProfilesCacheAndSessionsFolder(t *testing.T) {
+	pluginConfigDir := t.TempDir()
+	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", pluginConfigDir)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work, codexHome := filepath.Join(home, ".claude-work"), filepath.Join(home, ".codex-dev")
+	toml := "[[claude.profiles]]\nid = \"claude\"\nconfig_dir = \"" + filepath.Join(home, ".claude") + "\"\n\n" +
+		"[[claude.profiles]]\nid = \"work\"\nconfig_dir = \"" + work + "\"\n\n" +
+		"[[codex.profiles]]\nid = \"dev\"\ncodex_home = \"" + codexHome + "\"\n"
+	if err := os.WriteFile(filepath.Join(pluginConfigDir, "config.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		filepath.Join(home, ".claude", "herdr-usagebar"),
+		filepath.Join(work, "herdr-usagebar"),
+		filepath.Join(codexHome, "sessions"),
+	}
+	if got := WatchDirs(); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("WatchDirs() = %v, want %v", got, want)
 	}
 }

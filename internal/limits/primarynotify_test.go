@@ -197,3 +197,36 @@ func TestCheckProviderPrimaryLimitsWithThresholds_UsedInvertsToastBody(t *testin
 		t.Fatalf("notifications=%v", notifications)
 	}
 }
+
+// Two accounts of one family must never produce identical toasts: a grouped
+// entry is titled by its family and names its own account.
+func TestCheckProviderPrimaryLimits_GroupedAccountIsNamedInTheTitle(t *testing.T) {
+	cases := []struct {
+		name      string
+		overrides func(*ProviderLimits)
+		wantTitle string
+	}{
+		{"a lone entry keeps its label", nil, "Codex limit"},
+		{"a grouped entry names its profile", func(p *ProviderLimits) {
+			p.ProviderID, p.Label, p.GroupLabel, p.ProfileLabel = "dev", "product", "Codex", "product"
+		}, "Codex limit · product"},
+		{"a grouped entry without a profile label falls back to its label", func(p *ProviderLimits) {
+			p.ProviderID, p.Label, p.GroupLabel = "dev", "product", "Codex"
+		}, "Codex limit · product"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var titles []string
+			CheckProviderPrimaryLimits(
+				[]ProviderLimits{notifyTestProvider(tc.overrides)},
+				ProviderNotifyState{},
+				notifyNowMs,
+				func(title, _ string) bool { titles = append(titles, title); return true },
+				defaultClaudeProfiles,
+			)
+			if len(titles) != 1 || titles[0] != tc.wantTitle {
+				t.Fatalf("titles = %v, want [%s]", titles, tc.wantTitle)
+			}
+		})
+	}
+}
