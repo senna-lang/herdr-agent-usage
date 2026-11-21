@@ -202,3 +202,16 @@ func contains(s, sub string) bool {
 			return false
 		}())
 }
+
+func TestSidebarBarsConfig(t *testing.T) {
+	if ParsePluginConfigTOML("[ui]\n").SidebarBars {
+		t.Fatal("bars must default off")
+	}
+	cfg := ParsePluginConfigTOML("[ui]\nsidebar_bars = true\nlimit_percent = \"used\"\n")
+	if !cfg.SidebarBars || cfg.LimitPercent != core.LimitPercentUsed {
+		t.Fatalf("config: %+v", cfg)
+	}
+	if !ParsePluginConfigTOML(DefaultPluginConfigTOML(cfg)).SidebarBars {
+		t.Fatal("seed dropped bars setting")
+	}
+}

@@ -284,6 +284,11 @@ func writeWindowBandTokensWith(writer metadataTokenWriter, current map[string]st
 	}
 	for _, tag := range limits.SidebarWindowTags {
 		band, present := byTag[tag]
+		warning := ""
+		if present {
+			warning = band.Warning
+		}
+		writeMetadataTokenWith(writer, current, paneID, "limit_"+tag+"_warning", warning, false)
 		for _, suffix := range []string{"high", "mid", "low"} {
 			value := ""
 			if present && band.Band.Suffix() == suffix {

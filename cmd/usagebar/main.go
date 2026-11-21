@@ -30,10 +30,12 @@ var version = "0.1.0-dev"
 
 func main() {
 	limits.SetShowNotification(herdrcli.ShowNotification)
+	config := setup.LoadPluginConfig(setup.ResolvePluginConfigDir(environment()))
+	limits.SetSidebarBars(config.SidebarBars)
 	// $limit presentation is a plugin-config choice, read once per process so
 	// every hook (status, watch, startup) renders the same shape.
 	limits.SetSidebarWindows(setup.NormalizeSidebarWindows(
-		setup.LoadPluginConfig(setup.ResolvePluginConfigDir(environment())).SidebarWindows,
+		config.SidebarWindows,
 	))
 
 	if len(os.Args) < 2 {

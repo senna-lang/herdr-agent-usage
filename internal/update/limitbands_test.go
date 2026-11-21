@@ -131,3 +131,18 @@ func TestWriteWindowBandTokens_SlotSwapClearsOldSuffix(t *testing.T) {
 		}
 	}
 }
+
+func TestWindowWarningClearsOnRecoveryAndMissingWindow(t *testing.T) {
+	for _, bands := range [][]limits.SidebarWindowBand{nil, {{Tag: "5h", Text: "50%", Band: core.LimitHigh}}} {
+		rec := newBandRecorder()
+		writeWindowBandTokensWith(rec.writer(), map[string]string{"limit_5h_warning": "⚠ 5h quota nearly used"}, "w1:p1", bands, false)
+		if !rec.cleared["w1:p1/limit_5h_warning"] {
+			t.Fatal("stale warning not cleared")
+		}
+	}
+	rec := newBandRecorder()
+	writeWindowBandTokensWith(rec.writer(), nil, "w1:p1", []limits.SidebarWindowBand{{Tag: "7d", Warning: "warning"}}, false)
+	if rec.set["w1:p1/limit_7d_warning"] != "warning" {
+		t.Fatal("warning not published")
+	}
+}

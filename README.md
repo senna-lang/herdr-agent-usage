@@ -245,6 +245,62 @@ current limits appear before the context meter. Until a context meter is
 available, the context row shows only the current limits; periodic refreshes
 never recover a meter from an older combined row.
 
+### Sidebar progress bars
+
+Set `[ui] sidebar_bars = true` in the plugin config to add eight-column progress
+bars to the per-window `$limit_5h_*`, `$limit_7d_*`, and `$limit_30d_*` tokens.
+Bars default off, preserving existing layouts. Use a separate sidebar row per
+window; the combined `$limit` token is unchanged. `limit_percent = "used"` makes
+bars fill with consumption; `"remaining"` fills with remaining allowance. Warning
+colours always follow remaining headroom. Missing windows stay blank. Reset
+countdowns are retained, so allow enough sidebar width for them.
+
+```toml
+# Plugin config: merge into the existing [ui] section.
+[ui]
+limit_percent = "used"
+sidebar_bars = true
+```
+
+Example sidebar rows (used mode):
+
+```text
+5h ██░░░░░░ 25%
+7d ██████░░ 75%
+```
+
+These are account-wide rolling quotas, not conversation-specific token budgets.
+Bar mode uses the same thresholds as the Agent Usage pane: green at ≥50%
+remaining, yellow at ≥20%, red below 20%. Legacy non-bar sidebar thresholds
+remain unchanged. Herdr colours each token as a whole; the sidebar cannot
+reproduce the pane's independently coloured bar, percentage and dim countdown.
+
+Example Herdr layout (merge into the existing sidebar configuration):
+
+```toml
+[ui.sidebar.agents]
+rows = [
+  ["state_icon", { token = "$title", bold = true }],
+  ["$provider", "state_text"],
+  [{ token = "$limit_5h_high", fg = "#1bd96a" }, { token = "$limit_5h_mid", fg = "#e0af68" }, { token = "$limit_5h_low", fg = "#ff5555" }],
+  [{ token = "$limit_7d_high", fg = "#1bd96a" }, { token = "$limit_7d_mid", fg = "#e0af68" }, { token = "$limit_7d_low", fg = "#ff5555" }],
+  [{ token = "$limit_5h_warning", fg = "#ff5555" }],
+  [{ token = "$limit_7d_warning", fg = "#ff5555" }],
+  ["$context"],
+  [{ token = "$cache_high", dim = true }, { token = "$cache_mid", fg = "#e0af68" }, { token = "$cache_low", fg = "#ff5555" }],
+]
+```
+
+Optional `$limit_<window>_warning` rows (5h, 7d, 30d) show `quota nearly used`
+below 20% remaining or `quota exhausted` at zero. When the collected snapshot
+includes the pane's run-out estimate, `empty in ~...` takes precedence over the
+near-limit warning. The separate pane enriches snapshots with usage history;
+the idle watcher and agent-event collectors currently do not, so those paths
+only show threshold warnings. No estimate is inferred from a missing history.
+Warnings clear on recovery or absent windows, following the existing retention
+policy for wholly empty working updates. Warnings are off when sidebar bars are off.
+
+
 ### Plugin config
 
 ```bash
