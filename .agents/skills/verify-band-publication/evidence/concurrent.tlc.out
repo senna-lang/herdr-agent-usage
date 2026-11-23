@@ -1,0 +1,64 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 103 and seed 8262002657581194037 with 1 worker on 8 cores with 5461MB heap and 64MB offheap memory [pid: 41081] (Mac OS X 26.4.1 aarch64, Eclipse Adoptium 25.0.5 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /Users/senna/Documents/Repos/herdr-agent-usage-formal/.agents/skills/verify-band-publication/model/BandPublication.tla
+Parsing file /private/var/folders/5f/trw3b8r92_l452jb2pq3cn_r0000gn/T/Naturals.tla
+Parsing file /private/var/folders/5f/trw3b8r92_l452jb2pq3cn_r0000gn/T/FiniteSets.tla
+Parsing file /private/var/folders/5f/trw3b8r92_l452jb2pq3cn_r0000gn/T/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module BandPublication
+Starting... (2026-11-23 22:59:12)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-23 22:59:12.
+Error: Invariant QuiescentExclusive is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ tokens = [limit_high |-> "", limit_mid |-> "", limit_low |-> ""]
+/\ pc = [Comfortable |-> 0, Critical |-> 0]
+/\ snapshot = [Comfortable |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""], Critical |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""]]
+
+State 2: <ReadSnapshot line 27, col 5 to line 30, col 23 of module BandPublication>
+/\ tokens = [limit_high |-> "", limit_mid |-> "", limit_low |-> ""]
+/\ pc = [Comfortable |-> 1, Critical |-> 0]
+/\ snapshot = [Comfortable |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""], Critical |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""]]
+
+State 3: <ReadSnapshot line 27, col 5 to line 30, col 23 of module BandPublication>
+/\ tokens = [limit_high |-> "", limit_mid |-> "", limit_low |-> ""]
+/\ pc = [Comfortable |-> 1, Critical |-> 1]
+/\ snapshot = [Comfortable |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""], Critical |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""]]
+
+State 4: <Publish line 39, col 8 to line 44, col 28 of module BandPublication>
+/\ tokens = [limit_high |-> "5h 80%", limit_mid |-> "", limit_low |-> ""]
+/\ pc = [Comfortable |-> 2, Critical |-> 1]
+/\ snapshot = [Comfortable |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""], Critical |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""]]
+
+State 5: <Publish line 39, col 8 to line 44, col 28 of module BandPublication>
+/\ tokens = [limit_high |-> "5h 80%", limit_mid |-> "", limit_low |-> ""]
+/\ pc = [Comfortable |-> 2, Critical |-> 2]
+/\ snapshot = [Comfortable |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""], Critical |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""]]
+
+State 6: <Publish line 39, col 8 to line 44, col 28 of module BandPublication>
+/\ tokens = [limit_high |-> "5h 80%", limit_mid |-> "", limit_low |-> ""]
+/\ pc = [Comfortable |-> 3, Critical |-> 2]
+/\ snapshot = [Comfortable |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""], Critical |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""]]
+
+State 7: <Publish line 39, col 8 to line 44, col 28 of module BandPublication>
+/\ tokens = [limit_high |-> "5h 80%", limit_mid |-> "", limit_low |-> ""]
+/\ pc = [Comfortable |-> 3, Critical |-> 3]
+/\ snapshot = [Comfortable |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""], Critical |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""]]
+
+State 8: <Publish line 39, col 8 to line 44, col 28 of module BandPublication>
+/\ tokens = [limit_high |-> "5h 80%", limit_mid |-> "", limit_low |-> ""]
+/\ pc = [Comfortable |-> 4, Critical |-> 3]
+/\ snapshot = [Comfortable |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""], Critical |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""]]
+
+State 9: <Publish line 39, col 8 to line 44, col 28 of module BandPublication>
+/\ tokens = [limit_high |-> "5h 80%", limit_mid |-> "", limit_low |-> "5h 20%"]
+/\ pc = [Comfortable |-> 4, Critical |-> 4]
+/\ snapshot = [Comfortable |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""], Critical |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""]]
+
+57 states generated, 39 distinct states found, 4 states left on queue.
+The depth of the complete state graph search is 9.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 2 and the 95th percentile is 2).
+Finished in 00s at (2026-11-23 22:59:12)

@@ -1,0 +1,8 @@
+=== RUN   TestVerifyBandPublicationConcurrent
+    formal_concurrent_test.go:25: expected exactly one publisher's complete row after both finished: map[limit_high:5h 80% limit_low:5h 20%]
+--- FAIL: TestVerifyBandPublicationConcurrent (0.00s)
+=== RUN   TestVerifyBandPublicationSingle
+--- PASS: TestVerifyBandPublicationSingle (0.00s)
+FAIL
+FAIL	github.com/senna-lang/herdr-agent-usage/internal/update	1.059s
+FAIL

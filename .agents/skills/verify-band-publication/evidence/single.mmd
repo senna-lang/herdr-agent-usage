@@ -1,0 +1,10 @@
+---
+title: "Sidebar publication: one complete row after publishers finish"
+---
+stateDiagram-v2
+  s0: Publishing: comfortable row
+  s1: Publishing: empty sidebar
+  s2: Publishers finished: critical row
+  [*] --> s0
+  s0 --> s1: Critical: update the comfortable band
+  s1 --> s2: Critical: update the critical band

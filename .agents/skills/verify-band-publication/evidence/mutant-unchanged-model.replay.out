@@ -1,0 +1,6 @@
+=== RUN   TestVerifyBandPublicationSingle
+    formal_single_test.go:13: expected only the new critical row: map[limit_high:5h 94% limit_low:5h 20%]
+--- FAIL: TestVerifyBandPublicationSingle (0.00s)
+FAIL
+FAIL	github.com/senna-lang/herdr-agent-usage/internal/update	0.244s
+FAIL

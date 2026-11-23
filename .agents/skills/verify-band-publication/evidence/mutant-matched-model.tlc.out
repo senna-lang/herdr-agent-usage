@@ -1,0 +1,44 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 42 and seed 5269352945908061704 with 1 worker on 8 cores with 5461MB heap and 64MB offheap memory [pid: 36137] (Mac OS X 26.4.1 aarch64, Eclipse Adoptium 25.0.5 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /Users/senna/Documents/Repos/herdr-agent-usage-formal/.agents/skills/verify-band-publication/model/BandPublication.tla
+Parsing file /private/var/folders/5f/trw3b8r92_l452jb2pq3cn_r0000gn/T/Naturals.tla
+Parsing file /private/var/folders/5f/trw3b8r92_l452jb2pq3cn_r0000gn/T/FiniteSets.tla
+Parsing file /private/var/folders/5f/trw3b8r92_l452jb2pq3cn_r0000gn/T/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module BandPublication
+Starting... (2026-11-23 22:56:43)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-23 22:56:43.
+Error: Invariant QuiescentExclusive is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ tokens = [limit_high |-> "5h 94%", limit_mid |-> "", limit_low |-> ""]
+/\ pc = [Critical |-> 0]
+/\ snapshot = [Critical |-> [limit_high |-> "", limit_mid |-> "", limit_low |-> ""]]
+
+State 2: <ReadSnapshot line 27, col 5 to line 30, col 23 of module BandPublication>
+/\ tokens = [limit_high |-> "5h 94%", limit_mid |-> "", limit_low |-> ""]
+/\ pc = [Critical |-> 1]
+/\ snapshot = [Critical |-> [limit_high |-> "5h 94%", limit_mid |-> "", limit_low |-> ""]]
+
+State 3: <Publish line 39, col 8 to line 44, col 28 of module BandPublication>
+/\ tokens = [limit_high |-> "5h 94%", limit_mid |-> "", limit_low |-> ""]
+/\ pc = [Critical |-> 2]
+/\ snapshot = [Critical |-> [limit_high |-> "5h 94%", limit_mid |-> "", limit_low |-> ""]]
+
+State 4: <Publish line 39, col 8 to line 44, col 28 of module BandPublication>
+/\ tokens = [limit_high |-> "5h 94%", limit_mid |-> "", limit_low |-> ""]
+/\ pc = [Critical |-> 3]
+/\ snapshot = [Critical |-> [limit_high |-> "5h 94%", limit_mid |-> "", limit_low |-> ""]]
+
+State 5: <Publish line 39, col 8 to line 44, col 28 of module BandPublication>
+/\ tokens = [limit_high |-> "5h 94%", limit_mid |-> "", limit_low |-> "5h 20%"]
+/\ pc = [Critical |-> 4]
+/\ snapshot = [Critical |-> [limit_high |-> "5h 94%", limit_mid |-> "", limit_low |-> ""]]
+
+5 states generated, 5 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 5.
+The average outdegree of the complete state graph is 1 (minimum is 1, the maximum 1 and the 95th percentile is 1).
+Finished in 00s at (2026-11-23 22:56:43)

@@ -1,0 +1,4 @@
+=== RUN   TestVerifyBandPublicationSingle
+--- PASS: TestVerifyBandPublicationSingle (0.00s)
+PASS
+ok  	github.com/senna-lang/herdr-agent-usage/internal/update	1.353s
