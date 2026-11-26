@@ -629,37 +629,54 @@ scripts/herdr-app-install.sh uninstall   # remove exactly what install added
   `cloned_from` records the source). To re-sync after a herdr-app update, diff
   them against the shipped `mods/tabs/main.js` and `layouts/main.json` in the
   herdr-app home and re-apply the additions: the Usage button, `open-usage`
-  command and `showPanel` helper in the mod, and the `usage` child of the
-  `panel-body` stack plus the tab bar's mod name in the layout.
+  command, `showPanel` helper and background toast polling in the mod, and
+  the `usage` child of the `panel-body` stack plus the tab bar's mod name in
+  the layout.
 - **Binary:** `~/.local/bin/usagebar` (`AGENT_USAGE_BIN`). **Config:**
   `~/.config/agent-usage/config.toml` (`AGENT_USAGE_CONFIG_DIR`), the same
   format as the plugin config above, so `[[claude.profiles]]`,
   `[[codex.profiles]]` and friends work unchanged. The panel runs
-  `usagebar collect --format v1` and `usagebar notify --json`
-  ([contract](docs/collect-json-v1.md)) with `HERDR_PLUGIN_CONFIG_DIR` set to
+  `usagebar collect --format v1`; the always-visible tab bar polls
+  `usagebar notify --json` even before the Usage panel has been opened
+  ([contract](docs/collect-json-v1.md)). Both set `HERDR_PLUGIN_CONFIG_DIR` to
   that folder; install seeds it with `[notify] delivery = "external"`.
 - **Claude statusLine (optional, recommended):** it keeps the 5h window fresh.
   Use one command for every Claude config dir; it routes by
   `CLAUDE_CONFIG_DIR` and must see the same config:
   `HERDR_PLUGIN_CONFIG_DIR=$HOME/.config/agent-usage $HOME/.local/bin/usagebar statusline`.
   Without it, Claude limits come from each dir's `.claude.json`.
-- Config dirs signed into the same account (e.g. the everyday `~/.claude` and
-  a dedicated `~/.claude-2`) share that account's freshest windows, and the
-  panel shows the account once, marked "also <label>" for the other dir.
-- The panel lists only providers in use on this machine: a configured
-  profile, any reading, or an installed harness (its home dir exists) that is
-  signed out or has not run yet. To show a fixed list instead, set
+  **Using both herdr TUI and herdr-app:** a statusLine command pointing at this
+  external-delivery config also suppresses Claude's statusLine toasts in the
+  TUI. Choose one delivery owner: keep this config for herdr-app notifications,
+  or point statusLine at the TUI plugin config with `delivery = "herdr"`.
+  Different config directories do not provide independent Claude delivery:
+  the profile's cache and notification state are shared.
+- Config dirs share windows only when the observation proves the same account.
+  For Claude, the statusLine bridge records email and organization UUID with
+  the windows; both must match the current login. Legacy untagged caches and
+  readings without organization provenance stay local to their profile.
+  Proven duplicates appear once, marked "also <label>" for the other dir.
+- The panel lists configured profiles, providers with readings, and installed
+  harnesses, including those whose quota fetch failed. Claude installation
+  evidence comes from its login/settings/project files, not the
+  `herdr-usagebar` directory usagebar creates itself.
+  To collect and show a fixed list instead, set
   `[ui] providers = ["claude", "codex"]` (provider ids: `claude`, `codex`,
   `opencode`, `grok`, `agy`, `kilo`, `devin`); this also limits the herdr pane and
   sidebar collection. Unknown ids in `[ui] providers` are ignored, and
   `usagebar setup` lists them.
-- The panel's pure logic is in `app/mods/agent-usage/model.js` (the view and
-  herdr calls stay in `main.js`). Test it with `node --test "app/**/*.test.js"`
-  (Node 22.12 or later); CI runs only the Go checks. The installer copies
-  `model.js` but not the test file.
-- The panel refreshes every 15 s while shown, every 60 s while hidden, and when
-  a statusLine cache or Codex rollout changes. Click it and press `r` to
-  refresh.
+- The panel's pure logic is in `app/mods/agent-usage/model.js`; the view and
+  herdr calls stay in `main.js`. Model and real-module lifecycle tests run with
+  `node --experimental-vm-modules --test "app/**/*.test.js"` (Node 22.12 or
+  later). Lifecycle tests stub the herdr/GPUI host, not the mod implementation;
+  they do not replace native visual checks. CI currently runs only Go checks.
+  The installer excludes test files and does not install `app/test-support`.
+- The panel refreshes every 15s while shown and every 60s while hidden.
+  Changes to an exact statusLine cache file or a Codex rollout trigger earlier
+  visible refreshes; history and notification-state writes do not. Watch-driven
+  refreshes are spaced at least 3s apart, including events received during a
+  collect; the latest held event runs after the deadline. Hidden watch events
+  wait for the normal hidden cadence. Click the panel and press `r` to refresh.
 
 ## Data handling
 

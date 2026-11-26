@@ -1,17 +1,20 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, nextCommand } from "herdr";
+import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, nextCommand, exec, home, appHome, readTextFile, notify, agents } from "herdr";
+import { openPanes, toastNotifications } from "../agent-usage/model.js";
 
 // Agent Usage: this clone of the shipped `tabs` mod adds a Usage button for
-// the `usage` child of the panel-body stack (mods/agent-usage), and the
-// `open-usage` command the usage toasts run to open that panel.
+// the `usage` child of the panel-body stack (mods/agent-usage), the
+// `open-usage` command the usage toasts run to open that panel, and the
+// notify --json poll (this bar is always shown; the Usage panel is not).
 //
 // Vendored: adapted from the `tabs` mod herdr-app 0.1.12 ships (the Usage
-// button, `open-usage` command and `showPanel` helper are the additions). To
-// re-sync after a herdr-app update, diff against the shipped
+// button, `open-usage` command, `showPanel` helper and toast poll are the
+// additions). To re-sync after a herdr-app update, diff against the shipped
 // ~/.config/herdr-app/mods/tabs/main.js and re-apply those additions. See the
 // "herdr-app" section of the README.
 const USAGE = "usage";
+const TOAST_MS = 15000;
 // Show one child of the side panel's stack (the panel itself may be hidden).
 const showPanel = (child) => { run("layout.select", { stack: "panel-body", child }); run("layout.show", { id: "panel" }); };
 const openUsage = () => showPanel(USAGE);
@@ -30,6 +33,34 @@ export default class Tabs extends View {
     cx.spawn(async () => { for (;;) { if (await nextCommand() === "open-usage") openUsage(); } });
     this.pressed = null;
     this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");
+    this.toastBusy = false;
+    this.paths = { binary: `${home()}/.local/bin/usagebar`, configDir: `${home()}/.config/agent-usage` };
+    cx.spawn(async (cx) => {
+      try {
+        const local = JSON.parse((await readTextFile(`${appHome()}/mods/agent-usage/local.json`)) ?? "{}");
+        this.paths = { ...this.paths, ...local };
+      } catch { /* same defaults as the panel */ }
+      this.pollToasts(cx);
+    });
+    cx.timer.every(TOAST_MS, (cx) => this.pollToasts(cx));
+  }
+
+  usagebar(args) {
+    return exec("/usr/bin/env", [`HERDR_PLUGIN_CONFIG_DIR=${this.paths.configDir}`, this.paths.binary, ...args]);
+  }
+
+  // Single-flight: a tick during an in-flight notify waits for the next one.
+  pollToasts(cx) {
+    if (this.toastBusy) return;
+    this.toastBusy = true;
+    cx.spawn(async () => {
+      try {
+        const r = await this.usagebar(["notify", "--json", "--panes", JSON.stringify(openPanes(agents(), panes()))]);
+        if (r.code !== 0) return;
+        for (const n of toastNotifications(JSON.parse(r.stdout).toasts, undefined, this.paths.openCommand)) notify(n);
+      } catch { /* the next tick retries */ }
+      finally { this.toastBusy = false; }
+    });
   }
 
   // The side panel is remembered per space: switching shows that space's choice

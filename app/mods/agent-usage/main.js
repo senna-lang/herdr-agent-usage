@@ -2,19 +2,21 @@
 // panel in the right column (docs/design/herdr-app/SPEC.md).
 //
 // Data comes from the usagebar binary: `collect --format v1` for the panel
-// (docs/collect-json-v1.md) and `notify --json` for toasts. It runs every 15 s
-// while the panel shows and every 60 s while hidden, and sooner when a folder
-// the report names in `watchDirs` changes. Paths come from local.json next to
-// this file (written by scripts/herdr-app-install.sh), else the defaults below.
+// (docs/collect-json-v1.md). Toasts are polled by the always-shown tabs mod.
+// Collect runs every 15 s while the panel shows and every 60 s while hidden.
+// `watchFiles` are exact Claude cache files: the parent folder is watched and
+// a change counts only when that file's content changes. `watchDirs` are Codex
+// sessions trees. Paths come from local.json next to this file (written by
+// scripts/herdr-app-install.sh), else the defaults below.
 // The pure data-to-display logic lives in ./model.js (tested with `node --test`).
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, home, appHome, readTextFile, watchFolder, notify, agents, panes, layout, theme, settings } from "herdr";
+import { exec, home, appHome, readTextFile, watchFolder, agents, panes, layout, theme, settings } from "herdr";
 import {
   FAMILIES, bandColors, fillWidth, openPanes, groupAccounts, groupName, accountTitle, hint, percentWord,
   shareLine, noDataText, metaText, calloutParts, compactName, compactPlaceholder, lowCacheText, emptyStateTitle,
-  footerText, errorText, toastNotifications,
+  footerText, errorText,
 } from "./model.js";
 
 const VISIBLE_MS = 15000;
@@ -35,6 +37,10 @@ function shown() {
   return Boolean(panel && !panel.hidden && body?.active === "usage");
 }
 
+function parentDir(file) {
+  const i = String(file).lastIndexOf("/");
+  return i <= 0 ? String(file) : String(file).slice(0, i);
+}
 // The monospace face of the user's terminal, for tags and code.
 const monoFont = () => settings().font_family ?? "JetBrains Mono";
 
@@ -44,74 +50,152 @@ export default class AgentUsage extends View {
     this.report = null; this.error = null; this.busy = false; this.updatedAt = null;
     this.all = localStorage.getItem("filter") === "all";
     this.compact = localStorage.getItem("view") === "compact";
-    this.watching = new Set(); this.lastWatchRefresh = 0; this.tick = 0;
+    this.watching = new Set(); this.watchedFiles = new Map(); this.fingerprints = new Map();
+    this.lastWatchRefresh = 0; this.watchTrailing = false; this.watchDeadline = 0;
+    this.generation = 0; this.rerun = false; this.tick = 0;
     this.paths = { binary: `${home()}/.local/bin/usagebar`, configDir: `${home()}/.config/agent-usage` };
     cx.spawn(async (cx) => {
       try {
         const local = JSON.parse((await readTextFile(`${appHome()}/mods/agent-usage/local.json`)) ?? "{}");
         this.paths = { ...this.paths, ...local };
       } catch { /* defaults */ }
-      this.refresh(cx, true);
+      this.refresh(cx);
     });
     cx.timer.every(VISIBLE_MS, (cx) => {
       this.tick += 1;
-      if (shown() || this.tick % HIDDEN_EVERY === 0) this.refresh(cx, true);
+      if (shown() || this.tick % HIDDEN_EVERY === 0) this.refresh(cx);
     });
+    // No one-shot timer in the host. This tick launches a trailing watch refresh
+    // once its debounce deadline has passed, without bypassing the hidden cadence.
+    cx.timer.every(WATCH_DEBOUNCE_MS, (cx) => this.pumpWatch(cx));
   }
 
   usagebar(args) {
     return exec("/usr/bin/env", [`HERDR_PLUGIN_CONFIG_DIR=${this.paths.configDir}`, this.paths.binary, ...args]);
   }
 
-  refresh(cx, withToasts) {
-    if (this.busy) return;
-    this.busy = true;
+  // A filter change invalidates a collect. A slow same-selection refresh still
+  // publishes, then the single queued rerun runs from finally.
+  refresh(cx) {
+    const token = this.generation;
+    if (this.busy) { this.rerun = true; return; }
+    this.busy = true; this.rerun = false;
+    const wantAll = this.all;
     const panesArg = JSON.stringify(openPanes(agents(), panes()));
     cx.spawn(async (cx) => {
+      let stale = () => token !== this.generation || wantAll !== this.all;
       try {
-        const r = await this.usagebar(["collect", "--format", "v1", ...(this.all ? ["--all"] : []), "--panes", panesArg]);
+        const r = await this.usagebar(["collect", "--format", "v1", ...(wantAll ? ["--all"] : []), "--panes", panesArg]);
         if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || `usagebar exited ${r.code}`);
         const report = JSON.parse(r.stdout);
         if (report.version !== 1) throw new Error(`unsupported usagebar report version ${report.version}`);
+        if (stale()) return;
         this.report = report; this.error = null; this.updatedAt = Date.now();
-        this.watch(report.watchDirs ?? [], cx);
-        if (withToasts) await this.postToasts(panesArg);
+        this.watch(report, cx);
       } catch (e) {
+        if (stale()) return;
         this.error = errorText(e?.message ?? e, this.paths.binary, home());
-      } finally { this.busy = false; cx.notify(); }
+      } finally {
+        this.busy = false;
+        if (this.rerun) this.refresh(cx);
+        else this.pumpWatch(cx);
+        cx.notify();
+      }
     });
     cx.notify();
   }
 
-  async postToasts(panesArg) {
-    const r = await this.usagebar(["notify", "--json", "--panes", panesArg]);
-    if (r.code !== 0) return;
-    for (const n of toastNotifications(JSON.parse(r.stdout).toasts, this.report, this.paths.openCommand)) notify(n);
+  // Hidden watches wait for the 60 s timer. Visible ones refresh, coalescing
+  // while a collect is in flight or inside the debounce window without dropping the last one.
+  requestWatchRefresh(cx) {
+    if (!shown()) return;
+    const now = Date.now();
+    // A busy collect holds a watch event to the debounce deadline, so an early finish cannot rerun it.
+    if (this.busy || now - this.lastWatchRefresh < WATCH_DEBOUNCE_MS) {
+      this.watchTrailing = true;
+      this.watchDeadline = this.lastWatchRefresh + WATCH_DEBOUNCE_MS;
+      return;
+    }
+    this.lastWatchRefresh = now;
+    this.watchTrailing = false;
+    this.refresh(cx);
   }
 
-  // Re-collect soon after a cache or rollout folder changes. A folder that
-  // can't be watched (missing, too big) just leaves the timer in charge.
-  watch(dirs, cx) {
-    for (const dir of dirs) {
-      if (this.watching.has(dir)) continue;
-      this.watching.add(dir);
-      cx.spawn(async (cx) => {
-        try {
-          for (;;) {
-            await watchFolder(dir);
-            if (Date.now() - this.lastWatchRefresh < WATCH_DEBOUNCE_MS) continue;
-            this.lastWatchRefresh = Date.now();
-            this.refresh(cx, true);
-          }
-        } catch { this.watching.delete(dir); }
-      });
+  pumpWatch(cx) {
+    if (!this.watchTrailing || this.busy || !shown() || Date.now() < this.watchDeadline) return;
+    this.watchTrailing = false;
+    this.lastWatchRefresh = Date.now();
+    this.refresh(cx);
+  }
+
+  // Parent folders of exact cache files, plus Codex sessions trees.
+  // A folder that can't be watched just leaves the timer in charge.
+  watch(report, cx) {
+    const files = Array.isArray(report?.watchFiles) ? report.watchFiles : [];
+    const dirs = Array.isArray(report?.watchDirs) ? report.watchDirs : [];
+    const parents = new Set();
+    for (const file of files) {
+      if (!file) continue;
+      const parent = parentDir(file);
+      parents.add(parent);
+      const group = this.watchedFiles.get(parent) ?? new Set();
+      group.add(file);
+      this.watchedFiles.set(parent, group);
+      this.armFiles(parent, cx);
     }
+    for (const dir of dirs) {
+      if (dir && !parents.has(dir)) this.armDir(dir, cx);
+    }
+  }
+
+  armFiles(parent, cx) {
+    if (this.watching.has(parent)) return;
+    this.watching.add(parent);
+    cx.spawn(async (cx) => {
+      try {
+        await this.seedFingerprints(parent);
+        if (await this.fingerprintsChanged(parent)) this.requestWatchRefresh(cx);
+        for (;;) {
+          await watchFolder(parent);
+          if (await this.fingerprintsChanged(parent)) this.requestWatchRefresh(cx);
+        }
+      } catch { this.watching.delete(parent); }
+    });
+  }
+
+  armDir(dir, cx) {
+    const key = `dir:${dir}`;
+    if (this.watching.has(key)) return;
+    this.watching.add(key);
+    cx.spawn(async (cx) => {
+      try {
+        for (;;) {
+          await watchFolder(dir);
+          this.requestWatchRefresh(cx);
+        }
+      } catch { this.watching.delete(key); }
+    });
+  }
+
+  async seedFingerprints(parent) {
+    for (const file of this.watchedFiles.get(parent) ?? []) this.fingerprints.set(file, await readTextFile(file));
+  }
+
+  async fingerprintsChanged(parent) {
+    let changed = false;
+    for (const file of this.watchedFiles.get(parent) ?? []) {
+      const next = await readTextFile(file);
+      if (next !== this.fingerprints.get(file)) { this.fingerprints.set(file, next); changed = true; }
+    }
+    return changed;
   }
 
   setFilter(all, cx) {
     if (this.all === all) return;
-    this.all = all; localStorage.setItem("filter", all ? "all" : "open");
-    this.report = null; this.refresh(cx, false);
+    this.all = all; this.generation += 1; localStorage.setItem("filter", all ? "all" : "open");
+    this.report = null; this.error = null;
+    cx.notify();
+    this.refresh(cx);
   }
 
   setCompact(compact, cx) {
@@ -124,7 +208,7 @@ export default class AgentUsage extends View {
     return v_flex().id("agent-usage").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border)
       .text_color(t.foreground).text_size(13).track_focus(this.handle)
       .on_mouse_down("left", () => this.handle.focus())
-      .on_key_down((e, cx) => { if (e.key === "r") { this.refresh(cx, true); cx.stop_propagation(); } })
+      .on_key_down((e, cx) => { if (e.key === "r") { this.refresh(cx); cx.stop_propagation(); } })
       .child(this.header(t, count, cx))
       .when(Boolean(this.error), (el) => el.child(div().px(14).py(6).text_size(11.5).text_color(t.ansi1).border_b(1).border_color(t.border).child(this.error)))
       .child(count === 0 ? this.empty(t) : v_flex().id("agent-usage-list").flex_1().min_h(0).overflow_y_scrollbar()
@@ -259,7 +343,7 @@ export default class AgentUsage extends View {
         .child(seg("view-full", "Full", !this.compact, (_e, cx) => this.setCompact(false, cx)))
         .child(seg("view-compact", "Compact", this.compact, (_e, cx) => this.setCompact(true, cx))))
       .child(h_flex().id("refresh").h(26).px(10).gap(6).items_center().rounded(7).bg(t.raised).text_size(12).text_color(t.foreground)
-        .cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.refresh(cx, true))
+        .cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.refresh(cx))
         .child(div().text_color(this.busy ? t.dim : t.foreground).child("Refresh"))
         .child(div().font_family(monoFont()).text_size(11).text_color(t.dim).child("r")));
   }

@@ -41,8 +41,10 @@ type CollectReport struct {
 	Providers     []ProviderReport    `json:"providers"`
 	APIUsage      []APIUsageReport    `json:"apiUsage"`
 	LowCachePanes []LowCachePaneEntry `json:"lowCachePanes"`
-	// WatchDirs are folders whose changes mean fresh data (see WatchDirs).
-	WatchDirs []string `json:"watchDirs"`
+	// WatchDirs are Codex session trees (see WatchDirs). WatchFiles are the
+	// exact Claude statusLine cache paths (see WatchFiles).
+	WatchDirs  []string `json:"watchDirs"`
+	WatchFiles []string `json:"watchFiles"`
 }
 
 // ProviderReport is one subscription account.
@@ -55,8 +57,8 @@ type ProviderReport struct {
 	ProfileID    string `json:"profileId"`
 	ProfileLabel string `json:"profileLabel"`
 	Identity     string `json:"identity"`
-	// Account is the login (email or account id) when readable, and
-	// SameAccountAs the providerId of the earlier entry for that account.
+	// Account is the opaque proven join key, not a display login. Identity is
+	// the display login. SameAccountAs is the providerId of the earlier retained entry.
 	Account       string `json:"account"`
 	SameAccountAs string `json:"sameAccountAs"`
 	// Home is the account's config/home dir, where its agent writes readings.
@@ -158,6 +160,7 @@ type CollectReportInput struct {
 	APIUsage      []APIProviderUsage
 	LowCachePanes []LowCachePane
 	WatchDirs     []string
+	WatchFiles    []string
 	Filter        CollectFilter
 	LimitPercent  core.LimitPercent
 	NowMs         int64
@@ -180,6 +183,7 @@ func BuildCollectReport(in CollectReportInput) CollectReport {
 		APIUsage:      make([]APIUsageReport, 0, len(in.APIUsage)),
 		LowCachePanes: make([]LowCachePaneEntry, 0, len(in.LowCachePanes)),
 		WatchDirs:     append([]string{}, in.WatchDirs...),
+		WatchFiles:    append([]string{}, in.WatchFiles...),
 	}
 	for _, p := range in.Providers {
 		report.Providers = append(report.Providers, providerReport(p, percent, in.NowMs))

@@ -30,8 +30,39 @@ manifest="$config_dir/herdr-app-install.manifest"
 die() { echo "herdr-app-install: $*" >&2; exit 1; }
 say() { echo "herdr-app-install: $*"; }
 
-# recorded PATH: was PATH written by a previous install?
 recorded() { [[ -f "$manifest" ]] && grep -qxF "$1" "$manifest"; }
+
+# owned_paths are final targets this attempt will create, noted before the
+# mutation. temp_paths are staging paths. A failure removes every temp and
+# only those finals the previous manifest does not already own, so a failed
+# upgrade keeps the last successful install and its manifest.
+owned_paths=""
+temp_paths=""
+claim() { owned_paths="${owned_paths}"$'\n'"$1"; }
+claim_temp() { temp_paths="${temp_paths}"$'\n'"$1"; }
+
+install_failed() {
+  local status=$?
+  [[ $# -gt 0 ]] && status=$1
+  trap - ERR
+  set +e
+  local path
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    rm -rf "$path"
+  done <<< "$temp_paths"
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    if recorded "$path"; then
+      continue
+    fi
+    case "$path" in
+      "$app_home"/mods/agent-usage*|"$app_home"/layouts/agent-usage*|"$bin") rm -rf "$path" ;;
+    esac
+  done <<< "$owned_paths"
+  rm -f "$manifest.new"
+  exit "$status"
+}
 
 # The app's files: every mod folder and layout under app/, all agent-usage*.
 sources() {
@@ -66,6 +97,8 @@ preflight() {
 
 install_binary() {
   bash "$repo/bin/ensure-binary.sh" --build >/dev/null
+  claim_temp "$bin.tmp.$$"
+  claim "$bin"
   mkdir -p "$(dirname "$bin")"
   install -m 0755 "$repo/bin/usagebar" "$bin.tmp.$$"
   mv -f "$bin.tmp.$$" "$bin"
@@ -111,28 +144,58 @@ json_string() {
 # written only when AGENT_USAGE_OPEN_COMMAND is set, for a layout whose tab bar
 # is not agent-usage-tabs; otherwise the mod's own default applies.
 write_local_json() {
+  local out="$app_home/mods/agent-usage/local.json"
+  local tmp="$out.tmp.$$"
+  claim_temp "$tmp"
   {
     printf '{\n  "binary": %s,\n  "configDir": %s' "$(json_string "$bin")" "$(json_string "$config_dir")"
     if [[ -n "${AGENT_USAGE_OPEN_COMMAND:-}" ]]; then
       printf ',\n  "openCommand": %s' "$(json_string "$AGENT_USAGE_OPEN_COMMAND")"
     fi
     printf '\n}\n'
-  } > "$app_home/mods/agent-usage/local.json"
+  } > "$tmp"
+  mv -f "$tmp" "$out"
 }
 
 copy_app() {
-  local rel src dst
-  while read -r rel; do
+  local rel src dst tmp prev
+  while IFS= read -r rel; do
     src="$repo/app/$rel"; dst="$app_home/$rel"
+    tmp="$dst.tmp.$$"
+    claim_temp "$tmp"
+    claim "$dst"
     if [[ -d "$src" ]]; then
-      rm -rf "$dst.tmp.$$"; mkdir -p "$dst.tmp.$$"
-      cp -R "$src/." "$dst.tmp.$$/"
+      rm -rf "$tmp"
+      mkdir -p "$tmp"
+      cp -R "$src/." "$tmp/"
       # herdr-app writes its own gpui-kit.d.ts / jsconfig.json into mod folders;
       # the mods' tests are not part of what gets installed.
-      find "$dst.tmp.$$" -type f \( -name gpui-kit.d.ts -o -name jsconfig.json -o -name '*.test.js' \) -delete
-      rm -rf "$dst"; mv "$dst.tmp.$$" "$dst"
+      find "$tmp" -type f \( -name gpui-kit.d.ts -o -name jsconfig.json -o -name '*.test.js' \) -delete
+      if [[ -e "$dst" ]] && recorded "$dst"; then
+        prev="$dst.prev.$$"
+        # Not a disposable temp: the trap must not delete this until the
+        # previous tree is back at dst.
+        mv "$dst" "$prev"
+        if ! mv "$tmp" "$dst"; then
+          if mv "$prev" "$dst"; then
+            return 1
+          fi
+          if rm -rf "$dst" && cp -R "$prev" "$dst"; then
+            rm -rf "$prev"
+            return 1
+          fi
+          echo "herdr-app-install: could not restore $dst; previous install remains at $prev" >&2
+          return 1
+        fi
+        rm -rf "$prev"
+      else
+        rm -rf "$dst"
+        mv "$tmp" "$dst"
+      fi
     else
-      mkdir -p "$(dirname "$dst")"; cp "$src" "$dst.tmp.$$"; mv -f "$dst.tmp.$$" "$dst"
+      mkdir -p "$(dirname "$dst")"
+      cp "$src" "$tmp"
+      mv -f "$tmp" "$dst"
     fi
     echo "$dst" >> "$manifest.new"
   done < <(sources)
@@ -170,15 +233,21 @@ cmd_install() {
   preflight
   mkdir -p "$config_dir"
   rm -f "$manifest.new"
+  owned_paths=""
+  temp_paths=""
+  set -E
+  trap install_failed ERR
   install_binary
   seed_config
   copy_app
-  mv -f "$manifest.new" "$manifest"
   if ! check_mods; then
-    say "herdr-app check failed; removing what was installed"
-    leave_layout; remove_recorded
-    exit 1
+    say "herdr-app check failed; removing what this attempt added"
+    leave_layout || true
+    install_failed 1
   fi
+  mv -f "$manifest.new" "$manifest"
+  trap - ERR
+  set +E
   say "installed (recorded in $manifest):"
   sed 's/^/  /' "$manifest"
   say "switch to it: herdr-app do layout.switch '{\"name\":\"agent-usage\"}'"

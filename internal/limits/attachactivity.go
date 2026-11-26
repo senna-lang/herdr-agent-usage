@@ -5,7 +5,9 @@
 package limits
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/providers"
 )
@@ -147,7 +149,12 @@ type openPaneWire struct {
 // ParseOpenPanesJSON decodes a JSON array of {paneId, agent, label?,
 // sessionId?, cwd?}. Entries without an agent are dropped (they are plain
 // terminals); a missing label falls back to the agent id, as herdr's does.
+// JSON null is not an empty list: a missing list and a confirmed empty list
+// are different, and null must not silently mean "no panes".
 func ParseOpenPanesJSON(raw []byte) ([]OpenPaneSnapshot, error) {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, errors.New("pane list must be a JSON array, not null")
+	}
 	var wire []openPaneWire
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		return nil, err

@@ -200,6 +200,8 @@ func flagValue(args []string, flag string) string {
 }
 
 // flagValueOK is flagValue plus whether the flag was given with a value.
+// A missing following token is "not given": callers that must reject that
+// use hostFlagValue instead.
 func flagValueOK(args []string, flag string) (string, bool) {
 	for i, arg := range args {
 		if arg == flag && i+1 < len(args) {
@@ -207,6 +209,25 @@ func flagValueOK(args []string, flag string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// hostFlagValue reads one host flag (--format, --panes). Missing, empty, and
+// a following option are errors. "-" is a value (stdin), not an option.
+func hostFlagValue(args []string, flag string) (string, bool, error) {
+	for i, arg := range args {
+		if arg != flag {
+			continue
+		}
+		if i+1 >= len(args) || args[i+1] == "" || nextOption(args[i+1]) {
+			return "", false, fmt.Errorf("%s requires a value", flag)
+		}
+		return args[i+1], true, nil
+	}
+	return "", false, nil
+}
+
+func nextOption(value string) bool {
+	return strings.HasPrefix(value, "-") && value != "-"
 }
 
 func environment() map[string]string {
@@ -569,15 +590,17 @@ func runNotify() {
 // the billing gate (no toasts for pay-as-you-go setups); --panes supplies the
 // open panes that gate reads.
 func runNotifyJSON(args []string) {
+	// Reject a bad --panes before the enabled shortcut, so a disabled
+	// config cannot turn a malformed flag into an empty success.
+	listPanes, err := collectPaneSource(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "usagebar notify: %v\n", err)
+		os.Exit(2)
+	}
 	env := environment()
 	config := setup.LoadPluginConfig(setup.ResolvePluginConfigDir(env))
 	report := limits.PendingToastsReport{Version: limits.CollectReportVersion, Toasts: []limits.PendingToast{}}
 	if config.NotifyEnabled {
-		listPanes, err := collectPaneSource(args)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "usagebar notify: %v\n", err)
-			os.Exit(2)
-		}
 		nowMs := time.Now().UnixMilli()
 		opts := limits.DefaultCollectOptions()
 		snaps, panesOK := listPanes()
@@ -655,7 +678,7 @@ func runStatusLine() {
 		}
 		// Empty-payload guard lives in WriteClaudeLimitsCacheGuarded so `{}`
 		// cannot clobber a valid cache.
-		if _, err := limits.WriteClaudeLimitsCacheGuarded(input, nowMs, profile.LimitsCache); err != nil {
+		if _, err := limits.WriteClaudeLimitsCacheGuarded(limits.WithClaudeAccountProvenance(input, profile.JSONPath), nowMs, profile.LimitsCache); err != nil {
 			fmt.Fprintf(os.Stderr, "[usagebar-rate] cache write failed: %v\n", err)
 		}
 	}
@@ -768,8 +791,12 @@ func runOpenCodeCheck() {
 }
 
 func runCollectJSON(args []string) {
-	format := flagValue(args, "--format")
-	if format != "" && format != "v1" {
+	format, formatSet, err := hostFlagValue(args, "--format")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "usagebar collect: %v\n", err)
+		os.Exit(2)
+	}
+	if formatSet && format != "v1" {
 		fmt.Fprintf(os.Stderr, "usagebar collect: unknown --format %q (want v1)\n", format)
 		os.Exit(2)
 	}
@@ -801,6 +828,7 @@ func runCollectJSON(args []string) {
 		APIUsage:      snap.apiUsage,
 		LowCachePanes: snap.lowCachePanes,
 		WatchDirs:     limits.WatchDirs(),
+		WatchFiles:    limits.WatchFiles(),
 		Filter:        filter,
 		LimitPercent:  cfg.LimitPercent,
 		NowMs:         nowMs,
@@ -811,7 +839,10 @@ func runCollectJSON(args []string) {
 // `--panes <json>` (a JSON array, or "-" for stdin) from a host that knows
 // its own panes, otherwise the herdr pane query.
 func collectPaneSource(args []string) (paneSource, error) {
-	raw, ok := flagValueOK(args, "--panes")
+	raw, ok, err := hostFlagValue(args, "--panes")
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		return openPaneSnapshots, nil
 	}

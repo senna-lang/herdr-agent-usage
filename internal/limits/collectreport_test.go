@@ -51,7 +51,7 @@ func TestBuildCollectReport_PinsTheV1FieldNames(t *testing.T) {
 		got  []string
 		want []string
 	}{
-		{"document", keysOf(doc), []string{"apiUsage", "emptyMessage", "filter", "generatedAtMs", "limitPercent", "lowCachePanes", "providers", "version", "watchDirs"}},
+		{"document", keysOf(doc), []string{"apiUsage", "emptyMessage", "filter", "generatedAtMs", "limitPercent", "lowCachePanes", "providers", "version", "watchDirs", "watchFiles"}},
 		{"provider", keysOf(provider), []string{"account", "accountLabel", "action", "configured", "family", "fetchedAtMs", "groupLabel", "home", "identity", "inUse", "label", "note", "paneActivity", "planType", "profileId", "profileLabel", "providerId", "sameAccountAs", "source", "staleMinutes", "status", "windows"}},
 		{"window", keysOf(window), []string{"band", "barFill", "displayPercent", "remainingPercent", "resetIn", "resetsAt", "runOut", "slot", "tag", "usedPercentage", "windowMinutes"}},
 		{"runOut", keysOf(window["runOut"]), []string{"emptyBeforeReset", "minutesToEmpty", "text"}},
@@ -124,7 +124,7 @@ func TestBuildCollectReport_EmptyInputHasEmptyListsNotNull(t *testing.T) {
 	}
 	var doc map[string]any
 	_ = json.Unmarshal(raw, &doc)
-	for _, key := range []string{"providers", "apiUsage", "lowCachePanes", "watchDirs"} {
+	for _, key := range []string{"providers", "apiUsage", "lowCachePanes", "watchDirs", "watchFiles"} {
 		if _, ok := doc[key].([]any); !ok {
 			t.Errorf("%s = %v, want []", key, doc[key])
 		}

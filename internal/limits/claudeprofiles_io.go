@@ -94,9 +94,7 @@ func applyProfileGrouping(pl ProviderLimits, p claude.ClaudeProfile, multiProfil
 	pl = withProfileIdentity(pl, p.ID, p.Label, identity)
 	pl.Home = p.ConfigDir
 	pl.Configured = !p.Implicit
-	if hasEmail {
-		pl.Account = strings.ToLower(email)
-	}
+	pl.Installed = claudeInstallEvidence(p)
 	if !multiProfile {
 		return pl
 	}
@@ -179,6 +177,7 @@ func applyCodexProfileGrouping(pl ProviderLimits, p codex.CodexProfile, multiPro
 	pl = withProfileIdentity(pl, p.ID, p.Label, p.Home)
 	pl.Home = p.Home
 	pl.Configured = !p.Implicit
+	pl.Installed = dirExists(p.Home)
 	pl.Account = codex.AccountIDIn(p.Home)
 	if !multiProfile {
 		return pl
@@ -194,6 +193,7 @@ func applyGrokProfileGrouping(pl ProviderLimits, profile grok.GrokProfile, multi
 	pl = withProfileIdentity(pl, profile.ID, profile.Label, profile.Home)
 	pl.Home = profile.Home
 	pl.Configured = !profile.Implicit
+	pl.Installed = dirExists(profile.Home)
 	if !multiProfile {
 		return pl
 	}
@@ -208,6 +208,7 @@ func applyOpenCodeProfileGrouping(pl ProviderLimits, profile opencode.OpenCodePr
 	pl = withProfileIdentity(pl, profile.ID, profile.Label, profile.DataDir)
 	pl.Home = profile.DataDir
 	pl.Configured = !profile.Implicit
+	pl.Installed = dirExists(profile.DataDir)
 	if !multiProfile {
 		return pl
 	}
@@ -242,24 +243,68 @@ func openCodeProfileByIDIn(profiles []opencode.OpenCodeProfile, id string) (open
 	return opencode.OpenCodeProfile{}, false
 }
 
-// WatchDirs lists the folders whose changes mean fresh limit data for the
-// configured profiles: each Claude profile's statusLine cache folder and each
-// Codex home's sessions tree. A host can watch them to re-collect sooner than
-// its timer. Folders may not exist yet.
+// claudeInstallEvidence is a Claude install this plugin did not create.
+// herdr-usagebar under the config dir is not evidence.
+func claudeInstallEvidence(p claude.ClaudeProfile) bool {
+	if regularFile(p.JSONPath) {
+		return true
+	}
+	if regularFile(filepath.Join(p.ConfigDir, "settings.json")) {
+		return true
+	}
+	return dirHasEntries(p.ProjectsRoot)
+}
+
+func regularFile(path string) bool {
+	if path == "" {
+		return false
+	}
+	st, err := os.Stat(path)
+	return err == nil && st.Mode().IsRegular()
+}
+
+func dirHasEntries(path string) bool {
+	if path == "" {
+		return false
+	}
+	dir, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer dir.Close()
+	names, err := dir.Readdirnames(1)
+	return err == nil && len(names) > 0
+}
+
+// WatchDirs lists Codex session trees whose changes mean fresh limit data.
+// Claude statusLine caches are files, not directories: see WatchFiles.
+// Folders may not exist yet. The slice is never nil.
 func WatchDirs() []string {
-	var dirs []string
+	dirs := []string{}
 	seen := map[string]bool{}
-	add := func(dir string) {
-		if dir != "" && !seen[dir] {
-			seen[dir] = true
-			dirs = append(dirs, dir)
-		}
-	}
-	for _, p := range ResolvedClaudeProfiles() {
-		add(filepath.Dir(p.LimitsCache))
-	}
 	for _, home := range configuredCodexHomes() {
-		add(filepath.Join(home, "sessions"))
+		dir := filepath.Join(home, "sessions")
+		if dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		dirs = append(dirs, dir)
 	}
 	return dirs
+}
+
+// WatchFiles lists the exact Claude statusLine cache files. A host watches
+// the parent folder but refreshes only when one of these paths changes.
+// Paths may not exist yet. The slice is never nil.
+func WatchFiles() []string {
+	files := []string{}
+	seen := map[string]bool{}
+	for _, p := range ResolvedClaudeProfiles() {
+		if p.LimitsCache == "" || seen[p.LimitsCache] {
+			continue
+		}
+		seen[p.LimitsCache] = true
+		files = append(files, p.LimitsCache)
+	}
+	return files
 }

@@ -8,9 +8,10 @@ import "os"
 
 // MarkInUse sets InUse on every entry. An entry is in use when the user
 // listed its family ([ui] providers, explicit), configured its profile, it has
-// a reading, or its home directory exists and the adapter only lacks a login
-// or a first reading (an installed but signed-out or idle harness). A source
-// with nothing on disk (no install, no profile, no data) is not in use.
+// a reading, or the adapter stamped Installed. A signed-out harness with a
+// login action and an existing home is also in use. Adapters decide what
+// counts as installed; this check does not branch on provider name. A source
+// with nothing on disk is not in use.
 func MarkInUse(entries []ProviderLimits, explicit bool) []ProviderLimits {
 	out := append([]ProviderLimits(nil), entries...)
 	for i := range out {
@@ -20,13 +21,13 @@ func MarkInUse(entries []ProviderLimits, explicit bool) []ProviderLimits {
 }
 
 func inUse(p ProviderLimits) bool {
-	if p.Configured || p.HasWindows() {
+	if p.Configured || p.HasWindows() || p.Installed {
 		return true
 	}
-	if p.Action == "" && !p.NoReadingYet {
-		return false
+	if p.Action != "" && dirExists(p.Home) {
+		return true
 	}
-	return dirExists(p.Home)
+	return false
 }
 
 func dirExists(path string) bool {

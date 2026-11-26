@@ -66,10 +66,10 @@ type ProviderLimits struct {
 	ProfileID    string
 	ProfileLabel string
 	Identity     string
-	// Account is the logged-in account behind this entry (a login email or
-	// account id) when the adapter can read it, else "". Unlike Identity it
-	// is never a path, so two entries of one family with the same Account
-	// are the same account seen through two config dirs.
+	// Account is the opaque join key for one family when the adapter can prove
+	// the account, else "". It is not a display email and never a path: two
+	// entries of one family with the same Account are the same account seen
+	// through two config dirs. Identity carries the email shown to the user.
 	Account string
 	// SameAccountAs is the ProviderID of an earlier entry (in collection
 	// order) of the same family and Account. Renderers fold this entry into
@@ -89,6 +89,10 @@ type ProviderLimits struct {
 	// InUse says the provider is in use on this machine (see
 	// limits.MarkInUse); hosts hide entries that are not.
 	InUse bool
+	// Installed is adapter evidence that this harness is present, independent
+	// of a successful reading. MarkInUse treats it as in use. Adapters set it;
+	// the shared check does not branch on provider id.
+	Installed bool
 	// NoReadingYet marks an entry whose source simply has not recorded a
 	// reading yet (the agent has not run with this account), as opposed to
 	// a broken or missing source.

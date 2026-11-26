@@ -50,6 +50,39 @@ func ShareAccountWindows(entries []ProviderLimits) []ProviderLimits {
 	return out
 }
 
+// reanchorSameAccount points later retained rows at the first retained row of
+// the same account. A pointer to a row Only removed is cleared. A lone
+// retained row is not marked as a duplicate.
+func reanchorSameAccount(entries []ProviderLimits) []ProviderLimits {
+	type key struct{ family, account string }
+	first := map[key]string{}
+	count := map[key]int{}
+	for _, e := range entries {
+		if e.Account == "" {
+			continue
+		}
+		k := key{e.Family, e.Account}
+		count[k]++
+		if _, ok := first[k]; !ok {
+			first[k] = e.ProviderID
+		}
+	}
+	for i := range entries {
+		e := &entries[i]
+		if e.Account == "" {
+			e.SameAccountAs = ""
+			continue
+		}
+		k := key{e.Family, e.Account}
+		if count[k] < 2 || e.ProviderID == first[k] {
+			e.SameAccountAs = ""
+			continue
+		}
+		e.SameAccountAs = first[k]
+	}
+	return entries
+}
+
 // freshestWithWindows is the index of the newest member reading that has any
 // window, or -1 when none has.
 func freshestWithWindows(entries []ProviderLimits, members []int) int {

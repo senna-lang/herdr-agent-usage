@@ -156,8 +156,8 @@ func TestCollectAllProviderLimits_ClaudeProfileFilteredByOnly(t *testing.T) {
 	if len(got) != 1 || got[0].ProviderID != "claude" {
 		t.Fatalf("got %+v", got)
 	}
-	if secondaryCalled {
-		t.Fatal("filtered-out profile's collector must not run")
+	if !secondaryCalled {
+		t.Fatal("a selected profile's sibling must be collected so sharing can run before Only drops it")
 	}
 }
 
@@ -212,10 +212,9 @@ func TestDefaultCollectOptions_MultiProfileGroupsEveryProfileUnderClaude(t *test
 	if got1.AccountLabel != "secondary@example.com" {
 		t.Fatalf("unlabeled profile should resolve AccountLabel from its email, got %q", got1.AccountLabel)
 	}
-	// The profile's own id/label and its login identity are separate fields,
-	// so a renderer can show "My Work Account" and the email side by side.
-	if got0.Account != "primary@example.com" {
-		t.Fatalf("Account = %q, want the login email", got0.Account)
+	// Email without organizationUuid is display identity, not a join key.
+	if got0.Account != "" {
+		t.Fatalf("Account = %q, email alone must not prove an account", got0.Account)
 	}
 	if got0.ProfileID != "claude" || got0.ProfileLabel != "My Work Account" || got0.Identity != "primary@example.com" {
 		t.Fatalf("profile identity = %q/%q/%q", got0.ProfileID, got0.ProfileLabel, got0.Identity)
@@ -298,8 +297,8 @@ func TestCollectAllProviderLimits_CodexProfileFilteredByOnly(t *testing.T) {
 	if len(got) != 1 || got[0].ProviderID != "codex" {
 		t.Fatalf("got %+v", got)
 	}
-	if devCalled {
-		t.Fatal("filtered-out profile's collector must not run")
+	if !devCalled {
+		t.Fatal("a selected profile's sibling must be collected so sharing can run before Only drops it")
 	}
 }
 
@@ -466,24 +465,27 @@ func TestCollectAllProviderLimits_StampsTheFamily(t *testing.T) {
 	}
 }
 
-func TestWatchDirs_ListsEachProfilesCacheAndSessionsFolder(t *testing.T) {
+func TestWatchDirs_ListsCodexSessionsAndWatchFilesListsClaudeCaches(t *testing.T) {
 	pluginConfigDir := t.TempDir()
 	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", pluginConfigDir)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	work, codexHome := filepath.Join(home, ".claude-work"), filepath.Join(home, ".codex-dev")
-	toml := "[[claude.profiles]]\nid = \"claude\"\nconfig_dir = \"" + filepath.Join(home, ".claude") + "\"\n\n" +
+	personal := filepath.Join(home, ".claude")
+	toml := "[[claude.profiles]]\nid = \"claude\"\nconfig_dir = \"" + personal + "\"\n\n" +
 		"[[claude.profiles]]\nid = \"work\"\nconfig_dir = \"" + work + "\"\n\n" +
 		"[[codex.profiles]]\nid = \"dev\"\ncodex_home = \"" + codexHome + "\"\n"
 	if err := os.WriteFile(filepath.Join(pluginConfigDir, "config.toml"), []byte(toml), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{
-		filepath.Join(home, ".claude", "herdr-usagebar"),
-		filepath.Join(work, "herdr-usagebar"),
-		filepath.Join(codexHome, "sessions"),
-	}
-	if got := WatchDirs(); strings.Join(got, "\n") != strings.Join(want, "\n") {
+	if got, want := WatchDirs(), []string{filepath.Join(codexHome, "sessions")}; strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("WatchDirs() = %v, want %v", got, want)
+	}
+	wantFiles := []string{
+		filepath.Join(personal, "herdr-usagebar", "claude-limits-latest.json"),
+		filepath.Join(work, "herdr-usagebar", "claude-limits-latest.json"),
+	}
+	if got := WatchFiles(); strings.Join(got, "\n") != strings.Join(wantFiles, "\n") {
+		t.Fatalf("WatchFiles() = %v, want %v", got, wantFiles)
 	}
 }

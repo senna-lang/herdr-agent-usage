@@ -65,8 +65,11 @@ type CollectOptions struct {
 	// Families restricts collection to these provider families (nil = all):
 	// the [ui] providers setting. Skipped families' collectors never run.
 	Families map[string]bool
-	// Only restricts collection to these provider ids (nil = all providers).
-	// Filtered providers are skipped entirely: their collectors never run.
+	// Only restricts the returned rows to these provider ids (nil = all).
+	// A selected profile still collects every configured sibling of its
+	// family so sharing sees the whole account, then rows outside Only are
+	// dropped. Families remains a hard exclusion: those collectors never run.
+	// Unrelated families are not collected.
 	Only map[string]bool
 }
 
@@ -159,16 +162,19 @@ func DefaultCollectOptions() CollectOptions {
 		Antigravity: func(_ *string, nowMs int64) ProviderLimits {
 			pl := CollectAntigravityLimits(nowMs, CollectAntigravityLimitsOptions{})
 			pl.Home = antigravity.StateDir()
+			pl.Installed = dirExists(pl.Home)
 			return pl
 		},
 		Kilo: func(_ *string, nowMs int64) ProviderLimits {
 			pl := CollectKiloLimits(nowMs, CollectKiloLimitsOptions{})
 			pl.Home = kilo.DataDir()
+			pl.Installed = dirExists(pl.Home)
 			return pl
 		},
 		Devin: func(_ *string, nowMs int64) ProviderLimits {
 			pl := CollectDevinLimits(nowMs, CollectDevinLimitsOptions{})
 			pl.Home = devin.ResolveDevinDataDir()
+			pl.Installed = dirExists(pl.Home)
 			return pl
 		},
 	}
@@ -214,9 +220,9 @@ var (
 
 // CollectAllProviderLimits runs collectors in display order: each configured
 // Claude profile (config order) -> Codex -> OpenCode -> Grok, then attaches
-// pane activity when configured. Providers excluded by opts.Only are skipped
-// (collectors never run). Pass DefaultCollectOptions() for production local
-// collectors.
+// pane activity when configured. Only drops rows after family-wide sharing;
+// Families skips those collectors entirely. Pass DefaultCollectOptions() for
+// production local collectors.
 func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []ProviderLimits {
 	collect := func(collector LimitsCollector, id, label string) ProviderLimits {
 		if collector != nil {
@@ -235,8 +241,25 @@ func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []P
 		pl.Family = family
 		return pl
 	}
-	wanted := func(family, id string) bool {
-		return (opts.Families == nil || opts.Families[family]) && (opts.Only == nil || opts.Only[id])
+	familySelected := func(family string, specs []ClaudeProfileCollector) bool {
+		if opts.Families != nil && !opts.Families[family] {
+			return false
+		}
+		if opts.Only == nil {
+			return true
+		}
+		for _, spec := range specs {
+			if opts.Only[spec.ID] {
+				return true
+			}
+		}
+		return false
+	}
+	idSelected := func(family, id string) bool {
+		if opts.Families != nil && !opts.Families[family] {
+			return false
+		}
+		return opts.Only == nil || opts.Only[id]
 	}
 
 	claudeSpecs := opts.Claude
@@ -257,28 +280,28 @@ func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []P
 	}
 
 	base := make([]ProviderLimits, 0, len(claudeSpecs)+len(codexSpecs)+len(openCodeSpecs)+len(grokSpecs)+len(singleCollectorQuotaSpecs))
-	for _, spec := range claudeSpecs {
-		if wanted(claudeFamily, spec.ID) {
+	if familySelected(claudeFamily, claudeSpecs) {
+		for _, spec := range claudeSpecs {
 			base = append(base, inFamily(claudeFamily, collect(spec.Collector, spec.ID, spec.Label)))
 		}
 	}
-	for _, spec := range codexSpecs {
-		if wanted(codexFamily, spec.ID) {
+	if familySelected(codexFamily, codexSpecs) {
+		for _, spec := range codexSpecs {
 			base = append(base, inFamily(codexFamily, collect(spec.Collector, spec.ID, spec.Label)))
 		}
 	}
-	for _, spec := range openCodeSpecs {
-		if wanted(openCodeFamily, spec.ID) {
+	if familySelected(openCodeFamily, openCodeSpecs) {
+		for _, spec := range openCodeSpecs {
 			base = append(base, inFamily(openCodeFamily, collect(spec.Collector, spec.ID, spec.Label)))
 		}
 	}
-	for _, spec := range grokSpecs {
-		if wanted(grokFamily, spec.ID) {
+	if familySelected(grokFamily, grokSpecs) {
+		for _, spec := range grokSpecs {
 			base = append(base, inFamily(grokFamily, collect(spec.Collector, spec.ID, spec.Label)))
 		}
 	}
 	for _, spec := range singleCollectorQuotaSpecs {
-		if wanted(spec.id, spec.id) {
+		if idSelected(spec.id, spec.id) {
 			base = append(base, inFamily(spec.id, collect(spec.field(opts), spec.id, spec.label)))
 		}
 	}
@@ -287,6 +310,15 @@ func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []P
 		base[i] = expireElapsedWindows(base[i], nowMs)
 	}
 	base = ShareAccountWindows(base)
+	if opts.Only != nil {
+		filtered := make([]ProviderLimits, 0, len(base))
+		for _, p := range base {
+			if opts.Only[p.ProviderID] {
+				filtered = append(filtered, p)
+			}
+		}
+		base = reanchorSameAccount(filtered)
+	}
 	base = MarkInUse(base, opts.Families != nil)
 	if opts.Attach != nil {
 		return opts.Attach(base, nowMs)

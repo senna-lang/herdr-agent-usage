@@ -15,6 +15,9 @@ usagebar collect --format v1 [--all] [--quotas-only] [--panes JSON|-]
   the array from stdin). An empty array means no agent panes are open.
 - `--quotas-only` skips pane shares, pay-as-you-go blocks and cache warnings.
 - Without `--format` the command prints the older, unversioned debug shape.
+- `--format` and `--panes` require non-empty values. Missing values and
+  `--panes null` (including stdin `null`) exit 2 with no JSON output; use `[]`
+  for an empty pane list. Pane validation also runs when notifications are off.
 
 Adding fields is compatible. Renaming or removing one bumps `version`.
 
@@ -34,7 +37,7 @@ Adding fields is compatible. Renaming or removing one bumps `version`.
     "profileId": "claude-work",      // the [[claude.profiles]] entry behind it
     "profileLabel": "work",
     "identity": "me@example.com",    // login email, else the account's config/home dir
-    "account": "me@example.com",     // the login (email / account id) when readable, else ""
+    "account": "opaque-account-key", // proven account join key, else ""; not display text
     "home": "/home/me/.claude-work", // the account's config/home dir, where its agent writes readings
     "configured": true,              // from an explicit [[<family>.profiles]] entry
     "inUse": true,                   // false: nothing on this machine (no install, no profile,
@@ -74,11 +77,26 @@ Adding fields is compatible. Renaming or removing one bumps `version`.
     "paneActivity": null
   }],
   "lowCachePanes": [{ "label": "Task A", "hitPercent": 35 }],
-  // folders whose changes mean fresh data: each Claude profile's statusLine
-  // cache folder and each Codex home's sessions tree (may not exist yet)
-  "watchDirs": ["/home/me/.claude/herdr-usagebar", "/home/me/.codex/sessions"]
+  // Exact input files; watch their parent folders and compare file contents.
+  "watchFiles": ["/home/me/.claude/herdr-usagebar/claude-limits-latest.json"],
+  // Input-only trees; folders may not exist yet.
+  "watchDirs": ["/home/me/.codex/sessions"]
 }
 ```
+
+`account` is an opaque, provider-scoped identity, not an email to display.
+Claude sharing requires email and organization UUID recorded alongside the
+statusLine observation and matching the current login. Untagged caches,
+native utilization and borrowed readings without organization provenance stay
+local; email alone never joins organizations. Collection shares a selected
+family's readings before applying the open-pane/profile filter, and
+`sameAccountAs` always refers to a row retained in the same report.
+
+`watchFiles` excludes usage-history and notification-state files. A folder event
+alone is not evidence that an input file changed: compare that exact file's
+contents before collecting. `watchDirs` contains input-only rollout trees, not
+the plugin's writable cache folders. Hidden panels defer watch-driven work to
+their normal hidden cadence.
 
 ## `usagebar notify --json [--panes JSON|-]`
 

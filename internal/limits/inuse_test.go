@@ -18,7 +18,7 @@ func TestMarkInUse(t *testing.T) {
 		{"a configured profile with no data yet", ProviderLimits{Configured: true, NoReadingYet: true, Home: missing}, true},
 		{"any reading", ProviderLimits{Primary: window}, true},
 		{"installed but signed out", ProviderLimits{Action: "grok login", Home: installed}, true},
-		{"installed, nothing recorded yet", ProviderLimits{NoReadingYet: true, Home: installed}, true},
+		{"installed, nothing recorded yet", ProviderLimits{NoReadingYet: true, Home: installed, Installed: true}, true},
 		{"never installed, asks for a login", ProviderLimits{Action: "grok login", Home: missing}, false},
 		{"never installed, nothing recorded", ProviderLimits{NoReadingYet: true, Home: missing}, false},
 		{"no home known", ProviderLimits{NoReadingYet: true}, false},
