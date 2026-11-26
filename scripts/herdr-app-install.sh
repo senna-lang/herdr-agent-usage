@@ -167,7 +167,7 @@ copy_app() {
     if [[ -d "$src" ]]; then
       rm -rf "$tmp"
       mkdir -p "$tmp"
-      cp -R "$src/." "$tmp/"
+      cp -RL "$src/." "$tmp/"
       # herdr-app writes its own gpui-kit.d.ts / jsconfig.json into mod folders;
       # the mods' tests are not part of what gets installed.
       find "$tmp" -type f \( -name gpui-kit.d.ts -o -name jsconfig.json -o -name '*.test.js' \) -delete

@@ -666,11 +666,15 @@ scripts/herdr-app-install.sh uninstall   # remove exactly what install added
   sidebar collection. Unknown ids in `[ui] providers` are ignored, and
   `usagebar setup` lists them.
 - The panel's pure logic is in `app/mods/agent-usage/model.js`; the view and
-  herdr calls stay in `main.js`. Model and real-module lifecycle tests run with
+  herdr calls stay in `main.js`. herdr-app loads a mod's modules only from its
+  own folder, so `app/mods/agent-usage-tabs/model.js` is a link to that single
+  file and the installer copies it as a real file. Model and real-module
+  lifecycle tests run with
   `node --experimental-vm-modules --test "app/**/*.test.js"` (Node 22.12 or
   later). Lifecycle tests stub the herdr/GPUI host, not the mod implementation;
-  they do not replace native visual checks. CI currently runs only Go checks.
-  The installer excludes test files and does not install `app/test-support`.
+  they do not replace running `herdr-app check` (the installer does) or native
+  visual checks. CI currently runs only Go checks. The installer excludes test
+  files and does not install `app/test-support`.
 - The panel refreshes every 15s while shown and every 60s while hidden.
   Changes to an exact statusLine cache file or a Codex rollout trigger earlier
   visible refreshes; history and notification-state writes do not. Watch-driven

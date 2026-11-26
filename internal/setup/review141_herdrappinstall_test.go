@@ -129,6 +129,45 @@ func TestReview141InstallUpgradeRestoreMvFailure(t *testing.T) {
 	box.keepsEqual()
 }
 
+// app/mods/agent-usage-tabs/model.js is a symlink. herdr-app rejects imports that
+// leave a mod folder, so the installed copy must be a real file: cp -RL, not cp -R.
+func TestReview141InstallTabsModelIsRegularFile(t *testing.T) {
+	box := newReview141InstallBox(t)
+	sandboxLink := filepath.Join(box.repo, "app", "mods", "agent-usage-tabs", "model.js")
+	info, err := os.Lstat(sandboxLink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("sandbox %s must be a symlink before install, mode %v", sandboxLink, info.Mode())
+	}
+	installed := box.run("install", 0, 0)
+	if installed.code != 0 {
+		t.Fatalf("install exit %d\n%s", installed.code, installed.out)
+	}
+	box.assertInstalled()
+	tabs := filepath.Join(box.appHome, "mods", "agent-usage-tabs", "model.js")
+	panel := filepath.Join(box.appHome, "mods", "agent-usage", "model.js")
+	info, err = os.Lstat(tabs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("installed %s mode %v, want a regular file (cp -RL)", tabs, info.Mode())
+	}
+	want, err := os.ReadFile(panel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(tabs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("installed tabs model.js differs from panel model.js\ntabs: %q\npanel: %q", got, want)
+	}
+}
+
 type review141InstallBox struct {
 	t           *testing.T
 	repo        string
@@ -432,6 +471,13 @@ func review141CopyDir(t *testing.T, src, dst string) {
 			return err
 		}
 		target := filepath.Join(dst, rel)
+		if d.Type()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, target)
+		}
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}

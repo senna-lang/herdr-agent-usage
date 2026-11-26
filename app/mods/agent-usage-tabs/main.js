@@ -1,7 +1,8 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, nextCommand, exec, home, appHome, readTextFile, notify, agents } from "herdr";
-import { openPanes, toastNotifications } from "../agent-usage/model.js";
+// model.js is a link to ../agent-usage/model.js: herdr-app only loads modules inside the mod's own folder, and the installer copies the link as a real file.
+import { openPanes, toastNotifications } from "./model.js";
 
 // Agent Usage: this clone of the shipped `tabs` mod adds a Usage button for
 // the `usage` child of the panel-body stack (mods/agent-usage), the
