@@ -156,8 +156,8 @@ func TestCollectAllProviderLimits_ClaudeProfileFilteredByOnly(t *testing.T) {
 	if len(got) != 1 || got[0].ProviderID != "claude" {
 		t.Fatalf("got %+v", got)
 	}
-	if !secondaryCalled {
-		t.Fatal("a selected profile's sibling must be collected so sharing can run before Only drops it")
+	if secondaryCalled {
+		t.Fatal("a sibling cannot share when the selected profile has no account")
 	}
 }
 
@@ -297,8 +297,8 @@ func TestCollectAllProviderLimits_CodexProfileFilteredByOnly(t *testing.T) {
 	if len(got) != 1 || got[0].ProviderID != "codex" {
 		t.Fatalf("got %+v", got)
 	}
-	if !devCalled {
-		t.Fatal("a selected profile's sibling must be collected so sharing can run before Only drops it")
+	if devCalled {
+		t.Fatal("a sibling cannot share when the selected profile has no account")
 	}
 }
 

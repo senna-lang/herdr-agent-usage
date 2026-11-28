@@ -879,6 +879,39 @@ func TestEnsureBinary_BuildModeNeverDownloads(t *testing.T) {
 	})
 }
 
+func TestEnsureBinary_BuildOutput(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		name := "success"
+		if fail {
+			name = "failure never downloads"
+		}
+		t.Run(name, func(t *testing.T) {
+			o := ensureReleaseOpts()
+			o.goShim = true
+			o.goFail = fail
+			sb := newEnsureSandbox(t, o)
+			sb.seedBin(0o701, "unrelated in-tree binary\n")
+			output := filepath.Join(sb.repo, "build destination", "nested", "usagebar")
+			r := sb.run(nil, "--build", output)
+			if fail {
+				sb.assertExit(r, 1)
+				if _, err := os.Stat(output); !os.IsNotExist(err) {
+					t.Errorf("failed build produced output: %v", err)
+				}
+			} else {
+				sb.assertExit(r, 0)
+				data, err := os.ReadFile(output)
+				if err != nil || string(data) != string(ensurePayload("source build", 0)) {
+					t.Errorf("output = %q, %v", data, err)
+				}
+			}
+			sb.assertBin("unrelated in-tree binary\n", 0o701)
+			sb.assertNoRequests()
+			sb.assertNotExecuted()
+		})
+	}
+}
+
 func TestEnsureBinary_DefaultFallsBackToExactReleaseWhenGoFails(t *testing.T) {
 	o := ensureReleaseOpts()
 	o.goShim = true

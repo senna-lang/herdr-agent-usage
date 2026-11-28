@@ -88,9 +88,12 @@ Adding fields is compatible. Renaming or removing one bumps `version`.
 Claude sharing requires email and organization UUID recorded alongside the
 statusLine observation and matching the current login. Untagged caches,
 native utilization and borrowed readings without organization provenance stay
-local; email alone never joins organizations. Collection shares a selected
-family's readings before applying the open-pane/profile filter, and
-`sameAccountAs` always refers to a row retained in the same report.
+local; email alone never joins organizations. With an open-pane/profile
+filter, collection first reads the selected profiles. It reads their siblings
+only when a selected row has a non-empty account key, then shares in
+configuration order before filtering the output. Without a proven account,
+unselected siblings are not fetched. `sameAccountAs` always refers to a row
+retained in the same report.
 
 `watchFiles` excludes usage-history and notification-state files. A folder event
 alone is not evidence that an input file changed: compare that exact file's

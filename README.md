@@ -623,6 +623,14 @@ scripts/herdr-app-install.sh uninstall   # remove exactly what install added
   button), and `layouts/agent-usage.json` (a clone of `main` whose
   `panel-body` stack also holds the panel and whose tab bar uses that clone).
   It refuses to install over anything it did not install itself.
+- **Upgrade failures:** the binary, mods, layout and `local.json` are staged
+  before replacing installed files. Previous copies are kept until every mod
+  passes `herdr-app check` and the ownership manifest is committed. A command
+  failure before that point restores the old contents and modes, removes new
+  targets and leaves the previous manifest, user config and unrelated files
+  alone. If both rename and copy recovery fail, the old backup is retained
+  and its recovery path is printed. This handles command errors, not process
+  crashes, `SIGKILL` or power loss.
 - **Vendored files:** `app/mods/agent-usage-tabs/main.js` and
   `app/layouts/agent-usage.json` are adapted from herdr-app 0.1.12's shipped
   `tabs` mod and `main` layout (the layout JSON cannot hold a comment; its
@@ -656,6 +664,9 @@ scripts/herdr-app-install.sh uninstall   # remove exactly what install added
   the windows; both must match the current login. Legacy untagged caches and
   readings without organization provenance stay local to their profile.
   Proven duplicates appear once, marked "also <label>" for the other dir.
+  In Open panes mode, only the selected profiles are fetched unless one has
+  a proven account key; only then are siblings fetched for sharing. All mode
+  still collects every configured profile.
 - The panel lists configured profiles, providers with readings, and installed
   harnesses, including those whose quota fetch failed. Claude installation
   evidence comes from its login/settings/project files, not the

@@ -224,7 +224,7 @@ func newReview141InstallBox(t *testing.T) *review141InstallBox {
 		t.Fatal(err)
 	}
 	review141CopyDir(t, filepath.Join("..", "..", "app"), filepath.Join(box.repo, "app"))
-	stub := "#!/bin/sh\nprintf 'review141-usagebar\\n' > \"$(dirname \"$0\")/usagebar\"\nchmod 755 \"$(dirname \"$0\")/usagebar\"\n"
+	stub := "#!/bin/sh\nout=\"${2:-$(dirname \"$0\")/usagebar}\"\nprintf 'review141-usagebar\\n' > \"$out\"\nchmod 755 \"$out\"\n"
 	if err := os.WriteFile(filepath.Join(box.repo, "bin", "ensure-binary.sh"), []byte(stub), 0o755); err != nil {
 		t.Fatal(err)
 	}

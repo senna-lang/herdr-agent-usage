@@ -66,10 +66,9 @@ type CollectOptions struct {
 	// the [ui] providers setting. Skipped families' collectors never run.
 	Families map[string]bool
 	// Only restricts the returned rows to these provider ids (nil = all).
-	// A selected profile still collects every configured sibling of its
-	// family so sharing sees the whole account, then rows outside Only are
-	// dropped. Families remains a hard exclusion: those collectors never run.
-	// Unrelated families are not collected.
+	// Selected profiles with an account collect their family siblings for
+	// sharing. Families remains a hard exclusion; unrelated families are not
+	// collected.
 	Only map[string]bool
 }
 
@@ -218,11 +217,10 @@ var (
 	grokFamily     = grok.Provider.AgentID()
 )
 
-// CollectAllProviderLimits runs collectors in display order: each configured
-// Claude profile (config order) -> Codex -> OpenCode -> Grok, then attaches
-// pane activity when configured. Only drops rows after family-wide sharing;
-// Families skips those collectors entirely. Pass DefaultCollectOptions() for
-// production local collectors.
+// CollectAllProviderLimits runs collectors by family, preserving configuration
+// order in the report and during sharing, then attaches pane activity.
+// Families skips excluded collectors entirely. Pass DefaultCollectOptions()
+// for production local collectors.
 func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []ProviderLimits {
 	collect := func(collector LimitsCollector, id, label string) ProviderLimits {
 		if collector != nil {
@@ -236,24 +234,10 @@ func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []P
 			Note:        strPtr("limits collector not configured"),
 		}
 	}
-	// Each loop below collects one family; its default id names the family.
+	// A profile family's default id names the family.
 	inFamily := func(family string, pl ProviderLimits) ProviderLimits {
 		pl.Family = family
 		return pl
-	}
-	familySelected := func(family string, specs []ClaudeProfileCollector) bool {
-		if opts.Families != nil && !opts.Families[family] {
-			return false
-		}
-		if opts.Only == nil {
-			return true
-		}
-		for _, spec := range specs {
-			if opts.Only[spec.ID] {
-				return true
-			}
-		}
-		return false
 	}
 	idSelected := func(family, id string) bool {
 		if opts.Families != nil && !opts.Families[family] {
@@ -280,26 +264,47 @@ func CollectAllProviderLimits(cwd *string, nowMs int64, opts CollectOptions) []P
 	}
 
 	base := make([]ProviderLimits, 0, len(claudeSpecs)+len(codexSpecs)+len(openCodeSpecs)+len(grokSpecs)+len(singleCollectorQuotaSpecs))
-	if familySelected(claudeFamily, claudeSpecs) {
-		for _, spec := range claudeSpecs {
-			base = append(base, inFamily(claudeFamily, collect(spec.Collector, spec.ID, spec.Label)))
+	collectFamily := func(family string, specs []ClaudeProfileCollector) {
+		if opts.Families != nil && !opts.Families[family] {
+			return
 		}
-	}
-	if familySelected(codexFamily, codexSpecs) {
-		for _, spec := range codexSpecs {
-			base = append(base, inFamily(codexFamily, collect(spec.Collector, spec.ID, spec.Label)))
+		if opts.Only == nil {
+			for _, spec := range specs {
+				base = append(base, inFamily(family, collect(spec.Collector, spec.ID, spec.Label)))
+			}
+			return
 		}
-	}
-	if familySelected(openCodeFamily, openCodeSpecs) {
-		for _, spec := range openCodeSpecs {
-			base = append(base, inFamily(openCodeFamily, collect(spec.Collector, spec.ID, spec.Label)))
+
+		start := len(base)
+		base = base[:start+len(specs)]
+		hasAccount := false
+		for i, spec := range specs {
+			if opts.Only[spec.ID] {
+				base[start+i] = inFamily(family, collect(spec.Collector, spec.ID, spec.Label))
+				hasAccount = hasAccount || base[start+i].Account != ""
+			}
 		}
-	}
-	if familySelected(grokFamily, grokSpecs) {
-		for _, spec := range grokSpecs {
-			base = append(base, inFamily(grokFamily, collect(spec.Collector, spec.ID, spec.Label)))
+		if hasAccount {
+			for i, spec := range specs {
+				if !opts.Only[spec.ID] {
+					base[start+i] = inFamily(family, collect(spec.Collector, spec.ID, spec.Label))
+				}
+			}
+			return
 		}
+		end := start
+		for i, spec := range specs {
+			if opts.Only[spec.ID] {
+				base[end] = base[start+i]
+				end++
+			}
+		}
+		base = base[:end]
 	}
+	collectFamily(claudeFamily, claudeSpecs)
+	collectFamily(codexFamily, codexSpecs)
+	collectFamily(openCodeFamily, openCodeSpecs)
+	collectFamily(grokFamily, grokSpecs)
 	for _, spec := range singleCollectorQuotaSpecs {
 		if idSelected(spec.id, spec.id) {
 			base = append(base, inFamily(spec.id, collect(spec.field(opts), spec.id, spec.label)))
