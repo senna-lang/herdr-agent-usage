@@ -611,6 +611,10 @@ rate-limit toasts through herdr-app's own notifications
 ([design](docs/design/herdr-app/SPEC.md)). It needs Go and herdr-app, not the
 herdr TUI or this plugin installed in it.
 
+![Herdr desktop with the Agent Usage panel showing Claude, Codex, and OpenCode quota windows](docs/design/herdr-app/a-window-usage-panel.png)
+
+*Design example with synthetic account data.*
+
 ```sh
 scripts/herdr-app-install.sh install     # build, copy, herdr-app check
 herdr-app do layout.switch '{"name":"agent-usage"}'
