@@ -10,6 +10,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/fsutil"
 )
@@ -26,6 +28,11 @@ type RateLimitsInput struct {
 	}
 	PromptCachePresent   bool
 	PromptCacheExpiresAt *int64
+	// AccountEmail and OrganizationUUID are the login that produced a window
+	// write. Both must be set to stamp the cache. A prompt-cache-only update
+	// ignores them so it cannot relabel windows it did not rewrite.
+	AccountEmail     string
+	OrganizationUUID string
 }
 
 // ClaudeLimitsCacheFile is the on-disk statusLine cache payload.
@@ -34,6 +41,8 @@ type ClaudeLimitsCacheFile struct {
 	SevenDay             *LimitWindow `json:"sevenDay,omitempty"`
 	FetchedAtMs          int64        `json:"fetchedAtMs"`
 	PromptCacheExpiresAt *int64       `json:"promptCacheExpiresAt,omitempty"`
+	AccountEmail         string       `json:"accountEmail,omitempty"`
+	OrganizationUUID     string       `json:"organizationUuid,omitempty"`
 }
 
 // CollectClaudeLimitsOptions overrides paths for tests.
@@ -88,6 +97,16 @@ func WriteClaudeLimitsCache(rateLimits RateLimitsInput, nowMs int64, path string
 				WindowMinutes:  &wm,
 			}
 		}
+		email := strings.TrimSpace(rateLimits.AccountEmail)
+		org := strings.TrimSpace(rateLimits.OrganizationUUID)
+		if email != "" && org != "" {
+			payload.AccountEmail = email
+			payload.OrganizationUUID = org
+		} else {
+			// A window write that captured no identity must not keep a stale stamp.
+			payload.AccountEmail = ""
+			payload.OrganizationUUID = ""
+		}
 	}
 	if rateLimits.PromptCachePresent {
 		payload.PromptCacheExpiresAt = rateLimits.PromptCacheExpiresAt
@@ -107,6 +126,33 @@ func WriteClaudeLimitsCacheGuarded(rateLimits RateLimitsInput, nowMs int64, path
 		return false, nil
 	}
 	return true, WriteClaudeLimitsCache(rateLimits, nowMs, path)
+}
+
+// WithClaudeAccountProvenance copies a complete login from claudeJSONPath onto
+// input. Email or organizationUuid alone is not an identity: both fields are
+// cleared unless both are present. The statusLine bridge calls this so a
+// window write can stamp the account that produced it.
+func WithClaudeAccountProvenance(input RateLimitsInput, claudeJSONPath string) RateLimitsInput {
+	email, org, ok := claudeLoginIdentity(claudeJSONPath)
+	if !ok {
+		input.AccountEmail = ""
+		input.OrganizationUUID = ""
+		return input
+	}
+	input.AccountEmail = email
+	input.OrganizationUUID = org
+	return input
+}
+
+func claudeAccountKey(email, org string) string {
+	email = strings.ToLower(strings.TrimSpace(email))
+	org = strings.TrimSpace(org)
+	if email == "" || org == "" {
+		return ""
+	}
+	// Length prefixes keep arbitrary email and org text unambiguous. The
+	// result is an opaque join token, not a display value.
+	return strconv.Itoa(len(email)) + ":" + email + "\n" + strconv.Itoa(len(org)) + ":" + org
 }
 
 func readClaudeLimitsCacheFile(path string) *ClaudeLimitsCacheFile {
@@ -131,16 +177,99 @@ func ReadPromptCacheExpiresAt(path string) *int64 {
 }
 
 func collectFromStatusLineCache(nowMs int64, path string) *ProviderLimits {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil
+	return readStatusLineSnapshot(nowMs, path).limits
+}
+
+// CollectClaudeLimits returns this profile's windows. A statusLine cache is
+// current account data only when its stamped identity matches the complete
+// login in claudeJSONPath. An untagged cache stays local and is not shared.
+// A cache stamped for a different account is ignored. Native utilization in
+// ~/.claude.json has no observation account; the current oauthAccount in that
+// file does not prove those windows, so they stay local and unjoined. A
+// profile with no windows but a complete login still carries the join key, so
+// a proven sibling reading can fill it. Borrowed observations without
+// organization provenance are shown but not joined.
+func CollectClaudeLimits(nowMs int64, options CollectClaudeLimitsOptions) ProviderLimits {
+	statusPath := options.StatusLineCachePath
+	if statusPath == "" {
+		statusPath = ResolveClaudeLimitsCachePath()
 	}
-	var parsed ClaudeLimitsCacheFile
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil
+	jsonPath := options.ClaudeJSONPath
+	if jsonPath == "" {
+		jsonPath = ResolveClaudeJSONPath()
 	}
-	if parsed.FiveHour == nil && parsed.SevenDay == nil {
-		return nil
+
+	loginEmail, loginOrg, loginComplete := claudeLoginIdentity(jsonPath)
+	accountKey := ""
+	if loginComplete {
+		accountKey = claudeAccountKey(loginEmail, loginOrg)
+	}
+
+	var chosen *ProviderLimits
+	chosenProven := false
+	consider := func(next *ProviderLimits, proven bool) {
+		if next == nil {
+			return
+		}
+		if chosen == nil || next.FetchedAtMs > chosen.FetchedAtMs {
+			chosen = next
+			chosenProven = proven
+		}
+	}
+
+	// cachedUsageUtilization has no account of its own. The oauthAccount
+	// beside it is the login now, not proof of who those windows belong to.
+	consider(CollectClaudeLimitsFromJSON(nowMs, jsonPath), false)
+
+	if snap := readStatusLineSnapshot(nowMs, statusPath); snap.limits != nil {
+		cacheKey := claudeAccountKey(snap.email, snap.org)
+		switch {
+		case cacheKey != "" && loginComplete && cacheKey == accountKey:
+			consider(snap.limits, true)
+		case cacheKey == "":
+			consider(snap.limits, false)
+		}
+	}
+
+	// Borrow matches on email only. That is not organization provenance, so
+	// the reading may be shown but must not join another profile.
+	borrowEmail, _ := AccountEmailFromJSONPath(jsonPath)
+	if borrowed := borrowWindows("claude", "Claude", borrowEmail, nowMs); borrowed != nil {
+		consider(borrowed, false)
+	}
+
+	if chosen != nil {
+		out := *chosen
+		if chosenProven {
+			out.Account = accountKey
+		}
+		return out
+	}
+	note := "no ~/.claude.json utilization and no statusLine cache"
+	out := ProviderLimits{
+		ProviderID:   "claude",
+		Label:        "Claude",
+		Source:       "none",
+		FetchedAtMs:  nowMs,
+		Note:         &note,
+		NoReadingYet: true,
+	}
+	if loginComplete {
+		out.Account = accountKey
+	}
+	return out
+}
+
+type statusLineSnapshot struct {
+	limits *ProviderLimits
+	email  string
+	org    string
+}
+
+func readStatusLineSnapshot(nowMs int64, path string) statusLineSnapshot {
+	parsed := readClaudeLimitsCacheFile(path)
+	if parsed == nil || (parsed.FiveHour == nil && parsed.SevenDay == nil) {
+		return statusLineSnapshot{}
 	}
 	fetched := parsed.FetchedAtMs
 	if fetched == 0 {
@@ -156,50 +285,7 @@ func collectFromStatusLineCache(nowMs int64, path string) *ProviderLimits {
 		FetchedAtMs: fetched,
 	}
 	if ageMin > 30 {
-		note := "stale ~" + itoa(ageMin) + "m ago"
-		out.Note = &note
+		markStale(&out, ageMin)
 	}
-	return &out
-}
-
-// CollectClaudeLimits returns the freshest observation of this account's
-// windows. Claude Code's own artifacts are consulted first, but they are
-// caches with a timestamp, not live truth: when another agent has observed
-// the same account's same window more recently, that reading wins. Provenance
-// does not make a snapshot current — only its timestamp does.
-func CollectClaudeLimits(nowMs int64, options CollectClaudeLimitsOptions) ProviderLimits {
-	statusPath := options.StatusLineCachePath
-	if statusPath == "" {
-		statusPath = ResolveClaudeLimitsCachePath()
-	}
-	jsonPath := options.ClaudeJSONPath
-	if jsonPath == "" {
-		jsonPath = ResolveClaudeJSONPath()
-	}
-
-	native := CollectClaudeLimitsFromJSON(nowMs, jsonPath)
-	if fromStatusLine := collectFromStatusLineCache(nowMs, statusPath); fromStatusLine != nil {
-		if native == nil || fromStatusLine.FetchedAtMs > native.FetchedAtMs {
-			native = fromStatusLine
-		}
-	}
-	// The windows belong to the account, so any agent's reading of them
-	// counts — including when Claude Code wrote nothing at all.
-	account, _ := AccountEmailFromJSONPath(jsonPath)
-	if borrowed := borrowWindows("claude", "Claude", account, nowMs); borrowed != nil {
-		if native == nil || borrowed.FetchedAtMs > native.FetchedAtMs {
-			return *borrowed
-		}
-	}
-	if native != nil {
-		return *native
-	}
-	note := "no ~/.claude.json utilization and no statusLine cache"
-	return ProviderLimits{
-		ProviderID:  "claude",
-		Label:       "Claude",
-		Source:      "none",
-		FetchedAtMs: nowMs,
-		Note:        &note,
-	}
+	return statusLineSnapshot{limits: &out, email: parsed.AccountEmail, org: parsed.OrganizationUUID}
 }

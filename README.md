@@ -271,6 +271,12 @@ window, from least to most severe. `limit_percent = "used"` inverts the displaye
 number (and bar fill) on the pane, sidebar `$limit`, statusLine, and toast body;
 notify firing stays on remaining thresholds. `cache_display = false` clears cache
 metadata from every sidebar pane and suppresses the Agent Usage low-cache warning.
+`providers = ["claude", "codex"]` (optional, under `[ui]`) collects and shows only
+those providers (`claude`, `codex`, `opencode`, `grok`, `agy`, `kilo`, `devin`); unset,
+every provider is collected as before. Unknown ids are ignored and named by `usagebar setup`.
+`delivery = "external"` (optional, under `[notify]`; the default is `"herdr"`) is
+for a host that posts toasts itself: the herdr hooks and the Claude statusLine
+bridge stay silent, and `usagebar notify --json` returns the toasts due now.
 
 
 ### Multiple Claude accounts
@@ -582,6 +588,110 @@ Herdr panes or compute transcript activity for panes. If `HERDR_PANE_ID` is set,
 it may still query that pane to resolve the working directory. Without `--all`,
 it lists Herdr panes to select active subscription providers. Plain `collect`
 and the interactive panel retain the full activity data.
+
+A host that draws the panel itself can use two more commands, both documented in
+[docs/collect-json-v1.md](docs/collect-json-v1.md):
+
+```sh
+usagebar collect --format v1 [--all] [--quotas-only] [--panes JSON|-]
+usagebar notify --json [--panes JSON|-]
+```
+
+`collect --format v1` prints a versioned report with every display value
+precomputed. `notify --json` prints the toasts due now and records them as shown,
+honouring `[notify] enabled` and the pay-as-you-go gate. `--panes` supplies the
+open agent panes as a JSON array (or `-` for stdin) instead of asking Herdr.
+
+## herdr-app
+
+[herdr-app](https://herdr.dev) (the desktop herdr) does not load herdr
+plugins; `app/` holds an Agent Usage panel for it instead: a `usage` panel in
+the right column beside Files and Changes, a Usage button in the tab bar, and
+rate-limit toasts through herdr-app's own notifications
+([design](docs/design/herdr-app/SPEC.md)). It needs Go and herdr-app, not the
+herdr TUI or this plugin installed in it.
+
+```sh
+scripts/herdr-app-install.sh install     # build, copy, herdr-app check
+herdr-app do layout.switch '{"name":"agent-usage"}'
+herdr-app do layout.switch '{"name":"main"}'   # back to the stock layout
+scripts/herdr-app-install.sh uninstall   # remove exactly what install added
+```
+
+- **What it adds** to `~/.config/herdr-app`: `mods/agent-usage` (the panel),
+  `mods/agent-usage-tabs` (a clone of the shipped `tabs` mod with a Usage
+  button), and `layouts/agent-usage.json` (a clone of `main` whose
+  `panel-body` stack also holds the panel and whose tab bar uses that clone).
+  It refuses to install over anything it did not install itself.
+- **Upgrade failures:** the binary, mods, layout and `local.json` are staged
+  before replacing installed files. Previous copies are kept until every mod
+  passes `herdr-app check` and the ownership manifest is committed. A command
+  failure before that point restores the old contents and modes, removes new
+  targets and leaves the previous manifest, user config and unrelated files
+  alone. If both rename and copy recovery fail, the old backup is retained
+  and its recovery path is printed. This handles command errors, not process
+  crashes, `SIGKILL` or power loss.
+- **Vendored files:** `app/mods/agent-usage-tabs/main.js` and
+  `app/layouts/agent-usage.json` are adapted from herdr-app 0.1.12's shipped
+  `tabs` mod and `main` layout (the layout JSON cannot hold a comment; its
+  `cloned_from` records the source). To re-sync after a herdr-app update, diff
+  them against the shipped `mods/tabs/main.js` and `layouts/main.json` in the
+  herdr-app home and re-apply the additions: the Usage button, `open-usage`
+  command, `showPanel` helper and background toast polling in the mod, and
+  the `usage` child of the `panel-body` stack plus the tab bar's mod name in
+  the layout.
+- **Binary:** `~/.local/bin/usagebar` (`AGENT_USAGE_BIN`). **Config:**
+  `~/.config/agent-usage/config.toml` (`AGENT_USAGE_CONFIG_DIR`), the same
+  format as the plugin config above, so `[[claude.profiles]]`,
+  `[[codex.profiles]]` and friends work unchanged. The panel runs
+  `usagebar collect --format v1`; the always-visible tab bar polls
+  `usagebar notify --json` even before the Usage panel has been opened
+  ([contract](docs/collect-json-v1.md)). Both set `HERDR_PLUGIN_CONFIG_DIR` to
+  that folder; install seeds it with `[notify] delivery = "external"`.
+- **Claude statusLine (optional, recommended):** it keeps the 5h window fresh.
+  Use one command for every Claude config dir; it routes by
+  `CLAUDE_CONFIG_DIR` and must see the same config:
+  `HERDR_PLUGIN_CONFIG_DIR=$HOME/.config/agent-usage $HOME/.local/bin/usagebar statusline`.
+  Without it, Claude limits come from each dir's `.claude.json`.
+  **Using both herdr TUI and herdr-app:** a statusLine command pointing at this
+  external-delivery config also suppresses Claude's statusLine toasts in the
+  TUI. Choose one delivery owner: keep this config for herdr-app notifications,
+  or point statusLine at the TUI plugin config with `delivery = "herdr"`.
+  Different config directories do not provide independent Claude delivery:
+  the profile's cache and notification state are shared.
+- Config dirs share windows only when the observation proves the same account.
+  For Claude, the statusLine bridge records email and organization UUID with
+  the windows; both must match the current login. Legacy untagged caches and
+  readings without organization provenance stay local to their profile.
+  Proven duplicates appear once, marked "also <label>" for the other dir.
+  In Open panes mode, only the selected profiles are fetched unless one has
+  a proven account key; only then are siblings fetched for sharing. All mode
+  still collects every configured profile.
+- The panel lists configured profiles, providers with readings, and installed
+  harnesses, including those whose quota fetch failed. Claude installation
+  evidence comes from its login/settings/project files, not the
+  `herdr-usagebar` directory usagebar creates itself.
+  To collect and show a fixed list instead, set
+  `[ui] providers = ["claude", "codex"]` (provider ids: `claude`, `codex`,
+  `opencode`, `grok`, `agy`, `kilo`, `devin`); this also limits the herdr pane and
+  sidebar collection. Unknown ids in `[ui] providers` are ignored, and
+  `usagebar setup` lists them.
+- The panel's pure logic is in `app/mods/agent-usage/model.js`; the view and
+  herdr calls stay in `main.js`. herdr-app loads a mod's modules only from its
+  own folder, so `app/mods/agent-usage-tabs/model.js` is a link to that single
+  file and the installer copies it as a real file. Model and real-module
+  lifecycle tests run with
+  `node --experimental-vm-modules --test "app/**/*.test.js"` (Node 22.12 or
+  later). Lifecycle tests stub the herdr/GPUI host, not the mod implementation;
+  they do not replace running `herdr-app check` (the installer does) or native
+  visual checks. CI currently runs only Go checks. The installer excludes test
+  files and does not install `app/test-support`.
+- The panel refreshes every 15s while shown and every 60s while hidden.
+  Changes to an exact statusLine cache file or a Codex rollout trigger earlier
+  visible refreshes; history and notification-state writes do not. Watch-driven
+  refreshes are spaced at least 3s apart, including events received during a
+  collect; the latest held event runs after the deadline. Hidden watch events
+  wait for the normal hidden cadence. Click the panel and press `r` to refresh.
 
 ## Data handling
 

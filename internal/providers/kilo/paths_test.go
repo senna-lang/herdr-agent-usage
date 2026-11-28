@@ -101,3 +101,26 @@ func TestResolveKiloPaths_StayOutOfOpenCodesStore(t *testing.T) {
 		}
 	}
 }
+
+func TestDataDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	t.Setenv("KILO_DATA_DIR", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	if got, want := DataDir(), filepath.Join(home, ".local", "share", "kilo"); got != want {
+		t.Fatalf("default DataDir = %q, want %q", got, want)
+	}
+
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	if got, want := DataDir(), filepath.Join(xdg, "kilo"); got != want {
+		t.Fatalf("XDG DataDir = %q, want %q", got, want)
+	}
+
+	override := filepath.Join(t.TempDir(), "kilo-data")
+	t.Setenv("KILO_DATA_DIR", override)
+	if got := DataDir(); got != override {
+		t.Fatalf("KILO_DATA_DIR not honoured: %q", got)
+	}
+}

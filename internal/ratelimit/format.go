@@ -63,6 +63,16 @@ func FormatNotificationBody(
 	}
 }
 
+// WithAccountLabel names the account in a toast title ("Session limit ·
+// work", "Codex limit · personal") so two accounts of one provider never
+// produce identical toasts. An empty account leaves the title unchanged.
+func WithAccountLabel(title, account string) string {
+	if account == "" {
+		return title
+	}
+	return title + " · " + account
+}
+
 // FormatProviderPrimaryNotification formats an alert for a non-Claude provider's shortest window.
 func FormatProviderPrimaryNotification(
 	providerLabel string,

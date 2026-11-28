@@ -2,7 +2,7 @@
 # govulncheck. Separate from release.yml, which only builds and publishes
 # tagged binaries.
 #
-# go-version is pinned to Go 1.26.11, the current patched release. Keep this
+# go-version is pinned to Go 1.26.11, which fixes GO-2026-6859. Keep this
 # explicit: a minor-only selector can resolve an older vulnerable patch and
 # leave govulncheck reporting already-fixed standard-library CVEs. Advance this
 # pin as supported 1.26 patches are released.

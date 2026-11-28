@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/senna-lang/herdr-agent-usage/internal/planlabels"
@@ -128,8 +129,7 @@ func ProviderLimitsFromClaudeJSON(rawJSON string, nowMs int64) *ProviderLimits {
 		FetchedAtMs: fetchedAtMs,
 	}
 	if ageMin > 120 {
-		note := "stale ~" + itoa(ageMin) + "m ago"
-		out.Note = &note
+		markStale(&out, ageMin)
 	}
 	return &out
 }
@@ -169,6 +169,45 @@ func AccountEmailFromJSONPath(path string) (string, bool) {
 		return "", false
 	}
 	return AccountEmailFromJSON(string(raw))
+}
+
+// claudeLoginIdentity is a complete Claude login: email and organizationUuid
+// both present. Either alone is not an account. The email is returned as
+// written; the join key lowercases it.
+func claudeLoginIdentity(path string) (email, org string, ok bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", false
+	}
+	var parsed struct {
+		OAuthAccount *struct {
+			EmailAddress     *string `json:"emailAddress"`
+			OrganizationUUID *string `json:"organizationUuid"`
+		} `json:"oauthAccount"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || parsed.OAuthAccount == nil {
+		return "", "", false
+	}
+	if parsed.OAuthAccount.EmailAddress == nil || parsed.OAuthAccount.OrganizationUUID == nil {
+		return "", "", false
+	}
+	email = strings.TrimSpace(*parsed.OAuthAccount.EmailAddress)
+	org = strings.TrimSpace(*parsed.OAuthAccount.OrganizationUUID)
+	if email == "" || org == "" {
+		return "", "", false
+	}
+	return email, org, true
+}
+
+// markStale records that out's windows were observed ageMin minutes ago,
+// past the adapter's freshness bound: the structured StaleMinutes for
+// renderers that pick a look from it, and the "stale ~Nm ago" Note the
+// text panel prints.
+func markStale(out *ProviderLimits, ageMin int) {
+	note := "stale ~" + itoa(ageMin) + "m ago"
+	out.Note = &note
+	age := ageMin
+	out.StaleMinutes = &age
 }
 
 func itoa(n int) string {

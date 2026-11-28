@@ -380,10 +380,10 @@ download_release_binary() {
 }
 
 build_from_source() {
+  local output="${1:-$ROOT/bin/usagebar}"
   command -v go >/dev/null 2>&1 || return 1
-  echo "usagebar: building bin/usagebar with go..." >&2
-  mkdir -p "$ROOT/bin" || return 1
-  (cd "$ROOT" && go build -o bin/usagebar ./cmd/usagebar)
+  echo "usagebar: building $output with go..." >&2
+  (cd "$ROOT" && mkdir -p "$(dirname "$output")" && go build -o "$output" ./cmd/usagebar)
 }
 
 # Go first; the exact-tag prebuilt binary only when the source build fails.
@@ -416,7 +416,7 @@ case "${1:-}" in
     fi
     ;;
   --build)
-    build_from_source || {
+    build_from_source "${2:-}" || {
       echo "usagebar: go build failed (is the Go toolchain installed?)" >&2
       exit 1
     }
@@ -427,7 +427,7 @@ case "${1:-}" in
     fi
     ;;
   *)
-    echo "usage: ensure-binary.sh [--in-tree|--build]" >&2
+    echo "usage: ensure-binary.sh [--in-tree|--build [OUTPUT]]" >&2
     exit 2
     ;;
 esac
