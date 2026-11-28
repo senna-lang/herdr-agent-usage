@@ -1,0 +1,19 @@
+---
+title: "Sidebar publication: one complete row after publishers finish"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: Breaks QuiescentExclusive
+    lg1: Path to the QuiescentExclusive bug
+  }
+  class lg0 breaks
+  class lg1 bugPath
+  s0: Publishing: comfortable row
+  s1: Publishers finished: contradictory rows together
+  [*] --> s0
+  s0 --> s0: Critical: read the current sidebar or Critical: update the comfortable band or Critical: update the middle band
+  s0 --> s1: Critical: update the critical band
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s0 bugPath
+  class s1 breaks
+  class s1 bugPath

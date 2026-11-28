@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+skill=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+root=$(git -C "$skill" rev-parse --show-toplevel)
+out=$(mktemp -d "${TMPDIR:-/tmp}/verify-band-publication.XXXXXX")
+tlc='http:tla2tools[url=https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar,checksum=sha256:936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88]@1.7.4'
+mise install java@temurin-25.0.5+8.0.LTS "$tlc"
+jq -n --arg root "$root" --arg skill "$skill" '{Replace: {($root + "/internal/update/formal_concurrent_test.go"): ($skill + "/replay/concurrent_test.go"), ($root + "/internal/update/formal_single_test.go"): ($skill + "/replay/single_test.go")}}' > "$out/overlay.json"
+trap 'rm -f "$out/overlay.json"' EXIT
+model=0 replay=0
+mise exec java@temurin-25.0.5+8.0.LTS -- java -XX:+UseParallelGC -cp "$(mise where "$tlc")/tla2tools.jar" tlc2.TLC -workers 1 -metadir "$out/tlc" -config "$skill/model/${1:-Concurrent}.cfg" "$skill/model/BandPublication.tla" > "$out/tlc.out" 2>&1 || model=$?
+(cd "$root" && GOTOOLCHAIN=go1.26.11 go test -overlay "$out/overlay.json" ./internal/update -run "${REPLAY_PATTERN:-^TestVerifyBandPublication}" -count=1 -v) > "$out/replay.out" 2>&1 || replay=$?
+cat "$out/tlc.out" "$out/replay.out"
+printf '\nTLC exit=%s; replay exit=%s; evidence=%s\n' "$model" "$replay" "$out"
+[ "$model" -eq 0 ] && [ "$replay" -eq 0 ]
